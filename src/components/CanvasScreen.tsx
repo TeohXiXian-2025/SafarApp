@@ -3,6 +3,7 @@ import {
   Itinerary,
   Collaborator,
   ActivityBlock,
+  TripSuggestion,
 } from '../types';
 import {
   Calendar,
@@ -30,6 +31,18 @@ import {
   Ticket,
   ChevronDown,
   CheckCircle2,
+  Crown,
+  UserCheck,
+  UserPlus,
+  Video,
+  Send,
+  ThumbsUp,
+  X,
+  ExternalLink,
+  MessageSquare,
+  AlertCircle,
+  Shield,
+  Eye,
 } from 'lucide-react';
 import { LeftSidebar } from './LeftSidebar';
 import { WorkspaceMapPlaceholder } from './WorkspaceMapPlaceholder';
@@ -37,11 +50,15 @@ import { SplitSyncBlock } from './SplitSyncBlock';
 import { ConflictResolutionModal } from './ConflictResolutionModal';
 import { PrintItineraryModal } from './PrintItineraryModal';
 import { BudgetTracker } from './BudgetTracker';
+import { AddMateModal } from './AddMateModal';
+import { SuggestActivityModal } from './SuggestActivityModal';
 import { firestoreSync, ClashRecord } from '../firebase/firestoreService';
 
 interface CanvasScreenProps {
   itinerary: Itinerary;
   currentUser: Collaborator;
+  collaborators?: Collaborator[];
+  onSelectUser?: (user: Collaborator) => void;
   onUpdateItinerary: (updated: Itinerary, actionNote?: string) => void;
   onOpenRefinementModal: (activity: ActivityBlock) => void;
   onOpenAddModal: (dayId: string) => void;
@@ -49,11 +66,14 @@ interface CanvasScreenProps {
   onOpenInspiration?: () => void;
   dateConflictNotice?: boolean;
   onDismissDateConflict?: () => void;
+  onAddMate?: (newMate: Collaborator) => void;
 }
 
 export const CanvasScreen: React.FC<CanvasScreenProps> = ({
   itinerary,
   currentUser,
+  collaborators = [],
+  onSelectUser,
   onUpdateItinerary,
   onOpenRefinementModal,
   onOpenAddModal,
@@ -61,15 +81,30 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
   onOpenInspiration,
   dateConflictNotice = false,
   onDismissDateConflict,
+  onAddMate,
 }) => {
   const [activeSidebarTab, setActiveSidebarTab] = useState<string>('multiplayer');
   const [isConflictModalOpen, setIsConflictModalOpen] = useState<boolean>(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
+  const [isAddMateModalOpen, setIsAddMateModalOpen] = useState<boolean>(false);
+  const [isSuggestModalOpen, setIsSuggestModalOpen] = useState<boolean>(false);
+  const [showSuggestionsDrawer, setShowSuggestionsDrawer] = useState<boolean>(false);
   const [showBudgetDrawer, setShowBudgetDrawer] = useState<boolean>(false);
   const [selectedDayId, setSelectedDayId] = useState<string>('day-3');
   const [clashData, setClashData] = useState<ClashRecord | null>(null);
   const [notificationToast, setNotificationToast] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'timeline' | 'map'>('timeline');
+
+  // Check if current active user is Team Lead
+  const isTeamLead =
+    currentUser.isLead ||
+    currentUser.id === itinerary.leadId ||
+    currentUser.role.toLowerCase().includes('lead') ||
+    currentUser.role.toLowerCase().includes('organizer');
+
+  // Pending and approved suggestions
+  const suggestions = itinerary.suggestions || [];
+  const pendingSuggestions = suggestions.filter((s) => s.status === 'pending');
 
   // Initialize and subscribe to Firestore realtime updates
   useEffect(() => {
@@ -77,9 +112,6 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
     const unsubscribeClash = firestoreSync.subscribeClash((clash) => {
       setClashData(clash);
-      if (clash && clash.status === 'active') {
-        // Auto-show toast or notification
-      }
     });
 
     return () => {
@@ -88,7 +120,6 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
   }, []);
 
   const handleSimulateConflict = (track: 'spiritual' | 'secular') => {
-    // Record slot collision in Firestore to demonstrate AI Mediator conflict resolution
     const editor = track === 'spiritual' ? 'Amina' : 'John';
     firestoreSync.recordSlotEdit(
       '03:00 PM - 05:00 PM',
@@ -103,89 +134,242 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   const handleCopyShareLink = () => {
     navigator.clipboard?.writeText(window.location.href);
-    setNotificationToast('Multiplayer collaboration link copied! Open in a second window to test live sync.');
+    setNotificationToast('Multiplayer collaboration link copied! Tripmates can view and suggest places.');
     setTimeout(() => setNotificationToast(null), 3500);
+  };
+
+  // Team Lead approves suggestion into official itinerary
+  const handleApproveSuggestion = (suggestion: TripSuggestion) => {
+    if (!isTeamLead) return;
+
+    // Create an official activity block from the suggestion
+    const newActivity: ActivityBlock = {
+      id: `act-approved-${Date.now()}`,
+      dayId: suggestion.suggestedDayId || selectedDayId,
+      time: '04:30 PM',
+      duration: '1h 15m',
+      title: suggestion.title,
+      type: suggestion.type,
+      location: suggestion.location,
+      description: `${suggestion.description} (Suggested by ${suggestion.proposedBy.name} via ${suggestion.sourceUrl ? 'social link' : 'proposal'})`,
+      tags: ['Group Approved', suggestion.type, 'Halal Verified'],
+      halalBadge: suggestion.halalBadge || '100% Halal Verified',
+      votes: {
+        count: suggestion.votes + 1,
+        voters: [...suggestion.votedBy, currentUser.name],
+        userVoted: true,
+      },
+      collaboratorNote: {
+        author: suggestion.proposedBy.name,
+        avatar: suggestion.proposedBy.avatar,
+        text: `Approved by Team Lead ${currentUser.name}`,
+      },
+    };
+
+    const updatedSuggestions = suggestions.map((s) =>
+      s.id === suggestion.id ? { ...s, status: 'approved' as const } : s
+    );
+
+    const updatedItinerary: Itinerary = {
+      ...itinerary,
+      activityBlocks: [...itinerary.activityBlocks, newActivity],
+      suggestions: updatedSuggestions,
+    };
+
+    onUpdateItinerary(
+      updatedItinerary,
+      `Team Lead ${currentUser.name} approved suggestion: "${suggestion.title}" into Day schedule`
+    );
+
+    setNotificationToast(`✓ Approved "${suggestion.title}"! Added to official schedule.`);
+    setTimeout(() => setNotificationToast(null), 3500);
+  };
+
+  // Team Lead declines suggestion
+  const handleRejectSuggestion = (suggestionId: string) => {
+    if (!isTeamLead) return;
+
+    const updatedSuggestions = suggestions.map((s) =>
+      s.id === suggestionId ? { ...s, status: 'rejected' as const } : s
+    );
+
+    const updatedItinerary: Itinerary = {
+      ...itinerary,
+      suggestions: updatedSuggestions,
+    };
+
+    onUpdateItinerary(
+      updatedItinerary,
+      `Team Lead ${currentUser.name} declined suggestion`
+    );
+
+    setNotificationToast('Suggestion marked as declined.');
+    setTimeout(() => setNotificationToast(null), 2500);
+  };
+
+  // Submit suggestion from modal
+  const handleAddSuggestion = (newSugData: Omit<TripSuggestion, 'id' | 'votes' | 'votedBy' | 'submittedAt'>) => {
+    const newSug: TripSuggestion = {
+      ...newSugData,
+      id: `sug-${Date.now()}`,
+      submittedAt: 'Just now',
+      votes: 1,
+      votedBy: [currentUser.name],
+    };
+
+    const updatedItinerary: Itinerary = {
+      ...itinerary,
+      suggestions: [newSug, ...suggestions],
+    };
+
+    onUpdateItinerary(
+      updatedItinerary,
+      `Tripmate ${currentUser.name} submitted recommendation: "${newSug.title}" for Team Lead approval`
+    );
+
+    setNotificationToast(`Suggestion "${newSug.title}" submitted to Team Lead!`);
+    setTimeout(() => setNotificationToast(null), 3500);
+    setShowSuggestionsDrawer(true);
   };
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#FAF8F5] overflow-hidden select-none font-['Plus_Jakarta_Sans',sans-serif]">
       {/* ========================================================================= */}
-      {/* 1. TOP WORKSPACE NAVIGATION BAR (Matching Screenshot 1)                   */}
+      {/* 1. TOP WORKSPACE NAVIGATION BAR                                           */}
       {/* ========================================================================= */}
-      <header className="h-16 bg-white border-b border-[#E7DFD5] px-4 md:px-6 flex items-center justify-between gap-3 shrink-0 z-30">
-        {/* Left: Breadcrumbs [Inspiration / Document Vault / Workspace] */}
+      <header className="h-16 bg-white border-b border-[#E7DFD5] px-3 sm:px-6 flex items-center justify-between gap-2 shrink-0 z-30">
+        {/* Left: Breadcrumbs & Quick Role Switcher */}
         <div className="flex items-center gap-2 text-xs font-semibold">
           <button
             type="button"
             onClick={onOpenInspiration}
-            className="text-[#6D7A77] hover:text-[#161C23] transition-colors cursor-pointer"
+            className="text-[#6D7A77] hover:text-[#161C23] transition-colors cursor-pointer hidden sm:inline"
           >
             Inspiration
           </button>
-          <span className="text-[#C4BCB3]">/</span>
+          <span className="text-[#C4BCB3] hidden sm:inline">/</span>
           <button
             type="button"
             onClick={onOpenVault}
-            className="text-[#6D7A77] hover:text-[#161C23] transition-colors cursor-pointer"
+            className="text-[#6D7A77] hover:text-[#161C23] transition-colors cursor-pointer hidden sm:inline"
           >
             Document Vault
           </button>
-          <span className="text-[#C4BCB3]">/</span>
-          <span className="text-[#0D6955] font-extrabold flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#0D6955]"></span>
+          <span className="text-[#C4BCB3] hidden sm:inline">/</span>
+          <span className="text-[#00685F] font-extrabold flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00685F]"></span>
             <span>Workspace</span>
           </span>
+
+          {/* Quick Perspective Switcher (Pitch / Demo feature) */}
+          <div className="ml-2 pl-2 border-l border-[#E7DFD5] flex items-center gap-1">
+            <span className="text-[10px] font-bold uppercase text-[#8A9592] hidden md:inline">
+              Role:
+            </span>
+            <div className="flex items-center bg-[#FAF8F5] border border-[#E7DFD5] rounded-full p-0.5">
+              {collaborators.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => onSelectUser && onSelectUser(c)}
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold transition-all cursor-pointer flex items-center gap-1 ${
+                    c.id === currentUser.id
+                      ? c.isLead
+                        ? 'bg-[#00685F] text-white shadow-xs'
+                        : 'bg-[#161C23] text-white shadow-xs'
+                      : 'text-[#6D7A77] hover:text-[#161C23]'
+                  }`}
+                  title={`Switch view to ${c.name} (${c.role})`}
+                >
+                  <span>{c.isLead ? '👑' : '👤'}</span>
+                  <span>{c.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {/* Right: Live Session, Collaborator Avatars, Conflict Radar, Export, Share */}
-        <div className="flex items-center gap-2.5 sm:gap-3">
-          {/* Live Session Pill */}
-          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200/80 text-[11px] font-bold text-[#0D6955]">
-            <span className="w-2 h-2 rounded-full bg-[#0D6955] animate-pulse"></span>
-            <span>Live Session</span>
-          </div>
+        {/* Right: Actions (Add Mate, Suggestions, Budget, Export, Share, User Profile) */}
+        <div className="flex items-center gap-2 sm:gap-2.5">
+          {/* Active Mode Badge */}
+          {isTeamLead ? (
+            <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-[11px] font-extrabold text-amber-900 shadow-2xs">
+              <Crown className="w-3.5 h-3.5 text-amber-600" />
+              <span>Team Lead (Full Authority)</span>
+            </div>
+          ) : (
+            <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#EEF4FE] border border-[#00685F]/20 text-[11px] font-bold text-[#00685F] shadow-2xs">
+              <Users className="w-3.5 h-3.5" />
+              <span>Tripmate (Suggestion Role)</span>
+            </div>
+          )}
 
-          {/* Tripmate Avatars (A, J, T, S) */}
-          <div
-            className="flex items-center -space-x-2 cursor-pointer"
-            title="Amina, John, Tariq, Sarah (4 editing in real time)"
+          {/* Add Mate Button (For Team Lead) */}
+          {isTeamLead && (
+            <button
+              type="button"
+              onClick={() => setIsAddMateModalOpen(true)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-2xl bg-[#EEF4FE] hover:bg-[#00685F]/15 border border-[#00685F]/30 text-[#00685F] text-xs font-bold transition-all cursor-pointer shadow-2xs"
+              title="Add Tripmate & configure preferences"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Add Mate</span>
+            </button>
+          )}
+
+          {/* Suggest Place or Drop Link Button (For Tripmate) */}
+          {!isTeamLead && (
+            <button
+              type="button"
+              onClick={() => setIsSuggestModalOpen(true)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-2xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+              title="Suggest attraction or drop TikTok/Reel link"
+            >
+              <Video className="w-3.5 h-3.5 text-[#62FAE3]" />
+              <span>Suggest / Drop Link</span>
+            </button>
+          )}
+
+          {/* Suggestions Drawer Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowSuggestionsDrawer(!showSuggestionsDrawer)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border text-xs font-bold transition-all cursor-pointer relative ${
+              showSuggestionsDrawer
+                ? 'bg-[#00685F] text-white border-[#00685F]'
+                : 'bg-white border-[#E7DFD5] text-[#161C23] hover:bg-[#FAF8F5]'
+            }`}
+            title="View Tripmate recommendations & social media links"
           >
-            <span className="w-7 h-7 rounded-full bg-[#0D6955] text-white text-[11px] font-black flex items-center justify-center border-2 border-white shadow-2xs">
-              A
-            </span>
-            <span className="w-7 h-7 rounded-full bg-[#185ADB] text-white text-[11px] font-black flex items-center justify-center border-2 border-white shadow-2xs">
-              J
-            </span>
-            <span className="w-7 h-7 rounded-full bg-[#20A38B] text-white text-[11px] font-black flex items-center justify-center border-2 border-white shadow-2xs">
-              T
-            </span>
-            <span className="w-7 h-7 rounded-full bg-[#EA4C89] text-white text-[11px] font-black flex items-center justify-center border-2 border-white shadow-2xs">
-              S
-            </span>
-          </div>
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">Suggestions</span>
+            {pendingSuggestions.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-[#dc2626] text-white animate-pulse">
+                {pendingSuggestions.length}
+              </span>
+            )}
+          </button>
 
-          {/* Conflict Radar Button with Alert Badge */}
+          {/* Conflict Radar Button */}
           <button
             type="button"
             onClick={() => setIsConflictModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-[#FFF8EE] border border-[#E58A2B]/40 hover:bg-[#FFF2DF] text-[#C27803] text-xs font-bold transition-all shadow-2xs cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-2xl bg-[#FFF8EE] border border-[#E58A2B]/40 hover:bg-[#FFF2DF] text-[#C27803] text-xs font-bold transition-all cursor-pointer shadow-2xs"
             title="Click to view AI Conflict Mediator"
           >
             <AlertTriangle className="w-3.5 h-3.5 text-[#E58A2B]" />
-            <span className="hidden md:inline">Conflict Radar</span>
-            <span className="w-2 h-2 rounded-full bg-[#E58A2B] animate-ping"></span>
+            <span className="hidden lg:inline">Conflict Radar</span>
           </button>
 
-          {/* Budget Tracker Toggle Button */}
+          {/* Budget Toggle */}
           <button
             type="button"
             onClick={() => setShowBudgetDrawer(!showBudgetDrawer)}
-            className={`hidden lg:flex items-center gap-1 px-3 py-1.5 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${
+            className={`hidden xl:flex items-center gap-1 px-3 py-1.5 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${
               showBudgetDrawer
-                ? 'bg-[#0D6955]/10 border-[#0D6955] text-[#0D6955]'
+                ? 'bg-[#00685F]/10 border-[#00685F] text-[#00685F]'
                 : 'bg-white border-[#E7DFD5] text-[#526360] hover:bg-gray-50'
             }`}
-            title="Toggle Live Budget & Cost Breakdown"
           >
             <DollarSign className="w-3.5 h-3.5" />
             <span>Budget</span>
@@ -195,37 +379,45 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
           <button
             type="button"
             onClick={() => setIsPrintModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-white border border-[#E7DFD5] hover:bg-gray-50 text-[#161C23] text-xs font-bold transition-all shadow-2xs cursor-pointer"
-            title="Download Clean Print-Ready PDF Itinerary"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-white border border-[#E7DFD5] hover:bg-gray-50 text-[#161C23] text-xs font-bold transition-all cursor-pointer shadow-2xs"
           >
-            <FileDown className="w-3.5 h-3.5 text-[#0D6955]" />
-            <span className="hidden sm:inline">Export</span>
+            <FileDown className="w-3.5 h-3.5 text-[#00685F]" />
+            <span>Export</span>
           </button>
 
-          {/* Share Button (Primary Accent) */}
+          {/* Share Button */}
           <button
             type="button"
             onClick={handleCopyShareLink}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-2xl bg-[#0D6955] hover:bg-[#095041] text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+            className="flex items-center gap-1 px-3.5 py-1.5 rounded-2xl bg-[#161C23] hover:bg-black text-white text-xs font-bold transition-all cursor-pointer"
           >
             <Share2 className="w-3.5 h-3.5" />
-            <span>Share</span>
+            <span className="hidden sm:inline">Share</span>
           </button>
 
-          {/* User Profile Avatar */}
-          <img
-            src={currentUser.avatar}
-            alt={currentUser.name}
-            className="w-8 h-8 rounded-full object-cover ring-2 ring-[#0D6955] ml-1"
-          />
+          {/* Active User Avatar */}
+          <div className="relative">
+            <img
+              src={currentUser.avatar}
+              alt={currentUser.name}
+              className={`w-8 h-8 rounded-full object-cover ring-2 ${
+                isTeamLead ? 'ring-amber-500' : 'ring-[#00685F]'
+              }`}
+            />
+            {isTeamLead && (
+              <span className="absolute -top-1 -right-1 text-xs" title="Team Lead">
+                👑
+              </span>
+            )}
+          </div>
         </div>
       </header>
 
       {/* ========================================================================= */}
-      {/* 2. MAIN WORKSPACE BODY (Left Sidebar + Split Canvas)                      */}
+      {/* 2. MAIN WORKSPACE BODY (Left Sidebar + Split Canvas + Suggestions Drawer)   */}
       {/* ========================================================================= */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Persistent Vertical Sidebar (Matching Screenshot 1) */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Left Persistent Vertical Sidebar */}
         <LeftSidebar
           activeTab={activeSidebarTab}
           onSelectTab={(tab) => {
@@ -239,7 +431,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
           onOpenInspiration={onOpenInspiration}
         />
 
-        {/* Workspace Canvas Container (Split-Screen Map & Drag-and-Drop Timeline) */}
+        {/* Workspace Canvas Container */}
         <main className="flex-1 flex flex-col overflow-hidden p-3 sm:p-5">
           {/* Mobile Tab Switcher */}
           <div className="lg:hidden flex items-center justify-center mb-3">
@@ -249,7 +441,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
                 onClick={() => setMobileView('timeline')}
                 className={`px-4 py-1.5 rounded-full transition-all cursor-pointer ${
                   mobileView === 'timeline'
-                    ? 'bg-[#0D6955] text-white shadow-xs'
+                    ? 'bg-[#00685F] text-white shadow-xs'
                     : 'text-[#6D7A77] hover:text-[#161C23]'
                 }`}
               >
@@ -260,7 +452,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
                 onClick={() => setMobileView('map')}
                 className={`px-4 py-1.5 rounded-full transition-all cursor-pointer ${
                   mobileView === 'map'
-                    ? 'bg-[#0D6955] text-white shadow-xs'
+                    ? 'bg-[#00685F] text-white shadow-xs'
                     : 'text-[#6D7A77] hover:text-[#161C23]'
                 }`}
               >
@@ -271,9 +463,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
           {/* Split-Screen 2-Column Grid */}
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 overflow-hidden">
-            {/* ========================================================= */}
-            {/* LEFT COLUMN: Map Placeholder (Kyoto Geo-Track)            */}
-            {/* ========================================================= */}
+            {/* LEFT COLUMN: Map Placeholder */}
             <div
               className={`lg:col-span-5 h-full overflow-hidden ${
                 mobileView === 'map' ? 'block' : 'hidden lg:block'
@@ -282,97 +472,97 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
               <WorkspaceMapPlaceholder />
             </div>
 
-            {/* ========================================================= */}
-            {/* RIGHT COLUMN: Vertical Timeline (Wanderlog-Style Cards)    */}
-            {/* ========================================================= */}
+            {/* RIGHT COLUMN: Vertical Timeline */}
             <div
               className={`lg:col-span-7 h-full overflow-y-auto pr-1 sm:pr-3 space-y-4 ${
                 mobileView === 'timeline' ? 'block' : 'hidden lg:block'
               }`}
             >
-              {/* Timeline Header (Matching Screenshot 1) */}
+              {/* Timeline Header */}
               <div className="bg-white rounded-3xl border border-[#E7DFD5] p-5 sm:p-6 shadow-xs space-y-3">
                 {/* Day Badge & Breadcrumb */}
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-extrabold uppercase tracking-wider bg-[#0D6955]/10 text-[#0D6955] px-3 py-1 rounded-full">
+                    <span className="text-xs font-extrabold uppercase tracking-wider bg-[#00685F]/10 text-[#00685F] px-3 py-1 rounded-full">
                       Day 3 of 7
                     </span>
                     <span className="text-xs font-semibold text-[#8A9592]">
-                      Kyoto Historical Basin · Wednesday, Oct 16
+                      {itinerary.destinationCity || 'Kyoto'} Historical Basin · Wednesday, Oct 16
                     </span>
                   </div>
 
-                  <span className="text-[11px] font-bold text-[#0D6955] flex items-center gap-1 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#0D6955]"></span>
-                    <span>4 tripmates live</span>
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-[#00685F] flex items-center gap-1 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#00685F]"></span>
+                      <span>{collaborators.length} Tripmates Connected</span>
+                    </span>
+                  </div>
                 </div>
 
-                {/* Day Title & Subtitle */}
+                {/* Day Title & Lead Status Notice */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
                   <div>
                     <h2 className="text-xl sm:text-2xl font-black text-[#161C23] tracking-tight">
                       Heritage, Prayer &amp; Harmony
                     </h2>
                     <p className="text-xs text-[#6D7A77] font-medium mt-0.5">
-                      Balancing contemplative spiritual space with collaborative secular highlights
+                      {isTeamLead
+                        ? '👑 You are the Team Lead. You have prior authority to edit, swap, and finalize the official itinerary.'
+                        : '👤 You are viewing as Tripmate. Official activities are locked; use "+ Suggest" or "Drop Link" to submit ideas to the Team Lead.'}
                     </p>
                   </div>
 
-                  {/* Actions: Filters & Add Stop */}
+                  {/* Actions: Add Stop / Suggest */}
                   <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
-                    <button
-                      type="button"
-                      onClick={() => setShowBudgetDrawer(!showBudgetDrawer)}
-                      className="px-3.5 py-2 rounded-2xl bg-[#FAF8F5] border border-[#E7DFD5] hover:bg-[#F2ECE4] text-[#161C23] text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Filter className="w-3.5 h-3.5 text-[#6D7A77]" />
-                      <span>Filters</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => onOpenAddModal(selectedDayId)}
-                      className="px-4 py-2 rounded-2xl bg-[#0D6955] hover:bg-[#095041] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Stop</span>
-                    </button>
+                    {isTeamLead ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenAddModal(selectedDayId)}
+                        className="px-4 py-2 rounded-2xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Stop (Lead)</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsSuggestModalOpen(true)}
+                        className="px-4 py-2 rounded-2xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-[#62FAE3]" />
+                        <span>Suggest Stop</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Active Tripmates Editing Strip */}
+                {/* Group Roster Strip with Preferences Badges */}
                 <div className="pt-2 border-t border-[#E7DFD5]/60 flex items-center justify-between text-xs text-[#6D7A77] flex-wrap gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold">Active Tripmates:</span>
-                    <div className="flex items-center -space-x-1.5">
-                      <span className="w-5 h-5 rounded-full bg-[#0D6955] text-white text-[9px] font-bold flex items-center justify-center border border-white">
-                        A
-                      </span>
-                      <span className="w-5 h-5 rounded-full bg-[#185ADB] text-white text-[9px] font-bold flex items-center justify-center border border-white">
-                        J
-                      </span>
-                      <span className="w-5 h-5 rounded-full bg-[#20A38B] text-white text-[9px] font-bold flex items-center justify-center border border-white">
-                        T
-                      </span>
-                      <span className="w-5 h-5 rounded-full bg-[#EA4C89] text-white text-[9px] font-bold flex items-center justify-center border border-white">
-                        S
-                      </span>
+                    <span className="font-semibold text-[11px]">Party Members:</span>
+                    <div className="flex items-center gap-1.5">
+                      {collaborators.map((c) => (
+                        <div
+                          key={c.id}
+                          className="flex items-center gap-1 bg-[#FAF8F5] border border-[#E7DFD5] px-2 py-0.5 rounded-full text-[10px] font-bold"
+                          title={`${c.name} (${c.role}) - Dietary: ${c.preferences?.faithDietary || 'Configured'}`}
+                        >
+                          <img src={c.avatar} alt={c.name} className="w-4 h-4 rounded-full object-cover" />
+                          <span>{c.name}</span>
+                          {c.isLead && <span className="text-amber-600">👑</span>}
+                        </div>
+                      ))}
                     </div>
-                    <span className="text-[11px] font-medium text-[#8A9592]">
-                      (Editing together in real time)
-                    </span>
                   </div>
 
-                  <span className="text-[11px] font-extrabold text-[#0D6955] bg-[#EAF6F4] px-2.5 py-0.5 rounded-full border border-[#0D6955]/20 flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-[#0D6955]" />
-                    <span>⚡ Split &amp; Sync Active</span>
+                  <span className="text-[11px] font-extrabold text-[#00685F] bg-[#EAF6F4] px-2.5 py-0.5 rounded-full border border-[#00685F]/20 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-[#00685F]" />
+                    <span>⚡ Prayer &amp; Halal Sync Active</span>
                   </span>
                 </div>
               </div>
 
-              {/* Collapsible Budget Tracker Panel */}
+              {/* Collapsible Budget Drawer */}
               {showBudgetDrawer && (
                 <div className="animate-in fade-in slide-in-from-top-2 duration-200">
                   <BudgetTracker
@@ -394,87 +584,102 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
                 {/* BLOCK 1: Kyoto National Museum & Garden Walk            */}
                 {/* ------------------------------------------------------- */}
                 <div className="bg-white rounded-3xl border border-[#E7DFD5] p-5 sm:p-6 shadow-xs hover:shadow-md transition-all space-y-3">
-                  {/* Top Bar: Time, Duration, Tickets Badge */}
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-extrabold text-white bg-[#0D6955] px-3 py-1 rounded-full font-mono">
+                      <span className="text-xs font-extrabold text-white bg-[#00685F] px-3 py-1 rounded-full font-mono">
                         09:30 AM – 12:00 PM
                       </span>
-                      <span className="text-xs font-semibold text-[#8A9592]">
-                        (2h 30m)
-                      </span>
+                      <span className="text-xs font-semibold text-[#8A9592]">(2h 30m)</span>
                     </div>
 
-                    <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                      <Ticket className="w-3 h-3 text-emerald-700" />
-                      <span>4 Tickets Confirmed · QR Ready</span>
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {isTeamLead ? (
+                        <span className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                          <Crown className="w-3 h-3 text-amber-700" />
+                          <span>Lead Authorized</span>
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-bold text-neutral-600 bg-neutral-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                          <Lock className="w-3 h-3" />
+                          <span>Official Anchor</span>
+                        </span>
+                      )}
+                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                        <Ticket className="w-3 h-3 text-emerald-700" />
+                        <span>Tickets Confirmed</span>
+                      </span>
+                    </div>
                   </div>
 
-                  {/* Title & Description */}
                   <div>
                     <h3 className="text-base sm:text-lg font-black text-[#161C23]">
                       Kyoto National Museum &amp; Garden Walk
                     </h3>
                     <p className="text-xs sm:text-sm text-[#6D7A77] font-medium leading-relaxed mt-1">
-                      Exploring the Heian period imperial calligraphy &amp; tranquil stone courtyards before midday prayer.
+                      Exploring the Heian period imperial calligraphy &amp; tranquil stone courtyards before midday Dhuhr prayer.
                     </p>
                   </div>
 
-                  {/* Badges & Attendees */}
                   <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#E7DFD5]/50 flex-wrap">
                     <div className="flex items-center gap-2 flex-wrap text-xs text-[#526360]">
                       <span className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#FAF8F5] border border-[#E7DFD5] font-medium">
-                        <MapPin className="w-3.5 h-3.5 text-[#0D6955]" />
+                        <MapPin className="w-3.5 h-3.5 text-[#00685F]" />
                         <span>Higashiyama Ward · Step-free path</span>
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-[#161C23]">Attendees:</span>
-                      <div className="flex items-center -space-x-1.5">
-                        <span className="w-6 h-6 rounded-full bg-[#0D6955] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          A
-                        </span>
-                        <span className="w-6 h-6 rounded-full bg-[#185ADB] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          J
-                        </span>
-                        <span className="w-6 h-6 rounded-full bg-[#20A38B] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          T
-                        </span>
-                        <span className="w-6 h-6 rounded-full bg-[#EA4C89] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          S
-                        </span>
+                    {/* Team Lead Edit Actions / Tripmate view */}
+                    {isTeamLead && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const sampleAct: ActivityBlock = {
+                              id: 'act-1',
+                              dayId: 'day-3',
+                              time: '09:30 AM',
+                              duration: '2h 30m',
+                              title: 'Kyoto National Museum & Garden Walk',
+                              type: 'sightseeing',
+                              location: 'Higashiyama Ward',
+                              description: 'Heian calligraphy & stone gardens',
+                              tags: ['Sightseeing', 'Step-Free'],
+                            };
+                            onOpenRefinementModal(sampleAct);
+                          }}
+                          className="px-2.5 py-1 rounded-xl text-xs font-bold text-[#00685F] bg-[#EEF4FE] hover:bg-[#00685F]/20 transition-colors cursor-pointer"
+                        >
+                          Modify Activity (Lead)
+                        </button>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
 
-                {/* TRANSIT CONNECTOR: 8 min walk */}
+                {/* TRANSIT CONNECTOR */}
                 <div className="flex items-center gap-2 px-6 py-1 text-xs text-[#8A9592] font-semibold">
-                  <Footprints className="w-3.5 h-3.5 text-[#0D6955]" />
+                  <Footprints className="w-3.5 h-3.5 text-[#00685F]" />
                   <span>8 min walk (650m) along Takase River Canal</span>
                 </div>
 
                 {/* ------------------------------------------------------- */}
-                {/* BLOCK 2: SPLIT & SYNC BLOCK (Custom React Component)    */}
+                {/* BLOCK 2: SPLIT & SYNC BLOCK (AI Mediator)               */}
                 {/* ------------------------------------------------------- */}
                 <SplitSyncBlock onSimulateEdit={handleSimulateConflict} />
 
-                {/* TRANSIT CONNECTOR: 6 min walk to East Torii Gate */}
+                {/* TRANSIT CONNECTOR */}
                 <div className="flex items-center gap-2 px-6 py-1 text-xs text-[#8A9592] font-semibold">
-                  <Footprints className="w-3.5 h-3.5 text-[#0D6955]" />
+                  <Footprints className="w-3.5 h-3.5 text-[#00685F]" />
                   <span>6 min walk to East Torii Gate</span>
                 </div>
 
                 {/* ------------------------------------------------------- */}
-                {/* BLOCK 3: GROUP SYNC POINT (Botanical Gardens)           */}
+                {/* BLOCK 3: GROUP SYNC POINT                               */}
                 {/* ------------------------------------------------------- */}
-                <div className="bg-white rounded-3xl border-2 border-[#0D6955]/30 p-5 sm:p-6 shadow-xs hover:shadow-md transition-all space-y-3 relative overflow-hidden">
-                  {/* Top Bar */}
+                <div className="bg-white rounded-3xl border-2 border-[#00685F]/30 p-5 sm:p-6 shadow-xs hover:shadow-md transition-all space-y-3 relative overflow-hidden">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-black uppercase tracking-wider bg-[#0D6955] text-white px-3 py-1 rounded-full flex items-center gap-1">
+                      <span className="text-xs font-black uppercase tracking-wider bg-[#00685F] text-white px-3 py-1 rounded-full flex items-center gap-1">
                         <span>★ Group Sync Point</span>
                       </span>
                       <span className="text-xs font-bold text-[#161C23] font-mono">
@@ -482,12 +687,11 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       </span>
                     </div>
 
-                    <span className="text-xs font-extrabold text-[#0D6955] bg-[#EAF6F4] px-2.5 py-0.5 rounded-full border border-[#0D6955]/20 animate-pulse">
+                    <span className="text-xs font-extrabold text-[#00685F] bg-[#EAF6F4] px-2.5 py-0.5 rounded-full border border-[#00685F]/20 animate-pulse">
                       Rendezvous in 25 mins
                     </span>
                   </div>
 
-                  {/* Title & Description */}
                   <div>
                     <h3 className="text-base sm:text-lg font-black text-[#161C23]">
                       Botanical Gardens &amp; Bamboo Pavilion
@@ -497,62 +701,61 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     </p>
                   </div>
 
-                  {/* Badges & Attendees */}
                   <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#E7DFD5]/50 flex-wrap">
                     <div className="flex items-center gap-2 flex-wrap text-xs">
                       <span className="px-2.5 py-1 rounded-xl bg-[#FAF8F5] border border-[#E7DFD5] text-[#526360] font-medium">
                         Scenic Photo Spot #4
                       </span>
-                      <span className="px-2.5 py-1 rounded-xl bg-[#FAF8F5] border border-[#E7DFD5] text-[#526360] font-medium">
-                        6 min walk from Mosque &amp; Cafe
-                      </span>
-                      <span className="px-2.5 py-1 rounded-xl bg-emerald-50 text-[#0D6955] font-bold border border-emerald-200">
+                      <span className="px-2.5 py-1 rounded-xl bg-emerald-50 text-[#00685F] font-bold border border-emerald-200">
                         Meet at East Torii Gate
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-[#161C23]">Attendees:</span>
-                      <div className="flex items-center -space-x-1.5">
-                        <span className="w-6 h-6 rounded-full bg-[#0D6955] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          A
-                        </span>
-                        <span className="w-6 h-6 rounded-full bg-[#185ADB] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          J
-                        </span>
-                        <span className="w-6 h-6 rounded-full bg-[#20A38B] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          T
-                        </span>
-                        <span className="w-6 h-6 rounded-full bg-[#EA4C89] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          S
-                        </span>
-                      </div>
-                    </div>
+                    {isTeamLead && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sampleAct: ActivityBlock = {
+                            id: 'act-3',
+                            dayId: 'day-3',
+                            time: '02:00 PM',
+                            duration: '2h 30m',
+                            title: 'Botanical Gardens & Bamboo Pavilion',
+                            type: 'sightseeing',
+                            location: 'East Torii Gate',
+                            description: 'Group sync point and stroll',
+                            tags: ['Sync Point', 'Scenic'],
+                          };
+                          onOpenRefinementModal(sampleAct);
+                        }}
+                        className="px-2.5 py-1 rounded-xl text-xs font-bold text-[#00685F] bg-[#EEF4FE] hover:bg-[#00685F]/20 transition-colors cursor-pointer"
+                      >
+                        Adjust Sync Slot
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* TRANSIT CONNECTOR: 12 min taxi to Gion Quarter */}
+                {/* TRANSIT CONNECTOR */}
                 <div className="flex items-center gap-2 px-6 py-1 text-xs text-[#8A9592] font-semibold">
-                  <Route className="w-3.5 h-3.5 text-[#0D6955]" />
+                  <Route className="w-3.5 h-3.5 text-[#00685F]" />
                   <span>12 min taxi to Gion Quarter</span>
                 </div>
 
                 {/* ------------------------------------------------------- */}
-                {/* BLOCK 4: Halal Certified Wagyu Dining Experience        */}
+                {/* BLOCK 4: Halal Wagyu Dining Experience                  */}
                 {/* ------------------------------------------------------- */}
                 <div className="bg-white rounded-3xl border border-[#E7DFD5] p-5 sm:p-6 shadow-xs hover:shadow-md transition-all space-y-3">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-extrabold text-white bg-[#0D6955] px-3 py-1 rounded-full font-mono">
+                      <span className="text-xs font-extrabold text-white bg-[#00685F] px-3 py-1 rounded-full font-mono">
                         05:00 PM – 07:00 PM
                       </span>
-                      <span className="text-xs font-semibold text-[#8A9592]">
-                        (2h)
-                      </span>
+                      <span className="text-xs font-semibold text-[#8A9592]">(2h)</span>
                     </div>
 
-                    <span className="text-[11px] font-bold text-[#0D6955] bg-[#EAF6F4] border border-[#0D6955]/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                      <UtensilsCrossed className="w-3 h-3 text-[#0D6955]" />
+                    <span className="text-[11px] font-bold text-[#00685F] bg-[#EAF6F4] border border-[#00685F]/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <UtensilsCrossed className="w-3 h-3 text-[#00685F]" />
                       <span>100% Halal Verified · Table #4 Reserved</span>
                     </span>
                   </div>
@@ -576,39 +779,251 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-[#161C23]">Attendees:</span>
-                      <div className="flex items-center -space-x-1.5">
-                        <span className="w-6 h-6 rounded-full bg-[#0D6955] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          A
-                        </span>
-                        <span className="w-6 h-6 rounded-full bg-[#185ADB] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          J
-                        </span>
-                        <span className="w-6 h-6 rounded-full bg-[#20A38B] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          T
-                        </span>
-                        <span className="w-6 h-6 rounded-full bg-[#EA4C89] text-white text-[10px] font-bold flex items-center justify-center border border-white">
-                          S
-                        </span>
-                      </div>
-                    </div>
+                    {isTeamLead ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sampleAct: ActivityBlock = {
+                            id: 'act-4',
+                            dayId: 'day-3',
+                            time: '05:00 PM',
+                            duration: '2h',
+                            title: 'Halal Wagyu Dining Experience',
+                            type: 'dining',
+                            location: 'Gion Quarter',
+                            description: 'Halal certified wagyu with prayer room',
+                            tags: ['Halal Dining', 'Prayer Room'],
+                          };
+                          onOpenRefinementModal(sampleAct);
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-[#00685F] text-white text-xs font-bold hover:bg-[#008378] transition-colors cursor-pointer"
+                      >
+                        Swap Halal Option (Lead)
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-[#6D7A77] flex items-center gap-1">
+                        <Lock className="w-3 h-3 text-[#00685F]" />
+                        <span>Locked by Team Lead</span>
+                      </span>
+                    )}
                   </div>
                 </div>
+
+                {/* Approved Custom / Suggested Activities */}
+                {itinerary.activityBlocks
+                  .filter((act) => act.id.startsWith('act-approved-') || act.id.startsWith('act-custom-'))
+                  .map((act) => (
+                    <div
+                      key={act.id}
+                      className="bg-emerald-50/40 rounded-3xl border-2 border-emerald-500/30 p-5 sm:p-6 shadow-xs space-y-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-extrabold text-white bg-[#00685F] px-3 py-1 rounded-full font-mono">
+                          {act.time}
+                        </span>
+                        <span className="text-[11px] font-extrabold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Approved by Team Lead 👑</span>
+                        </span>
+                      </div>
+                      <h3 className="text-base sm:text-lg font-black text-[#161C23]">{act.title}</h3>
+                      <p className="text-xs text-[#6D7A77] font-medium leading-relaxed">
+                        {act.description}
+                      </p>
+                      <div className="text-xs text-[#526360] flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5 text-[#00685F]" />
+                        <span>{act.location}</span>
+                      </div>
+                    </div>
+                  ))}
               </div>
             </div>
           </div>
         </main>
+
+        {/* ========================================================================= */}
+        {/* 3. SUGGESTIONS & SOCIAL MEDIA REVIEW DRAWER                               */}
+        {/* ========================================================================= */}
+        {showSuggestionsDrawer && (
+          <aside className="w-80 sm:w-96 bg-white border-l border-[#E7DFD5] h-full flex flex-col shadow-2xl z-40 animate-in slide-in-from-right duration-200">
+            {/* Drawer Header */}
+            <div className="p-4 border-b border-[#E7DFD5] flex items-center justify-between bg-[#FAF8F5]">
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <MessageSquare className="w-4 h-4 text-[#00685F]" />
+                  <h3 className="text-sm font-black text-[#161C23]">Tripmate Suggestions</h3>
+                </div>
+                <p className="text-[11px] text-[#6D7A77]">
+                  {isTeamLead
+                    ? 'Review & approve suggestions into the itinerary'
+                    : 'Your submitted proposals and social links'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSuggestionsDrawer(false)}
+                className="p-1 rounded-full hover:bg-neutral-200 text-[#6D7A77]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick action button inside drawer for Mates */}
+            {!isTeamLead && (
+              <div className="p-3 bg-[#EEF4FE] border-b border-[#00685F]/20">
+                <button
+                  type="button"
+                  onClick={() => setIsSuggestModalOpen(true)}
+                  className="w-full py-2.5 px-3 rounded-xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Suggest New Place / Reel Link</span>
+                </button>
+              </div>
+            )}
+
+            {/* Suggestions List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {suggestions.length === 0 ? (
+                <div className="text-center py-12 space-y-2 text-[#6D7A77]">
+                  <MessageSquare className="w-8 h-8 mx-auto text-[#C4BCB3]" />
+                  <p className="text-xs font-bold">No suggestions yet</p>
+                  <p className="text-[11px]">
+                    Tripmates can submit TikTok reels, food spots, and scenic locations here.
+                  </p>
+                </div>
+              ) : (
+                suggestions.map((sug) => (
+                  <div
+                    key={sug.id}
+                    className={`p-3.5 rounded-2xl border transition-all space-y-2.5 ${
+                      sug.status === 'approved'
+                        ? 'bg-emerald-50/40 border-emerald-200'
+                        : sug.status === 'rejected'
+                        ? 'bg-neutral-100 border-neutral-200 opacity-60'
+                        : 'bg-white border-[#E7DFD5] shadow-xs'
+                    }`}
+                  >
+                    {/* Proposer Info & Status */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={sug.proposedBy.avatar}
+                          alt={sug.proposedBy.name}
+                          className="w-6 h-6 rounded-full object-cover"
+                        />
+                        <div className="leading-tight">
+                          <span className="text-xs font-bold text-[#161C23]">
+                            {sug.proposedBy.name}
+                          </span>
+                          <span className="text-[10px] text-[#6D7A77] block">
+                            {sug.submittedAt}
+                          </span>
+                        </div>
+                      </div>
+
+                      {sug.status === 'approved' && (
+                        <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Check className="w-3 h-3" />
+                          <span>Approved</span>
+                        </span>
+                      )}
+                      {sug.status === 'rejected' && (
+                        <span className="text-[10px] font-bold text-neutral-500 bg-neutral-200 px-2 py-0.5 rounded-full">
+                          Declined
+                        </span>
+                      )}
+                      {sug.status === 'pending' && (
+                        <span className="text-[10px] font-extrabold text-amber-900 bg-amber-100 px-2 py-0.5 rounded-full">
+                          Pending Review
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Title & Description */}
+                    <div>
+                      <h4 className="text-xs font-black text-[#161C23]">{sug.title}</h4>
+                      <p className="text-[11px] text-[#6D7A77] mt-0.5 leading-relaxed">
+                        {sug.description}
+                      </p>
+                    </div>
+
+                    {/* Halal Badge & Source Link */}
+                    <div className="flex items-center justify-between gap-1 text-[10px] pt-1 border-t border-[#E7DFD5]/50 flex-wrap">
+                      <span className="font-bold text-[#00685F] bg-[#EEF4FE] px-2 py-0.5 rounded">
+                        {sug.halalBadge || 'Community Halal Checked'}
+                      </span>
+
+                      {sug.sourceUrl && (
+                        <a
+                          href={sug.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[#00685F] font-bold flex items-center gap-1 hover:underline"
+                        >
+                          <Video className="w-3 h-3" />
+                          <span>View Social Link</span>
+                        </a>
+                      )}
+                    </div>
+
+                    {/* Team Lead Actions: Approve or Reject */}
+                    {isTeamLead && sug.status === 'pending' && (
+                      <div className="flex items-center gap-2 pt-1 border-t border-[#E7DFD5]">
+                        <button
+                          type="button"
+                          onClick={() => handleApproveSuggestion(sug)}
+                          className="flex-1 py-1.5 rounded-xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Approve into Day</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRejectSuggestion(sug.id)}
+                          className="px-2.5 py-1.5 rounded-xl border border-[#E7DFD5] hover:bg-neutral-100 text-[#6D7A77] text-xs font-bold transition-colors cursor-pointer"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </aside>
+        )}
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. MODALS & POPUPS                                                        */}
+      {/* 4. MODALS & POPUPS                                                        */}
       {/* ========================================================================= */}
-      {/* AI Mediator Conflict Resolution Modal (Screenshot 2) */}
+      {/* Add Tripmate Modal (Configures preferences) */}
+      <AddMateModal
+        isOpen={isAddMateModalOpen}
+        onClose={() => setIsAddMateModalOpen(false)}
+        collaborators={collaborators}
+        onAddMate={(newMate) => {
+          if (onAddMate) onAddMate(newMate);
+          setNotificationToast(`Added ${newMate.name} as Tripmate with custom dietary preferences!`);
+          setTimeout(() => setNotificationToast(null), 3500);
+        }}
+      />
+
+      {/* Suggest Activity / Drop Link Modal (For Mates) */}
+      <SuggestActivityModal
+        isOpen={isSuggestModalOpen}
+        onClose={() => setIsSuggestModalOpen(false)}
+        currentUser={currentUser}
+        activeDayId={selectedDayId}
+        onSubmitSuggestion={handleAddSuggestion}
+      />
+
+      {/* AI Mediator Conflict Resolution Modal */}
       <ConflictResolutionModal
         isOpen={isConflictModalOpen}
         onClose={() => setIsConflictModalOpen(false)}
-        onVoteSubmitted={(optId) => {
+        onVoteSubmitted={() => {
           setNotificationToast('Anonymous vote recorded in Firestore! Live consensus updated.');
           setTimeout(() => setNotificationToast(null), 3000);
         }}

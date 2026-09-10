@@ -4,6 +4,8 @@ import {
   Collaborator,
   ActivityBlock,
   HalalFallbackOption,
+  FaithDietaryTier,
+  TravelPace,
 } from './types';
 import {
   INITIAL_ITINERARY,
@@ -12,8 +14,8 @@ import {
 import { multiplayerSync } from './services/multiplayerSync';
 import { testConnection } from './firebase/config';
 import { Navbar } from './components/Navbar';
-import { PlanTripCard } from './components/PlanTripCard';
-import { PasteInspirationView } from './components/PasteInspirationView';
+import { LandingScreen } from './components/LandingScreen';
+import { TripSetupWizard } from './components/TripSetupWizard';
 import { GeneratingScreen } from './components/GeneratingScreen';
 import { DocumentVaultScreen } from './components/DocumentVaultScreen';
 import { CanvasScreen } from './components/CanvasScreen';
@@ -22,10 +24,11 @@ import { AuthModal } from './components/AuthModal';
 import { AddActivityModal } from './components/AddActivityModal';
 
 export default function App() {
-  // Application State & Flow per user mandate:
-  // State variable: step ('planTrip' | 'pasteInspiration' | 'generating')
-  const [step, setStep] = useState<'planTrip' | 'pasteInspiration' | 'generating'>('planTrip');
-  const [currentScreen, setCurrentScreen] = useState<'landing' | 'vault' | 'canvas'>('landing');
+  // Application State & Flow:
+  // 'landing' -> 'setup' (Team Lead setup wizard) -> 'generating' -> 'canvas'
+  const [currentScreen, setCurrentScreen] = useState<
+    'landing' | 'setup' | 'generating' | 'canvas' | 'vault'
+  >('landing');
 
   const [itinerary, setItinerary] = useState<Itinerary>(() => multiplayerSync.getSavedItinerary());
   const [collaborators, setCollaborators] = useState<Collaborator[]>(INITIAL_COLLABORATORS);
@@ -37,7 +40,7 @@ export default function App() {
   const [recentAction, setRecentAction] = useState<string>('Connected to Safar live sync');
   const [dateConflictNotice, setDateConflictNotice] = useState(false);
   const [generatingSource, setGeneratingSource] = useState<string>(
-    'https://instagram.com/reel/C8k9xM2... (Kyoto Halal Guide)'
+    'Kyoto, Japan (Autumn Foliage & Halal Corridors)'
   );
 
   // Test Firebase connection on mount
@@ -74,46 +77,123 @@ export default function App() {
     [currentUser]
   );
 
-  // Trigger AI generation from Reel URL (transitions step to 'generating')
-  const handleGenerateFromReel = (url: string) => {
-    setGeneratingSource(url);
-    setStep('generating');
-  };
-
-  // Start planning from Wanderlog-style card (transitions step to 'generating' or directly prepares canvas)
-  const handleStartPlanning = (tripDetails: {
+  // Handle completion of TripSetupWizard (Step 2)
+  const handleSetupComplete = (setupData: {
+    leadName: string;
+    leadFaithDietary: FaithDietaryTier;
     destination: string;
     startDate: string;
     endDate: string;
     travelGroup: string;
+    tourismPoints: string[];
+    pace: TravelPace;
+    halalTier: FaithDietaryTier;
+    prayerBuffers: boolean;
+    currency: string;
   }) => {
-    setItinerary((prev) => ({
-      ...prev,
-      title: `${tripDetails.destination} Itinerary 🧭`,
-      subtitle: `${tripDetails.travelGroup} · Halal Dining & Prayer Synchronized`,
-      dateRange: `${tripDetails.startDate} - ${tripDetails.endDate}`,
-    }));
-    setGeneratingSource(`${tripDetails.destination} (${tripDetails.startDate} - ${tripDetails.endDate})`);
-    setStep('generating');
+    // 1. Automatically designate the first user as Team Lead
+    const leadUser: Collaborator = {
+      id: `lead-${Date.now()}`,
+      name: setupData.leadName,
+      role: 'Team Lead 👑',
+      avatar:
+        currentUser.avatar ||
+        'https://lh3.googleusercontent.com/aida-public/AB6AXuCMF4QQmYrpQ8HzjKhko22Jih1K3Y-q9rsjUNXYRcpuQRJZI9-kTyAVgy2hXl4ubqoeftdJqglilA_c73YAr4sRGffw_2BHxAK3cZh_1Z9KUpaNPheUdZPiBanGXDd2ZbeGKWGxkp7B73A4r9z9_CGzj6xnfS-tKgUcB7WVZAIfFAP6bubKyIQy9r70Msd0Wzbb7MLscKojguDl97TQqJtERYKuskyLaCccThAFvloV5IFKf7Nz5Sog',
+      status: 'active',
+      isLead: true,
+      action: 'created trip as Team Lead',
+      preferences: {
+        faithDietary: setupData.leadFaithDietary,
+        pace: setupData.pace,
+        interests: ['Historic Heritage', 'Halal Gastronomy', 'Scenic Gardens'],
+        prayerReminders: setupData.prayerBuffers,
+      },
+    };
+
+    // Filter out previous lead if needed, place new lead at front
+    const otherCollaborators = collaborators.filter((c) => !c.isLead);
+    const updatedCollaborators = [leadUser, ...otherCollaborators];
+
+    setCollaborators(updatedCollaborators);
+    setCurrentUser(leadUser);
+
+    // 2. Update itinerary details
+    const destCity = setupData.destination.split(',')[0].trim();
+    const updatedItinerary: Itinerary = {
+      ...itinerary,
+      title: `${destCity} Trip 🧭`,
+      subtitle: `${setupData.travelGroup} · Team Lead: ${setupData.leadName} · Halal & Prayer Synchronized`,
+      dateRange: `${setupData.startDate} - ${setupData.endDate}`,
+      leadId: leadUser.id,
+      destinationCity: destCity,
+      tourismPoints: setupData.tourismPoints,
+      collaborators: updatedCollaborators,
+      budget: {
+        totalGoal: 1500,
+        currency: setupData.currency,
+        dailyGoal: 250,
+      },
+    };
+
+    setItinerary(updatedItinerary);
+    setGeneratingSource(
+      `${setupData.destination} • Key Stops: ${setupData.tourismPoints.slice(0, 3).join(', ')}`
+    );
+    setCurrentScreen('generating');
   };
 
-  // Complete 3-second generation and open Canvas workspace
+  // Add new Tripmate with configured preferences (Step 3)
+  const handleAddMate = (newMate: Collaborator) => {
+    const updatedCollaborators = [...collaborators, newMate];
+    setCollaborators(updatedCollaborators);
+
+    const updatedItinerary = {
+      ...itinerary,
+      collaborators: updatedCollaborators,
+    };
+    handleUpdateItinerary(
+      updatedItinerary,
+      `Team Lead added ${newMate.name} as Tripmate (${newMate.role})`
+    );
+  };
+
+  // Quick Reel extraction from landing
+  const handleQuickReelGenerate = (url: string) => {
+    setGeneratingSource(url);
+    setCurrentScreen('generating');
+  };
+
+  // Generation screen completes
   const handleGeneratingComplete = () => {
-    setStep('pasteInspiration');
     setCurrentScreen('canvas');
   };
 
-  // Cancel generation flow
-  const handleCancelGenerating = () => {
-    setStep('pasteInspiration');
+  // Switch or select active user (to test Team Lead vs Mate perspective)
+  const handleSelectUser = (user: Collaborator) => {
+    setCurrentUser(user);
+    multiplayerSync.broadcastPresence(
+      user,
+      `Switched view to ${user.name} (${user.isLead ? 'Team Lead 👑' : 'Tripmate 👤'})`
+    );
   };
 
-  const handleSelectCommunityPlan = (planId: string) => {
-    setGeneratingSource('Community Curated Halal Guide');
-    setStep('generating');
+  // Custom login via AuthModal
+  const handleCustomLogin = (name: string, email: string) => {
+    const newUser: Collaborator = {
+      id: `user-${Date.now()}`,
+      name,
+      role: 'Tripmate',
+      avatar: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80`,
+      status: 'active',
+      isLead: false,
+      action: 'Viewing canvas as Tripmate',
+    };
+    setCollaborators((prev) => [...prev, newUser]);
+    setCurrentUser(newUser);
+    multiplayerSync.broadcastPresence(newUser, 'Joined the itinerary canvas');
   };
 
-  // Swap activity in Refinement Modal (Screen 4)
+  // Swap activity in Refinement Modal
   const handleSwapActivity = (oldActivityId: string, newOption: HalalFallbackOption) => {
     const updatedActivities = itinerary.activityBlocks.map((act) => {
       if (act.id === oldActivityId) {
@@ -124,7 +204,7 @@ export default function App() {
           tags: ['Halal Dining', newOption.cuisine, 'Musalla Inside'],
           halalBadge: '100% Halal Verified',
           image: newOption.image,
-          warning: undefined, // Clears the closing soon warning
+          warning: undefined,
         };
       }
       return act;
@@ -193,33 +273,15 @@ export default function App() {
     );
   };
 
-  // Switch or add Google user
-  const handleSelectUser = (user: Collaborator) => {
-    setCurrentUser(user);
-    multiplayerSync.broadcastPresence(user, 'Switched active collaborator view');
-  };
-
-  const handleCustomLogin = (name: string, email: string) => {
-    const newUser: Collaborator = {
-      id: `user-${Date.now()}`,
-      name,
-      role: 'Family Member',
-      avatar: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80`,
-      status: 'active',
-      action: 'Viewing canvas',
-    };
-    setCollaborators((prev) => [...prev, newUser]);
-    setCurrentUser(newUser);
-    multiplayerSync.broadcastPresence(newUser, 'Joined the family itinerary canvas');
-  };
-
   return (
-    <div className="min-h-screen bg-[#FAF8F5] text-neutral-900 font-['Plus_Jakarta_Sans'] selection:bg-[#0D6955]/20 selection:text-[#0D6955]">
-      {/* For Workspace Canvas: Render Dedicated Full-Screen Canvas with Top Nav & Left Sidebar */}
+    <div className="min-h-screen bg-[#FAF8F5] text-neutral-900 font-['Plus_Jakarta_Sans'] selection:bg-[#00685F]/20 selection:text-[#00685F]">
+      {/* 1. Canvas Screen (Full-Screen Dedicated Workspace) */}
       {currentScreen === 'canvas' ? (
         <CanvasScreen
           itinerary={itinerary}
           currentUser={currentUser}
+          collaborators={collaborators}
+          onSelectUser={handleSelectUser}
           onUpdateItinerary={handleUpdateItinerary}
           onOpenRefinementModal={(activity) => setSelectedActivity(activity)}
           onOpenAddModal={(dayId) => {
@@ -227,69 +289,60 @@ export default function App() {
             setIsAddModalOpen(true);
           }}
           onOpenVault={() => setCurrentScreen('vault')}
-          onOpenInspiration={() => {
-            setCurrentScreen('landing');
-            setStep('pasteInspiration');
-          }}
+          onOpenInspiration={() => setCurrentScreen('landing')}
           dateConflictNotice={dateConflictNotice}
           onDismissDateConflict={() => setDateConflictNotice(false)}
+          onAddMate={handleAddMate}
         />
       ) : (
         <>
-          {/* Header Bar matching Safar OS Design System for Landing and Vault */}
+          {/* Header Bar for Landing, Setup, and Vault */}
           <Navbar
             currentScreen={currentScreen}
-            step={step}
             collaborators={collaborators}
             currentUser={currentUser}
             onSelectUser={handleSelectUser}
             onOpenAuthModal={() => setIsAuthModalOpen(true)}
-            onNavigateHome={() => {
-              setCurrentScreen('landing');
-              setStep('planTrip');
-            }}
-            onSelectStep={(targetStep) => {
-              setCurrentScreen('landing');
-              setStep(targetStep);
-            }}
+            onNavigateHome={() => setCurrentScreen('landing')}
             onOpenVault={() => setCurrentScreen('vault')}
             onOpenCanvas={() => setCurrentScreen('canvas')}
             recentAction={recentAction}
           />
 
-          {/* Main Content Area for Onboarding & Vault */}
-          <main className="pt-24 pb-16 px-4 sm:px-6 md:px-8 max-w-7xl mx-auto">
-            {/* Landing Flow with step state: 'planTrip' | 'pasteInspiration' | 'generating' */}
+          {/* Main Body */}
+          <main className="pt-20 pb-16 px-4 sm:px-6 md:px-8 max-w-7xl mx-auto">
+            {/* Step 1: Landing Page */}
             {currentScreen === 'landing' && (
-              <div>
-                {step === 'planTrip' && (
-                  <PlanTripCard
-                    onStartPlanning={handleStartPlanning}
-                    onSwitchToInspiration={() => setStep('pasteInspiration')}
-                  />
-                )}
-
-                {step === 'pasteInspiration' && (
-                  <PasteInspirationView
-                    onGenerate={handleGenerateFromReel}
-                    onSwitchToPlanTrip={() => setStep('planTrip')}
-                    onOpenVault={() => setCurrentScreen('vault')}
-                    onOpenWorkspace={() => setCurrentScreen('canvas')}
-                    onSelectCommunityPlan={handleSelectCommunityPlan}
-                  />
-                )}
-
-                {step === 'generating' && (
-                  <GeneratingScreen
-                    sourceText={generatingSource}
-                    onComplete={handleGeneratingComplete}
-                    onCancel={handleCancelGenerating}
-                  />
-                )}
-              </div>
+              <LandingScreen
+                onStartPlanningLead={() => setCurrentScreen('setup')}
+                onQuickReelGenerate={handleQuickReelGenerate}
+                onOpenWorkspace={() => setCurrentScreen('canvas')}
+                onOpenVault={() => setCurrentScreen('vault')}
+                onSelectCommunityPlan={(planId) => {
+                  setGeneratingSource('Community Curated Halal Guide');
+                  setCurrentScreen('generating');
+                }}
+              />
             )}
 
-            {/* Screen 2.5: The Smart Document Vault (Dedicated Document Verification Screen) */}
+            {/* Step 2: Pre-generation Trip Setup Wizard (Destination, Tourism Points, Preferences, Team Lead) */}
+            {currentScreen === 'setup' && (
+              <TripSetupWizard
+                onComplete={handleSetupComplete}
+                onCancel={() => setCurrentScreen('landing')}
+              />
+            )}
+
+            {/* Generating Screen with AI Countdown Animation */}
+            {currentScreen === 'generating' && (
+              <GeneratingScreen
+                sourceText={generatingSource}
+                onComplete={handleGeneratingComplete}
+                onCancel={() => setCurrentScreen('landing')}
+              />
+            )}
+
+            {/* Document Vault Screen */}
             {currentScreen === 'vault' && (
               <DocumentVaultScreen
                 onNavigateToCanvas={(focusConflict) => {
@@ -298,17 +351,14 @@ export default function App() {
                   }
                   setCurrentScreen('canvas');
                 }}
-                onNavigateHome={() => {
-                  setCurrentScreen('landing');
-                  setStep('planTrip');
-                }}
+                onNavigateHome={() => setCurrentScreen('landing')}
               />
             )}
           </main>
         </>
       )}
 
-      {/* Screen 4: Activity Refinement & Fallback Modal */}
+      {/* Screen 4: Activity Refinement Modal */}
       {selectedActivity && (
         <RefinementModal
           activity={selectedActivity}
@@ -318,7 +368,7 @@ export default function App() {
         />
       )}
 
-      {/* Google Authentication & Switcher Modal */}
+      {/* Google Authentication / User Switcher Modal */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
@@ -328,7 +378,7 @@ export default function App() {
         onCustomLogin={handleCustomLogin}
       />
 
-      {/* Add New Activity Modal */}
+      {/* Add New Activity Modal (For Team Lead) */}
       <AddActivityModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
@@ -338,4 +388,3 @@ export default function App() {
     </div>
   );
 }
-

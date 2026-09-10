@@ -1,5 +1,17 @@
 export type ActivityType = 'sightseeing' | 'dining' | 'cafe' | 'transit' | 'shopping' | 'cultural';
 
+export type FaithDietaryTier = 'strictly_halal' | 'muslim_owned' | 'pork_free' | 'non_muslim';
+export type TravelPace = 'fast' | 'moderate' | 'relaxed';
+
+export interface UserPreferences {
+  faithDietary: FaithDietaryTier;
+  pace: TravelPace;
+  interests: string[];
+  prayerReminders: boolean;
+  dietaryRestrictions?: string[];
+  accessibilityNeeds?: string;
+}
+
 export interface Collaborator {
   id: string;
   name: string;
@@ -8,6 +20,8 @@ export interface Collaborator {
   status: 'active' | 'idle' | 'offline';
   action?: string;
   isCurrentUser?: boolean;
+  isLead?: boolean;
+  preferences?: UserPreferences;
 }
 
 export interface ActivityBlock {
@@ -130,6 +144,27 @@ export interface TripBudget {
   dailyGoal?: number; // e.g. 250
 }
 
+export interface TripSuggestion {
+  id: string;
+  proposedBy: {
+    id: string;
+    name: string;
+    avatar: string;
+    role: string;
+  };
+  title: string;
+  location: string;
+  type: ActivityType;
+  description: string;
+  sourceUrl?: string; // Social media link (Reel, TikTok, Xiaohongshu)
+  halalBadge?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  submittedAt: string;
+  votes: number;
+  votedBy: string[];
+  suggestedDayId?: string;
+}
+
 export interface Itinerary {
   id: string;
   title: string;
@@ -141,6 +176,11 @@ export interface Itinerary {
   prayerAnchors: PrayerAnchorBlock[];
   sourceUrl?: string;
   budget?: TripBudget;
+  leadId?: string;
+  tourismPoints?: string[];
+  suggestions?: TripSuggestion[];
+  destinationCity?: string;
+  destinationCountry?: string;
 }
 
 export interface HalalFallbackOption {
