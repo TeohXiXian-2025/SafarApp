@@ -1,0 +1,10 @@
+{
+  "name": "Safar - Halal Travel OS",
+  "description": "Collaborative, Muslim-centric travel planning OS with AI itinerary generation, prayer time anchoring, and real-time multiplayer canvas.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

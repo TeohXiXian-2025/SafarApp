@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Itineraries collection
+    match /itineraries/{itineraryId} {
+      allow read: if isSignedIn() && isValidId(itineraryId);
+      allow create: if isSignedIn() && isValidId(itineraryId)
+        && incoming().title is string && incoming().title.size() <= 200;
+      allow update: if isSignedIn() && isValidId(itineraryId)
+        && incoming().title is string && incoming().title.size() <= 200;
+      allow delete: if isSignedIn() && isValidId(itineraryId);
+
+      // Subcollection for blocks
+      match /blocks/{blockId} {
+        allow read: if isSignedIn() && isValidId(itineraryId) && isValidId(blockId);
+        allow create, update: if isSignedIn() && isValidId(itineraryId) && isValidId(blockId)
+          && incoming().title is string && incoming().title.size() <= 200;
+        allow delete: if isSignedIn() && isValidId(itineraryId) && isValidId(blockId);
+      }
+    }
+
+    // AI Mediator Timeline Clashes
+    match /clashes/{clashId} {
+      allow read: if isSignedIn() && isValidId(clashId);
+      allow create, update: if isSignedIn() && isValidId(clashId)
+        && incoming().slotTime is string && incoming().slotTime.size() <= 100;
+      allow delete: if isSignedIn() && isValidId(clashId);
+
+      // Subcollection for Anonymous Votes
+      match /votes/{voteId} {
+        allow read: if isSignedIn() && isValidId(clashId) && isValidId(voteId);
+        allow create: if isSignedIn() && isValidId(clashId) && isValidId(voteId)
+          && incoming().selectedOptionId is string && incoming().selectedOptionId.size() <= 100;
+        allow update, delete: if false; // Votes are write-once and immutable
+      }
+    }
+
+    // Connection test document
+    match /test/{docId} {
+      allow read: if true;
+    }
+  }
+}
