@@ -1,0 +1,882 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Safar -- The Muslim Travel OS - Hackathon Pitch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --teal: #00685F;
+    --teal-light: #008378;
+    --teal-pale: #EEF4FE;
+    --cream: #FBF9F5;
+    --dark: #161C23;
+    --muted: #6D7A77;
+    --amber: #D97706;
+    --amber-pale: #FEF3C7;
+    --border: #E7DFD5;
+    --white: #ffffff;
+    --red: #dc2626;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    background: #0a0a0a;
+    color: var(--dark);
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+  #deck {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 64px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(60px);
+    transition: opacity 0.45s cubic-bezier(.4,0,.2,1), transform 0.45s cubic-bezier(.4,0,.2,1);
+    overflow: hidden;
+    background: var(--cream);
+  }
+  .slide.active { opacity: 1; pointer-events: all; transform: translateX(0); }
+  .slide.exit   { opacity: 0; transform: translateX(-60px); }
+  .slide::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='none' stroke='%2300685F' stroke-width='0.6' opacity='0.07'%3E%3Crect x='10' y='10' width='20' height='20' transform='rotate(45 20 20)'/%3E%3Crect x='50' y='10' width='20' height='20' transform='rotate(45 60 20)'/%3E%3Crect x='10' y='50' width='20' height='20' transform='rotate(45 20 60)'/%3E%3Crect x='50' y='50' width='20' height='20' transform='rotate(45 60 60)'/%3E%3C/g%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+  .slide > * { position: relative; z-index: 1; }
+
+  .label {
+    font-size: 11px; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--teal);
+    background: rgba(0,104,95,.1); padding: 4px 12px;
+    border-radius: 999px; display: inline-flex;
+    align-items: center; gap: 6px; margin-bottom: 16px;
+  }
+  .h1 { font-size: clamp(38px, 5vw, 68px); font-weight: 900; color: var(--dark); line-height: 1.05; text-align: center; }
+  .h2 { font-size: clamp(24px, 3.2vw, 44px); font-weight: 800; color: var(--dark); line-height: 1.15; text-align: center; }
+  .h3 { font-size: clamp(18px, 2.2vw, 28px); font-weight: 700; color: var(--dark); }
+  .sub { font-size: clamp(13px, 1.5vw, 18px); color: var(--muted); text-align: center; line-height: 1.6; max-width: 700px; margin-top: 10px; }
+  .accent { color: var(--teal); }
+  .amber  { color: var(--amber); }
+  .red    { color: var(--red); }
+
+  .card    { background: var(--white); border: 1px solid var(--border); border-radius: 20px; padding: 24px 28px; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+  .card-sm { background: var(--white); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; box-shadow: 0 1px 6px rgba(0,0,0,.04); }
+
+  .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; width: 100%; max-width: 880px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2,1fr); gap: 16px; width: 100%; max-width: 840px; }
+
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; background: var(--teal-pale); color: var(--dark); border-radius: 999px; padding: 5px 14px; }
+  .pill-amber { background: var(--amber-pale); color: var(--amber); }
+  .pill-green { background: rgba(0,104,95,.12); color: var(--teal); }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+
+  .icon-circle { width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+  .icon-teal  { background: rgba(0,104,95,.12); }
+  .icon-amber { background: rgba(217,119,6,.1); }
+
+  .stat-big   { font-size: clamp(30px, 4vw, 52px); font-weight: 900; color: var(--teal); line-height: 1; }
+  .stat-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-top: 4px; }
+
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 800; letter-spacing: .05em; padding: 3px 9px; border-radius: 999px; background: rgba(0,104,95,.12); color: var(--teal); }
+  .badge-amber { background: rgba(217,119,6,.12); color: var(--amber); }
+
+  #nav {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(22,28,35,.9); backdrop-filter: blur(12px);
+    border-radius: 999px; padding: 9px 18px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.4); z-index: 100;
+  }
+  .nav-btn { width: 36px; height: 36px; border-radius: 50%; border: none; background: rgba(255,255,255,.1); color: white; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background .2s; }
+  .nav-btn:hover { background: rgba(255,255,255,.2); }
+  .nav-btn:disabled { opacity: .3; cursor: default; }
+  #slide-counter { font-size: 13px; font-weight: 700; color: rgba(255,255,255,.8); min-width: 55px; text-align: center; }
+  .dot-nav { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.3); cursor: pointer; transition: all .2s; }
+  .dot-nav.on { background: var(--teal); width: 20px; border-radius: 4px; }
+
+  #timer-wrap { position: fixed; top: 18px; right: 18px; background: rgba(22,28,35,.88); backdrop-filter: blur(10px); border-radius: 14px; padding: 9px 16px; color: white; font-size: 12px; font-weight: 700; z-index: 100; cursor: pointer; display: flex; align-items: center; gap: 7px; }
+  #timer-display { font-size: 18px; font-weight: 900; font-variant-numeric: tabular-nums; color: #62FAE3; }
+  #timer-wrap.warn #timer-display { color: #FCA5A5; }
+  #phase-tag { font-size: 10px; font-weight: 800; color: rgba(255,255,255,.5); letter-spacing: .06em; }
+
+  #notes-btn { position: fixed; top: 18px; left: 18px; background: rgba(22,28,35,.88); backdrop-filter: blur(10px); border-radius: 14px; padding: 9px 16px; color: rgba(255,255,255,.7); font-size: 12px; font-weight: 700; z-index: 100; cursor: pointer; border: none; display: flex; align-items: center; gap: 6px; }
+  #notes-panel { position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%); width: min(680px, 90vw); background: rgba(22,28,35,.95); backdrop-filter: blur(16px); border-radius: 16px; padding: 18px 22px; color: rgba(255,255,255,.85); font-size: 13px; line-height: 1.7; z-index: 99; display: none; border: 1px solid rgba(255,255,255,.08); }
+  #notes-panel.show { display: block; }
+  #notes-panel .note-label { font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--teal); margin-bottom: 8px; }
+
+  #hint { position: fixed; bottom: 84px; right: 18px; background: rgba(22,28,35,.7); border-radius: 10px; padding: 7px 12px; font-size: 11px; color: rgba(255,255,255,.5); z-index: 100; pointer-events: none; }
+  #progress { position: fixed; top: 0; left: 0; height: 3px; background: var(--teal); transition: width .4s ease; z-index: 200; }
+
+  /* Hero */
+  .hero-logo { width: 76px; height: 76px; border-radius: 22px; background: linear-gradient(135deg, var(--teal) 0%, var(--teal-light) 100%); display: flex; align-items: center; justify-content: center; font-size: 34px; margin: 0 auto 20px; box-shadow: 0 16px 40px rgba(0,104,95,.3); }
+  .teal-line { width: 56px; height: 4px; background: var(--teal); border-radius: 2px; margin: 18px auto; }
+  .built-tag { margin-top: 24px; font-size: 12px; color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .built-tag span { padding: 3px 10px; background: var(--teal-pale); border-radius: 6px; color: var(--teal); font-weight: 700; }
+
+  /* Problem */
+  .problem-card { background: var(--white); border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; display: flex; align-items: flex-start; gap: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+  .problem-icon { font-size: 26px; flex-shrink: 0; margin-top: 2px; }
+  .problem-title { font-size: 14px; font-weight: 800; color: var(--dark); }
+  .problem-desc { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+  .stat-strip { background: rgba(0,104,95,.07); border: 1px solid rgba(0,104,95,.15); border-radius: 14px; padding: 12px 18px; text-align: center; font-size: 13px; font-weight: 700; color: var(--teal); width: 100%; max-width: 840px; margin-top: 8px; }
+  .stat-strip-red { background: rgba(220,38,38,.06); border: 1px solid rgba(220,38,38,.15); border-radius: 14px; padding: 12px 18px; text-align: center; font-size: 13px; font-weight: 700; color: var(--red); width: 100%; max-width: 880px; margin-top: 8px; }
+
+  /* Problem-Solution 1:1 */
+  .ps-row { display: flex; gap: 10px; width: 100%; max-width: 900px; align-items: stretch; }
+  .ps-problem { flex: 1; background: rgba(220,38,38,.04); border: 1px solid rgba(220,38,38,.18); border-radius: 14px; padding: 14px 16px; }
+  .ps-arrow { display: flex; align-items: center; font-size: 22px; color: var(--teal); padding: 0 4px; flex-shrink: 0; }
+  .ps-solution { flex: 1; background: rgba(0,104,95,.05); border: 1px solid rgba(0,104,95,.2); border-radius: 14px; padding: 14px 16px; }
+  .ps-head { font-size: 12px; font-weight: 800; margin-bottom: 5px; }
+  .ps-body { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  /* Flowchart */
+  .flow-col { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .flow-col-title { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 7px 14px; border-radius: 10px; text-align: center; margin-bottom: 2px; }
+  .flow-box { background: var(--white); border: 1px solid var(--border); border-radius: 11px; padding: 10px 12px; font-size: 11px; font-weight: 600; color: var(--dark); line-height: 1.4; text-align: center; }
+  .flow-box.teal { background: rgba(0,104,95,.08); border-color: rgba(0,104,95,.25); }
+  .flow-box.amber-box { background: rgba(217,119,6,.07); border-color: rgba(217,119,6,.25); }
+  .flow-box.shared { background: linear-gradient(135deg, rgba(0,104,95,.07), rgba(217,119,6,.07)); border: 1px dashed rgba(0,104,95,.3); }
+  .flow-down { text-align: center; font-size: 14px; color: var(--muted); line-height: 1; }
+  .flow-divider { width: 2px; background: rgba(0,104,95,.2); border-radius: 2px; align-self: stretch; flex-shrink: 0; margin: 0 8px; }
+
+  /* Aha */
+  .aha-input { background: var(--white); border: 1px solid var(--border); border-radius: 18px; padding: 16px 20px; display: flex; align-items: center; gap: 12px; width: 100%; max-width: 560px; box-shadow: 0 4px 20px rgba(0,0,0,.08); margin: 20px 0; }
+  .aha-input .url-icon { font-size: 18px; color: var(--teal); }
+  .aha-input .url-text { font-size: 12px; color: var(--muted); flex: 1; }
+  .aha-input .paste-btn { background: var(--teal); color: white; border: none; border-radius: 10px; padding: 7px 14px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
+  .gen-btn { background: var(--teal); color: white; border-radius: 14px; padding: 13px 28px; font-size: 15px; font-weight: 800; border: none; font-family: inherit; cursor: pointer; box-shadow: 0 8px 24px rgba(0,104,95,.35); display: flex; align-items: center; gap: 8px; }
+
+  /* Timeline */
+  .timeline-item { display: flex; align-items: flex-start; gap: 12px; background: var(--white); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+  .timeline-item.prayer { background: rgba(0,104,95,.06); border-color: rgba(0,104,95,.2); }
+  .time-badge { font-size: 10px; font-weight: 800; color: var(--teal); background: rgba(0,104,95,.1); border-radius: 7px; padding: 3px 7px; white-space: nowrap; margin-top: 1px; }
+  .time-badge.amber { background: rgba(217,119,6,.1); color: var(--amber); }
+  .item-title { font-size: 12px; font-weight: 700; color: var(--dark); }
+  .item-loc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .lock-icon { margin-left: auto; font-size: 13px; color: var(--teal); flex-shrink: 0; }
+  .warn-bar { background: rgba(220,38,38,.08); border: 1px solid rgba(220,38,38,.2); border-radius: 7px; padding: 6px 9px; font-size: 10px; color: #dc2626; font-weight: 600; display: flex; align-items: center; gap: 5px; margin-top: 5px; }
+
+  /* Avatars */
+  .collab-row { display: flex; align-items: center; }
+  .av { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--white); background: var(--teal); color: white; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; margin-left: -7px; }
+  .av:first-child { margin-left: 0; }
+  .av.amber { background: var(--amber); }
+  .av.blue { background: #3b82f6; }
+  .av.purple { background: #8b5cf6; }
+
+  /* Pillars */
+  .pillar-card { background: var(--white); border: 1px solid var(--border); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+  .pillar-title { font-size: 14px; font-weight: 800; color: var(--dark); }
+  .pillar-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  /* Market */
+  .market-stat { background: var(--white); border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+  .dest-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; width: 100%; max-width: 780px; }
+  .dest-card { background: var(--white); border: 1px solid var(--border); border-radius: 12px; padding: 12px; text-align: center; font-size: 12px; font-weight: 700; }
+  .dest-flag { font-size: 22px; margin-bottom: 4px; }
+  .dest-saves { font-size: 11px; color: var(--teal); font-weight: 800; margin-top: 4px; }
+
+  /* Competitor table */
+  .comp-table { width: 100%; max-width: 860px; border-collapse: collapse; font-size: 11px; }
+  .comp-table th { background: var(--teal); color: white; padding: 8px 10px; font-weight: 800; text-align: left; }
+  .comp-table th:first-child { border-radius: 10px 0 0 0; }
+  .comp-table th:last-child { border-radius: 0 10px 0 0; }
+  .comp-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--white); font-weight: 600; }
+  .comp-table tr:last-child td { border-bottom: none; }
+  .comp-table td.ours { background: rgba(0,104,95,.06); font-weight: 800; color: var(--teal); }
+  .comp-table .x { color: var(--red); font-weight: 800; }
+  .comp-table .check { color: var(--teal); font-weight: 800; }
+  .comp-table .partial { color: var(--amber); font-weight: 700; }
+
+  /* Close */
+  .close-logo { width: 88px; height: 88px; border-radius: 26px; background: linear-gradient(135deg, var(--teal) 0%, var(--teal-light) 100%); display: flex; align-items: center; justify-content: center; font-size: 40px; margin: 0 auto 20px; box-shadow: 0 20px 60px rgba(0,104,95,.35); }
+  .tech-chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 14px; }
+  .tech-chip { font-size: 11px; font-weight: 700; background: var(--teal-pale); color: var(--dark); border-radius: 8px; padding: 5px 12px; }
+  .big-quote { font-size: clamp(18px, 2.2vw, 28px); font-weight: 800; color: var(--teal); text-align: center; margin-top: 18px; font-style: italic; line-height: 1.3; }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  .pulse { animation: pulse 1.8s infinite; }
+  @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+  .float { animation: float 3s ease-in-out infinite; }
+
+  #s1, #s12 { background: linear-gradient(145deg, #f0faf9 0%, var(--cream) 100%); }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div id="timer-wrap" onclick="toggleTimer()" title="Click to start/stop - Press T">
+  PITCH <span id="timer-display">3:00</span>
+  <span id="phase-tag">min</span>
+</div>
+<button id="notes-btn" onclick="toggleNotes()" title="Press N">Notes</button>
+<div id="notes-panel">
+  <div class="note-label">Speaker Script</div>
+  <div id="note-text">Use arrow keys to navigate slides.</div>
+</div>
+<div id="hint">Arrow keys: Navigate | F: Fullscreen | T: Timer | N: Notes | D: Jump to Demo</div>
+
+<div id="deck">
+
+  <!-- S1 TITLE -->
+  <div class="slide active" id="s1" data-phase="pitch"
+    data-note="[PITCH 0:00] Hi everyone. We are Team Ds Gang -- Chong Pohyi, Teoh Xi Xian, and Tan Wei Feng. This is Safar -- the first AI travel operating system built specifically for Muslim travelers and mixed-faith groups. 3 minutes for the pitch, 2 minutes for a live demo. Let's go.">
+    <div class="hero-logo float">&#x1F9ED;</div>
+    <div class="label">AI Travel Copilot - Built for Muslims</div>
+    <h1 class="h1">Safar</h1>
+    <div class="teal-line"></div>
+    <p class="sub" style="font-size:clamp(16px,2vw,24px);font-weight:700;color:var(--dark);">The Muslim Travel OS</p>
+    <p class="sub">AI Itinerary Planner for Muslim Travelers &amp; Mixed-Faith Groups</p>
+    <div class="built-tag">
+      <span>CodeNection Hackathon 2026</span>
+      &nbsp;&#183;&nbsp; Team Ds Gang &nbsp;&#183;&nbsp; Chong Pohyi &#183; Teoh Xi Xian &#183; Tan Wei Feng
+    </div>
+    <div class="pill-row" style="margin-top:24px;">
+      <div class="pill" style="background:rgba(0,104,95,.12);color:var(--teal);">&#x1F54C; Prayer-Anchored</div>
+      <div class="pill" style="background:rgba(0,104,95,.12);color:var(--teal);">&#x2705; Halal Verified</div>
+      <div class="pill" style="background:rgba(0,104,95,.12);color:var(--teal);">&#x1F465; Mixed-Group AI</div>
+      <div class="pill" style="background:var(--amber-pale);color:var(--amber);">&#x1F4C4; Document Vault</div>
+      <div class="pill" style="background:var(--amber-pale);color:var(--amber);">&#x1F916; Gemini AI</div>
+    </div>
+  </div>
+
+  <!-- S2 MARKET SIZE -->
+  <div class="slide" id="s2" data-phase="pitch"
+    data-note="[PITCH 0:20] Who are we serving? 1.8 billion Muslims worldwide -- 24% of the global population. Muslim tourism is a $230 billion market. Every year, 2.5 million pilgrims make Hajj to Mecca. 8 million more do Umrah. That's 10.5 million people on a single religious trip type with ZERO purpose-built planning tool. Beyond religious travel, 160 million Muslim tourists travelled internationally in 2023 -- 12% of ALL global tourists. This is not niche. It's an underserved majority.">
+    <div class="label">Who We Serve -- The Muslim Traveler</div>
+    <h2 class="h2" style="margin-bottom:18px;">A <span class="accent">$230 Billion</span> Market. Zero Native OS.</h2>
+    <div class="grid-3" style="margin-bottom:14px;">
+      <div class="market-stat">
+        <div class="stat-big">1.8B</div>
+        <div class="stat-label">Muslims Worldwide</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;">24% of global population</div>
+      </div>
+      <div class="market-stat">
+        <div class="stat-big">$230B</div>
+        <div class="stat-label">Muslim Travel Market (2024)</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;">12% of global travel spend</div>
+      </div>
+      <div class="market-stat">
+        <div class="stat-big">160M</div>
+        <div class="stat-label">Muslim International Tourists 2023</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;">12% of all global tourists</div>
+      </div>
+    </div>
+    <div class="grid-3" style="max-width:880px;">
+      <div class="card-sm" style="text-align:center;">
+        <div style="font-size:22px;margin-bottom:6px;">&#x1F54B;</div>
+        <div style="font-size:13px;font-weight:800;">2.5M / year</div>
+        <div style="font-size:11px;color:var(--muted);">Hajj pilgrims to Mecca</div>
+      </div>
+      <div class="card-sm" style="text-align:center;">
+        <div style="font-size:22px;margin-bottom:6px;">&#x1F932;</div>
+        <div style="font-size:13px;font-weight:800;">8M+ / year</div>
+        <div style="font-size:11px;color:var(--muted);">Umrah travelers annually</div>
+      </div>
+      <div class="card-sm" style="text-align:center;">
+        <div style="font-size:22px;margin-bottom:6px;">&#x1F4F1;</div>
+        <div style="font-size:13px;font-weight:800;">0 apps</div>
+        <div style="font-size:11px;color:var(--muted);">Purpose-built Muslim travel OS</div>
+      </div>
+    </div>
+    <div class="stat-strip-red">
+      &#x274C; Despite being 12% of all global tourists -- Muslim travelers have <strong>zero purpose-built AI planning tool</strong>
+    </div>
+  </div>
+
+  <!-- S3 PROBLEM -->
+  <div class="slide" id="s3" data-phase="pitch"
+    data-note="[PITCH 0:50] Here's the real pain. A Muslim planning a trip abroad opens Google Maps -- Halal-blind. Opens Wanderlog -- no prayer times. Checks WhatsApp -- 47 unread messages. Downloads HalalTrip -- static database, can't plan a route. That's 5 apps, and they STILL arrive at a restaurant that's not halal, or miss Dhuhr. For mixed groups -- even worse. Either Muslims sacrifice prayer time, or non-Muslims sit idle. Someone always loses.">
+    <div class="label">The Problem</div>
+    <h2 class="h2">Muslim Travel Planning is <span class="red">Broken</span></h2>
+    <p class="sub" style="margin-bottom:20px;">Muslims juggle 5+ apps -- and still get it wrong. Mixed groups? Someone always sacrifices.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:840px;">
+      <div class="problem-card">
+        <div class="problem-icon">&#x23F0;</div>
+        <div>
+          <div class="problem-title">Schedule Blind Spots -- Prayer times ignored</div>
+          <div class="problem-desc">Standard apps (Wanderlog, TripAdvisor, Google Maps) have zero awareness of Dhuhr, Asr, Fajr. Muslim travelers scramble to find a mosque mid-itinerary while the group waits with nothing to do.</div>
+        </div>
+      </div>
+      <div class="problem-card">
+        <div class="problem-icon">&#x1F37D;</div>
+        <div>
+          <div class="problem-title">Fragmented Halal Food Search -- 4 apps for 1 meal</div>
+          <div class="problem-desc">Finding safe Halal food overseas means switching between Google Maps, TripAdvisor, Instagram, and HalalTrip with no live certification verification. <strong>72% of Muslim travelers</strong> report difficulty finding Halal food abroad.</div>
+        </div>
+      </div>
+      <div class="problem-card">
+        <div class="problem-icon">&#x1F91D;</div>
+        <div>
+          <div class="problem-title">Inflexible Mixed-Group Decisions -- Someone always loses</div>
+          <div class="problem-desc">In mixed Muslim/Non-Muslim groups, "majority rules" forces sacrifices. Muslims miss prayers or non-Muslims miss local experiences. Standard apps offer no middle ground -- this is the problem current tools cannot solve.</div>
+        </div>
+      </div>
+    </div>
+    <div class="stat-strip">
+      72% struggle finding Halal food abroad &nbsp;&#183;&nbsp; 91% rely on WhatsApp + manual tools &nbsp;&#183;&nbsp; 0 integrated solutions exist
+    </div>
+  </div>
+
+  <!-- S4 NO EXISTING SOLUTION -->
+  <div class="slide" id="s4" data-phase="pitch"
+    data-note="[PITCH 1:20] You might ask -- doesn't Wanderlog or HalalTrip solve this? Here's what our research found. Muslims TODAY review places via TikTok, Instagram, Xiaohongshu. They plan via WhatsApp and Excel. Wanderlog is culturally blind -- no Halal filter, no prayer sync. HalalTrip is a static directory -- you can't build a group itinerary. There is NO tool combining Halal verification, prayer anchoring, and group conflict resolution. That gap IS Safar.">
+    <div class="label">Market Gap -- No Existing Solution</div>
+    <h2 class="h2" style="margin-bottom:14px;">How Muslims <span class="accent">Currently</span> Plan Trips</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:860px;margin-bottom:12px;">
+      <div class="card-sm">
+        <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">How They Review Places</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;">&#x25B6; TikTok / Instagram Reels -- viral food &amp; travel</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;">&#x1F4CD; Google Maps star ratings (no Halal filter)</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;">&#x1F4DD; Xiaohongshu (Red Note) for Asian destinations</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--muted);">&#x2753; Manual cross-check with HalalTrip (static, outdated)</div>
+        </div>
+      </div>
+      <div class="card-sm">
+        <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">How They Plan Itineraries</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;">&#x1F4AC; WhatsApp group chats (47+ unread messages)</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;">&#x1F4CA; Excel / Google Sheets for scheduling</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;">&#x1F5FA; Wanderlog (no Halal / prayer awareness)</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--muted);">&#x1F937; Manual prayer lookup in a separate app</div>
+        </div>
+      </div>
+    </div>
+    <table class="comp-table">
+      <tr>
+        <th>Tool</th>
+        <th>Halal Radar</th>
+        <th>Prayer Sync</th>
+        <th>Group Planning</th>
+        <th>AI Conflict Resolve</th>
+        <th>Doc Vault</th>
+      </tr>
+      <tr>
+        <td class="ours">Safar (Ours)</td>
+        <td class="ours check">&#x2705; Live</td>
+        <td class="ours check">&#x2705; Auto</td>
+        <td class="ours check">&#x2705; Multiplayer</td>
+        <td class="ours check">&#x2705; AI Auto-Split</td>
+        <td class="ours check">&#x2705; AI Cross-Check</td>
+      </tr>
+      <tr>
+        <td>Wanderlog</td>
+        <td class="x">&#x2717; None</td>
+        <td class="x">&#x2717; None</td>
+        <td class="check">&#x2705; Yes</td>
+        <td class="x">&#x2717; None</td>
+        <td class="partial">&#x26A0; Manual</td>
+      </tr>
+      <tr>
+        <td>HalalTrip</td>
+        <td class="partial">&#x26A0; Static DB</td>
+        <td class="x">&#x2717; None</td>
+        <td class="x">&#x2717; None</td>
+        <td class="x">&#x2717; None</td>
+        <td class="x">&#x2717; None</td>
+      </tr>
+      <tr>
+        <td>WhatsApp + Excel</td>
+        <td class="x">&#x2717; None</td>
+        <td class="x">&#x2717; None</td>
+        <td class="partial">&#x26A0; Manual</td>
+        <td class="x">&#x2717; None</td>
+        <td class="x">&#x2717; None</td>
+      </tr>
+    </table>
+    <div class="stat-strip-red" style="margin-top:10px;">
+      There is <strong>no existing tool</strong> combining Halal verification + prayer anchoring + AI group conflict resolution in one platform
+    </div>
+  </div>
+
+  <!-- S5 PROBLEM-SOLUTION 1:1 -->
+  <div class="slide" id="s5" data-phase="pitch"
+    data-note="[PITCH 1:50] Our core pitch -- every problem has a direct 1-to-1 solution in Safar. Problem 1: Prayer blind spots -- Dynamic Prayer-Anchored Timeline. Problem 2: Fragmented Halal search -- Live Geo-Fenced Halal Radar. Problem 3: Inflexible group decisions -- AI Compromise and Auto-Split Engine. One to one. No unsolved pain points. No feature without a problem.">
+    <div class="label">Problem to Solution -- 1:1 Map</div>
+    <h2 class="h2" style="margin-bottom:16px;">Every Pain Point. <span class="accent">Directly Solved.</span></h2>
+    <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:900px;">
+      <div class="ps-row">
+        <div class="ps-problem">
+          <div class="ps-head" style="color:var(--red);">Problem 1 -- Prayer Blind Spots</div>
+          <div class="ps-body">Standard apps ignore Dhuhr, Asr, Fajr. Muslims scramble for a mosque while the group waits with nothing to do.</div>
+        </div>
+        <div class="ps-arrow">&#x2192;</div>
+        <div class="ps-solution">
+          <div class="ps-head" style="color:var(--teal);">Solution -- Dynamic Prayer-Anchored Timeline</div>
+          <div class="ps-body">GPS auto-calculates prayer times, inserts locked Prayer Blocks + nearest wudu-friendly facility. Non-Muslims auto-assigned nearby cafe break simultaneously.</div>
+        </div>
+      </div>
+      <div class="ps-row">
+        <div class="ps-problem">
+          <div class="ps-head" style="color:var(--red);">Problem 2 -- Fragmented Halal Search</div>
+          <div class="ps-body">Finding Halal food requires 4+ apps with no live certification check. 72% of Muslim travelers struggle with this abroad.</div>
+        </div>
+        <div class="ps-arrow">&#x2192;</div>
+        <div class="ps-solution">
+          <div class="ps-head" style="color:var(--teal);">Solution -- Live Geo-Fenced Halal Radar</div>
+          <div class="ps-body">Meal Blocks auto-drop based on GPS. 3-tier label: Certified Halal / Muslim-Owned / Pork-Free -- with live wait times and verified menus on one screen.</div>
+        </div>
+      </div>
+      <div class="ps-row">
+        <div class="ps-problem">
+          <div class="ps-head" style="color:var(--red);">Problem 3 -- Inflexible Group Decisions</div>
+          <div class="ps-body">"Majority rules" forces Muslims to sacrifice Halal/prayer needs or non-Muslims to skip local experiences. No existing app resolves this.</div>
+        </div>
+        <div class="ps-arrow">&#x2192;</div>
+        <div class="ps-solution">
+          <div class="ps-head" style="color:var(--teal);">Solution -- AI Compromise &amp; Auto-Split Engine</div>
+          <div class="ps-body">AI finds common-ground venues (Halal + non-Halal stalls side-by-side) OR temporarily splits the itinerary with synchronized regroup pins.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S6 FLOWCHART -->
+  <div class="slide" id="s6" data-phase="pitch"
+    data-note="[PITCH 2:20] Here's how Muslim and Non-Muslim users experience Safar -- seamlessly together. Both enter the shared Group Canvas. At prayer time, the app splits: Muslim routes to mosque, Non-Muslim gets cafe suggestions nearby. They regroup at a synchronized pin. No awkward pauses. No one waits. The trip never stalls.">
+    <div class="label">User Flow -- Muslim and Non-Muslim Paths</div>
+    <h2 class="h2" style="margin-bottom:14px;">One App. <span class="accent">Two Seamless Paths.</span></h2>
+    <div style="display:flex;gap:0;width:100%;max-width:920px;align-items:flex-start;">
+      <div class="flow-col">
+        <div class="flow-col-title" style="background:rgba(0,104,95,.12);color:var(--teal);">Muslim User Path</div>
+        <div class="flow-box teal">Join Group<br><span style="font-size:10px;color:var(--muted);">Set: Strictly Halal + Prayer ON</span></div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box teal">View Shared Itinerary<br><span style="font-size:10px;color:var(--muted);">Prayer Blocks auto-locked</span></div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box teal">Halal Meal Block<br><span style="font-size:10px;color:var(--muted);">Certified Halal spots only</span></div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box teal">Dhuhr Prayer<br><span style="font-size:10px;color:var(--muted);">Nearest mosque + wudu facility</span></div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box shared">Synchronized Regroup Pin<br><span style="font-size:10px;color:var(--muted);">Both paths converge here</span></div>
+      </div>
+      <div class="flow-divider"></div>
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;min-width:110px;padding:0 8px;">
+        <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;text-align:center;margin-bottom:4px;">Shared Canvas</div>
+        <div class="flow-box" style="font-size:10px;text-align:center;min-width:95px;">Admin Creates Trip</div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box" style="font-size:10px;text-align:center;min-width:95px;">Invite Link Sent</div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box" style="font-size:10px;text-align:center;min-width:95px;">Preference Setup Screen</div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box" style="font-size:10px;text-align:center;min-width:95px;">AI Generates Itinerary</div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box" style="font-size:10px;text-align:center;min-width:95px;border-color:rgba(0,104,95,.3);background:rgba(0,104,95,.06);">Conflict? AI Auto-Split</div>
+      </div>
+      <div class="flow-divider"></div>
+      <div class="flow-col">
+        <div class="flow-col-title" style="background:rgba(217,119,6,.1);color:var(--amber);">Non-Muslim User Path</div>
+        <div class="flow-box amber-box">Join Group<br><span style="font-size:10px;color:var(--muted);">Set: No restrictions + Local food</span></div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box amber-box">View Shared Itinerary<br><span style="font-size:10px;color:var(--muted);">Sees all activities + prayer blocks</span></div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box amber-box">Any Meal Options<br><span style="font-size:10px;color:var(--muted);">Local restaurants nearby</span></div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box amber-box">Auto-Suggested Cafe Break<br><span style="font-size:10px;color:var(--muted);">While Muslim friends pray</span></div>
+        <div class="flow-down">&#8595;</div>
+        <div class="flow-box shared">Synchronized Regroup Pin<br><span style="font-size:10px;color:var(--muted);">Both paths converge here</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S7 AHA MOMENT -->
+  <div class="slide" id="s7" data-phase="pitch"
+    data-note="[PITCH 2:40] What if you could paste a TikTok link and get a complete, Halal-verified, prayer-anchored group itinerary in 5 seconds? That's Safar's Social-to-Itinerary Engine. Paste the reel. AI reads audio, extracts locations, cross-checks Halal databases, fetches GPS-accurate prayer times, builds the full shared itinerary. Done.">
+    <div class="label">The Solution -- Safar</div>
+    <h2 class="h2" style="line-height:1.1;max-width:680px;">"Paste a TikTok.<br><span class="accent">Get a Halal Group Itinerary."</span></h2>
+    <p class="sub">One URL. Five seconds. A complete, prayer-anchored, Halal-verified trip plan for your whole group.</p>
+    <div class="aha-input">
+      <span class="url-icon">&#x25B6;</span>
+      <span class="url-text">https://tiktok.com/@halaltravelguide/video/... (Kyoto Halal Guide)</span>
+      <button class="paste-btn">Paste</button>
+    </div>
+    <button class="gen-btn">Generate Itinerary</button>
+    <div class="pill-row">
+      <div class="pill" style="background:rgba(0,104,95,.12);color:var(--teal);">Extracts places</div>
+      <div class="pill" style="background:rgba(0,104,95,.12);color:var(--teal);">3-tier Halal verified</div>
+      <div class="pill" style="background:rgba(0,104,95,.12);color:var(--teal);">Prayer anchored</div>
+      <div class="pill" style="background:rgba(0,104,95,.12);color:var(--teal);">Mixed-group ready</div>
+      <div class="pill" style="background:var(--amber-pale);color:var(--amber);">Doc vault cross-check</div>
+    </div>
+  </div>
+
+  <!-- S8 AI ENGINE CANVAS -->
+  <div class="slide" id="s8" data-phase="pitch"
+    data-note="[PITCH 2:50] The output is our Multiplayer Canvas. Prayer blocks are locked -- immovable. When Dhuhr hits, Muslims route to the mosque while Non-Muslims get a cafe suggestion simultaneously. Real-time conflict warnings fire when activities risk clashing with prayer windows. The whole group is live on the same canvas. No WhatsApp chaos.">
+    <div class="label">Core Feature -- Prayer-First AI Engine</div>
+    <div style="display:flex;gap:28px;width:100%;max-width:940px;align-items:flex-start;">
+      <div style="flex:1;">
+        <h3 class="h3" style="margin-bottom:14px;">Context-Aware<br><span class="accent">Prayer-First Planning</span></h3>
+        <div style="display:flex;flex-direction:column;gap:11px;">
+          <div style="display:flex;gap:11px;align-items:flex-start;">
+            <div class="icon-circle icon-teal">&#x1F54C;</div>
+            <div>
+              <div style="font-size:13px;font-weight:800;">Dynamic Prayer Anchoring</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px;">Dhuhr, Asr, Fajr locked as immovable blocks with musalla and wudu detection via GPS</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:11px;align-items:flex-start;">
+            <div class="icon-circle icon-teal">&#x1F4CD;</div>
+            <div>
+              <div style="font-size:13px;font-weight:800;">Live Geo-Fenced Halal Radar</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px;">3-tier: Certified Halal / Muslim-Owned / Pork-Free -- live wait times included</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:11px;align-items:flex-start;">
+            <div class="icon-circle icon-amber">&#x1F916;</div>
+            <div>
+              <div style="font-size:13px;font-weight:800;">AI Compromise &amp; Auto-Split Engine</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px;">Finds middle-ground venues OR splits itinerary with synchronized regroup pins</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:11px;align-items:flex-start;">
+            <div class="icon-circle" style="background:rgba(220,38,38,.1);">&#x26A0;</div>
+            <div>
+              <div style="font-size:13px;font-weight:800;">Real-Time Conflict Warnings</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px;">Alerts when activities risk clashing with prayer windows before it's too late</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;gap:7px;">
+        <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px;">Live Canvas -- Day 2, Kyoto</div>
+        <div class="timeline-item prayer">
+          <div class="time-badge">08:30</div>
+          <div>
+            <div class="item-title">Arashiyama Bamboo Grove</div>
+            <div class="item-loc">Ukyo Ward - 2h - Both groups together</div>
+          </div>
+        </div>
+        <div class="timeline-item prayer" style="border-color:rgba(0,104,95,.3);">
+          <div class="time-badge">12:48</div>
+          <div style="flex:1;">
+            <div class="item-title">Dhuhr Prayer (Muslim) + Cafe Break (Non-Muslim)</div>
+            <div class="item-loc">Kyoto Islamic Center + Nearby Cafe -- parallel auto-routing</div>
+          </div>
+          <div class="lock-icon">&#x1F512;</div>
+        </div>
+        <div class="timeline-item">
+          <div class="time-badge amber">13:45</div>
+          <div style="flex:1;">
+            <div class="item-title">Halal Wagyu Panga Gion</div>
+            <div class="item-loc">Higashiyama Ward - NAHA Certified</div>
+            <div class="badge" style="margin-top:4px;">Certified Halal (NAHA/JHA)</div>
+            <div class="warn-bar">Kitchen closes 2 PM -- only 15 min buffer remaining</div>
+          </div>
+        </div>
+        <div class="timeline-item prayer" style="border-color:rgba(0,104,95,.3);">
+          <div class="time-badge">15:57</div>
+          <div style="flex:1;">
+            <div class="item-title">Asr Prayer Window</div>
+            <div class="item-loc">Matsubara Rest Pavilion - 40m buffer</div>
+          </div>
+          <div class="lock-icon">&#x1F512;</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
+          <div class="collab-row">
+            <div class="av">A</div>
+            <div class="av amber">T</div>
+            <div class="av blue">F</div>
+            <div class="av purple">G</div>
+          </div>
+          <div style="font-size:11px;color:var(--teal);font-weight:700;" class="pulse">4 live - 2 Muslim / 2 Non-Muslim</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S9 EXTRA FEATURES -->
+  <div class="slide" id="s9" data-phase="pitch"
+    data-note="[PITCH 2:55] Three extra power features. Social-to-Itinerary: paste TikTok/Instagram/Xiaohongshu, AI extracts locations and runs Halal Radar on every spot. AI Document Cross-Check Vault: upload passports and flight tickets, AI catches expiry errors and BRN compliance before the airport. Emergency Fallback Engine: flight cancelled, AI self-heals the itinerary, finds Halal dining and prayer options on the new delay route.">
+    <div class="label">Extra Features -- 3 Power Tools</div>
+    <h2 class="h2" style="margin-bottom:16px;">Beyond the Basics. <span class="accent">Every Edge Case Covered.</span></h2>
+    <div class="grid-3" style="max-width:900px;">
+      <div class="pillar-card">
+        <div style="font-size:28px;">&#x1F4F2;</div>
+        <div class="pillar-title">Social-to-Itinerary Engine</div>
+        <div class="pillar-desc">Paste TikTok / Instagram / Xiaohongshu link. AI extracts locations, generates itinerary block, and instantly runs Halal Radar on every extracted spot.</div>
+        <div class="badge">Solves: Manual cross-referencing</div>
+      </div>
+      <div class="pillar-card">
+        <div style="font-size:28px;">&#x1F6E1;</div>
+        <div class="pillar-title">AI Document Cross-Check Vault</div>
+        <div class="pillar-desc">Upload passports, visas, flight tickets. AI sweeps for expiry dates, BRN numbers, accommodation gaps -- catching errors weeks before the airport.</div>
+        <div class="badge">Solves: Visa rejections and errors</div>
+      </div>
+      <div class="pillar-card">
+        <div style="font-size:28px;">&#x1F198;</div>
+        <div class="pillar-title">Emergency Fallback Engine</div>
+        <div class="pillar-desc">Flight cancelled? AI calculates blast radius, auto-shifts downstream bookings, finds new Halal dining + prayer facility pins along the delay route, recalculates group budget.</div>
+        <div class="badge">Solves: Trip disruption chaos</div>
+      </div>
+    </div>
+    <div class="stat-strip">
+      Halal Radar active across ALL features -- every function is Muslim-first by design
+    </div>
+  </div>
+
+  <!-- S10 MARKET -->
+  <div class="slide" id="s10" data-phase="pitch"
+    data-note="[PITCH 3:00] $230 billion market, growing fast. Launch market: Malaysia -- 29 million Muslims, highest outbound Muslim tourism per capita in Southeast Asia. Monetisation: freemium SaaS, B2B API for travel agencies, Halal restaurant affiliate commissions. [TRANSITION] Now -- let me hand over for the live 2-minute demo.">
+    <div class="label">Market Opportunity and Monetisation</div>
+    <h2 class="h2" style="margin-bottom:14px;">A <span class="accent">$230B</span> Market. Zero Native Solution.</h2>
+    <div class="grid-3" style="margin-bottom:14px;">
+      <div class="market-stat">
+        <div class="stat-big">$230B</div>
+        <div class="stat-label">Muslim Travel Market (2024)</div>
+      </div>
+      <div class="market-stat">
+        <div class="stat-big">230M</div>
+        <div class="stat-label">Muslim Tourists by 2026</div>
+      </div>
+      <div class="market-stat">
+        <div class="stat-big">10.5M</div>
+        <div class="stat-label">Hajj + Umrah pilgrims per year</div>
+      </div>
+    </div>
+    <div class="dest-grid" style="margin-bottom:12px;">
+      <div class="dest-card">
+        <div class="dest-flag">&#x1F1F8;&#x1F1E6;</div>
+        <div>Makkah and Madinah</div>
+        <div class="dest-saves">2.5M Hajj pilgrims</div>
+        <div class="badge" style="margin-top:5px;font-size:9px;">100% Halal Verified</div>
+      </div>
+      <div class="dest-card">
+        <div class="dest-flag">&#x1F1F9;&#x1F1F7;</div>
+        <div>Istanbul</div>
+        <div class="dest-saves">4.2M Muslim visitors</div>
+        <div class="badge" style="margin-top:5px;font-size:9px;">Top Muslim destination</div>
+      </div>
+      <div class="dest-card">
+        <div class="dest-flag">&#x1F1EF;&#x1F1F5;</div>
+        <div>Kyoto and Tokyo</div>
+        <div class="dest-saves">+400% Muslim tourists</div>
+        <div class="badge" style="margin-top:5px;font-size:9px;">Fastest growing segment</div>
+      </div>
+      <div class="dest-card">
+        <div class="dest-flag">&#x1F1F2;&#x1F1FE;</div>
+        <div>Malaysia Hub</div>
+        <div class="dest-saves">29M Muslims -- Launch Market</div>
+        <div class="badge" style="margin-top:5px;font-size:9px;">Highest SE Asia outbound</div>
+      </div>
+    </div>
+    <div class="stat-strip">
+      Monetisation: Freemium SaaS + B2B API for travel agencies + Halal restaurant affiliate commissions
+    </div>
+  </div>
+
+  <!-- S11 DEMO -->
+  <div class="slide" id="s11" data-phase="demo"
+    data-note="[DEMO 0:00] PLAY DEMO VIDEO NOW. Walk through: 1) Paste TikTok link -- watch AI extract Kyoto spots -- Halal Radar fires with 3-tier labels. 2) Show prayer blocks auto-inserting at Dhuhr -- mosque detection live. 3) Trigger group conflict -- AI Auto-Split -- show Muslim path + Non-Muslim cafe path + regroup pin on map. 4) Document Vault catches accommodation gap: hotel Oct 25, flight Oct 26, Sunday unbooked. KEY MESSAGE: This is a live working product -- not a mockup.">
+    <div class="label">DEMO -- Live App Walkthrough (2 min)</div>
+    <h2 class="h2" style="margin-bottom:10px;">Play <span class="accent">Demo Video</span> Now</h2>
+    <p class="sub">This is a live, working app -- not a mockup.</p>
+    <div style="margin-top:20px;display:flex;flex-direction:column;gap:10px;width:100%;max-width:700px;">
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;padding:14px 18px;display:flex;align-items:center;gap:14px;">
+        <span style="font-size:22px;">1&#xFE0F;&#x20E3;</span>
+        <div>
+          <div style="font-size:13px;font-weight:800;">Paste TikTok link -- Halal Radar fires</div>
+          <div style="font-size:11px;color:var(--muted);">Real-time location extraction + 3-tier Halal labeling (Certified / Muslim-Owned / Pork-Free)</div>
+        </div>
+        <div class="badge" style="margin-left:auto;white-space:nowrap;">Social-to-Itinerary</div>
+      </div>
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;padding:14px 18px;display:flex;align-items:center;gap:14px;">
+        <span style="font-size:22px;">2&#xFE0F;&#x20E3;</span>
+        <div>
+          <div style="font-size:13px;font-weight:800;">Prayer blocks auto-insert + mosque detected</div>
+          <div style="font-size:11px;color:var(--muted);">GPS prayer anchor -- Dhuhr locked at 12:48 -- nearest mosque + wudu facility pinned</div>
+        </div>
+        <div class="badge" style="margin-left:auto;white-space:nowrap;">Prayer Engine</div>
+      </div>
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;padding:14px 18px;display:flex;align-items:center;gap:14px;">
+        <span style="font-size:22px;">3&#xFE0F;&#x20E3;</span>
+        <div>
+          <div style="font-size:13px;font-weight:800;">Group conflict -- AI Auto-Split triggers</div>
+          <div style="font-size:11px;color:var(--muted);">Muslim path (mosque) + Non-Muslim path (cafe) + synchronized regroup pin on map</div>
+        </div>
+        <div class="badge" style="margin-left:auto;white-space:nowrap;">AI Compromise</div>
+      </div>
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;padding:14px 18px;display:flex;align-items:center;gap:14px;">
+        <span style="font-size:22px;">4&#xFE0F;&#x20E3;</span>
+        <div>
+          <div style="font-size:13px;font-weight:800;">Document Vault catches accommodation gap</div>
+          <div style="font-size:11px;color:var(--muted);">Hotel checkout Oct 25 -- Flight departs Oct 26 -- Sunday night unbooked -- Safar flags it</div>
+        </div>
+        <div class="badge" style="margin-left:auto;white-space:nowrap;">Doc Vault</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S12 CLOSE -->
+  <div class="slide" id="s12" data-phase="demo"
+    data-note="[DEMO 2:00] We built Safar with React, TypeScript, and Google Gemini AI. The AI engine, multiplayer sync, document vault -- all live right now. For 1.8 billion Muslims who travel with faith as their anchor, Safar is the OS that was always missing. We are Team Ds Gang. Thank you.">
+    <div class="close-logo float">&#x1F9ED;</div>
+    <div class="label">Thank You</div>
+    <h1 class="h1">Safar</h1>
+    <div class="teal-line"></div>
+    <div class="big-quote">"Faith first. Group first. Travel better."</div>
+    <p class="sub" style="margin-top:10px;">The travel OS for <strong style="color:var(--teal);">1.8 billion</strong> Muslim travelers -- CodeNection Hackathon 2026</p>
+    <div class="tech-chips">
+      <div class="tech-chip">React + TypeScript</div>
+      <div class="tech-chip">Google Gemini AI</div>
+      <div class="tech-chip">BroadcastChannel Sync</div>
+      <div class="tech-chip">AI Document Vault</div>
+      <div class="tech-chip">Prayer Time API</div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;padding:12px 22px;text-align:center;min-width:130px;">
+        <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">Demo</div>
+        <div style="font-size:13px;font-weight:800;color:var(--teal);">Live App</div>
+      </div>
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;padding:12px 22px;text-align:center;min-width:130px;">
+        <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">GitHub</div>
+        <div style="font-size:13px;font-weight:800;color:var(--teal);">Source Code</div>
+      </div>
+      <div style="background:var(--teal);border-radius:14px;padding:12px 22px;text-align:center;min-width:130px;">
+        <div style="font-size:10px;font-weight:800;color:rgba(255,255,255,.7);text-transform:uppercase;margin-bottom:3px;">Team</div>
+        <div style="font-size:13px;font-weight:800;color:white;">Ds Gang</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="nav">
+  <button class="nav-btn" id="btn-prev" onclick="prevSlide()">&#8249;</button>
+  <div id="dot-row" style="display:flex;gap:5px;"></div>
+  <span id="slide-counter">1 / 12</span>
+  <button class="nav-btn" id="btn-next" onclick="nextSlide()">&#8250;</button>
+</div>
+
+<script>
+  const slides    = Array.from(document.querySelectorAll('.slide'));
+  const noteTexts = slides.map(s => s.dataset.note || '');
+  const phases    = slides.map(s => s.dataset.phase || 'pitch');
+  let current = 0;
+  let timerInterval = null;
+  const PITCH_SECONDS = 180;
+  const DEMO_SECONDS  = 120;
+  let timerSeconds  = PITCH_SECONDS;
+  let timerRunning  = false;
+  let notesVisible  = false;
+
+  const dotRow = document.getElementById('dot-row');
+  slides.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'dot-nav' + (i === 0 ? ' on' : '');
+    d.onclick = () => goTo(i);
+    dotRow.appendChild(d);
+  });
+
+  function updatePhaseUI(idx) {
+    const phase = phases[idx];
+    const timerEl = document.getElementById('timer-display');
+    const phaseTag = document.getElementById('phase-tag');
+    const timerWrap = document.getElementById('timer-wrap');
+    if (phase === 'demo') {
+      timerWrap.firstChild.textContent = 'DEMO ';
+      phaseTag.textContent = 'min';
+      phaseTag.style.color = '#FCA5A5';
+      if (!timerRunning) { timerSeconds = DEMO_SECONDS; timerEl.textContent = '2:00'; }
+    } else {
+      timerWrap.firstChild.textContent = 'PITCH ';
+      phaseTag.textContent = 'min';
+      phaseTag.style.color = 'rgba(255,255,255,0.5)';
+      if (!timerRunning) { timerSeconds = PITCH_SECONDS; timerEl.textContent = '3:00'; }
+    }
+  }
+
+  function goTo(idx) {
+    if (idx < 0 || idx >= slides.length) return;
+    slides[current].classList.remove('active');
+    slides[current].classList.add('exit');
+    const old = current;
+    current = idx;
+    setTimeout(() => slides[old].classList.remove('exit'), 450);
+    slides[current].classList.add('active');
+    document.querySelectorAll('.dot-nav').forEach((d, i) => d.classList.toggle('on', i === current));
+    document.getElementById('slide-counter').textContent = (current + 1) + ' / ' + slides.length;
+    document.getElementById('btn-prev').disabled = current === 0;
+    document.getElementById('btn-next').disabled = current === slides.length - 1;
+    document.getElementById('progress').style.width = ((current + 1) / slides.length * 100) + '%';
+    document.getElementById('note-text').textContent = noteTexts[current] || 'No notes.';
+    updatePhaseUI(current);
+  }
+
+  function nextSlide() { goTo(current + 1); }
+  function prevSlide() { goTo(current - 1); }
+  function jumpToDemo() {
+    const idx = slides.findIndex(s => s.id === 's11');
+    if (idx >= 0) goTo(idx);
+  }
+
+  document.addEventListener('keydown', e => {
+    if (['ArrowRight','ArrowDown',' '].includes(e.key)) { e.preventDefault(); nextSlide(); }
+    if (['ArrowLeft','ArrowUp'].includes(e.key))         { e.preventDefault(); prevSlide(); }
+    if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+    if (e.key === 't' || e.key === 'T') toggleTimer();
+    if (e.key === 'n' || e.key === 'N') toggleNotes();
+    if (e.key === 'd' || e.key === 'D') jumpToDemo();
+  });
+
+  let touchX = 0;
+  document.addEventListener('touchstart', e => { touchX = e.touches[0].clientX; });
+  document.addEventListener('touchend',   e => {
+    const dx = e.changedTouches[0].clientX - touchX;
+    if (Math.abs(dx) > 55) dx < 0 ? nextSlide() : prevSlide();
+  });
+
+  function toggleTimer() {
+    const wrap = document.getElementById('timer-wrap');
+    if (timerRunning) {
+      clearInterval(timerInterval);
+      timerRunning = false;
+    } else {
+      if (timerSeconds <= 0) timerSeconds = phases[current] === 'demo' ? DEMO_SECONDS : PITCH_SECONDS;
+      timerRunning = true;
+      timerInterval = setInterval(() => {
+        timerSeconds--;
+        const m = Math.floor(Math.abs(timerSeconds) / 60);
+        const s = Math.abs(timerSeconds) % 60;
+        const sign = timerSeconds < 0 ? '-' : '';
+        document.getElementById('timer-display').textContent = sign + m + ':' + String(s).padStart(2, '0');
+        wrap.classList.toggle('warn', timerSeconds <= 30 && timerSeconds >= 0);
+        if (timerSeconds < 0) wrap.classList.add('warn');
+      }, 1000);
+    }
+  }
+
+  function toggleNotes() {
+    notesVisible = !notesVisible;
+    document.getElementById('notes-panel').classList.toggle('show', notesVisible);
+  }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+    else document.exitFullscreen && document.exitFullscreen();
+  }
+
+  goTo(0);
+</script>
+</body>
+</html>
+
