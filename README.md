@@ -1,4 +1,4 @@
-# 🌍 SalamSync
+# 🌍 Safar App
 > *By Ds gang (Chong Pohyi, Teoh Xi Xian, Tan Wei Feng)*  
 > **Problem Statement:** Travel Planner | 🎥 **[Video Presentation]** | 📊 **[Presentation Slides]**
 
@@ -102,7 +102,7 @@ Planning a trip as a Muslim traveler is exhausting because you have to **juggle 
 <a id="4-competitive-edge-what-makes-it-different"></a>
 ## ⚡ 4. Competitive Edge (What Makes It Different)
 
-While standard apps like Wanderlog handle basic collaborative planning, they treat religious and dietary requirements as optional preferences rather than strict constraints. **SalamSync** introduces a culturally aware AI that actively resolves group conflicts instead of just logging them.
+While standard apps like Wanderlog handle basic collaborative planning, they treat religious and dietary requirements as optional preferences rather than strict constraints. **Safar App** introduces a culturally aware AI that actively resolves group conflicts instead of just logging them.
 
 ### 🌟 Distinctive Twists
 
@@ -128,7 +128,7 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 
 ### 📊 Competitor Comparison Matrix
 
-| Feature | SalamSync (Ours) | Wanderlog | HalalTrip | Lambus | TripAdvisor (Trips) | Excel & WhatsApp |
+| Feature | Safar App (Ours) | Wanderlog | HalalTrip | Lambus | TripAdvisor (Trips) | Excel & WhatsApp |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Primary Use Case** | **Mixed/Muslim Groups** | Group Itinerary Builder | Static Muslim Directory | Group Expense & Travel | Venue Discovery & Saves | Manual Tracking |
 | 🗓️ **Collaborative Timeline** | ✅ **Yes** | ✅ Yes | ❌ No | ✅ Yes | ⚠️ View Only | ❌ No |
