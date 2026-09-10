@@ -61,25 +61,32 @@ Planning a trip as a Muslim traveler is exhausting because you have to **juggle 
 ---
 
 <a id="2-ideation--process"></a>
-## 2. Ideation & Process
+## 💡 2. Ideation & Process
 
 <a id="21-ideas-we-considered"></a>
-### 2.1 Ideas We Considered
-| Idea | Why it was dropped / kept |
+### 🧭 2.1 Ideas We Considered
+
+| Idea & Description | Why it was dropped / kept |
 | :--- | :--- |
-| **A (Chosen)** | *[Rationale]* |
-| **B (Chosen)** | *[Rationale]* |
-| **C** | *[Rationale]* |
+| 🌟 **Muslim Travel OS with Mixed-Group AI Engine (Chosen)**<br><br>*An itinerary planner anchored by local prayer times and Halal food radars, featuring an AI engine that actively resolves group conflicts.* | **Kept:**<br>• **Market Fit:** Fills a massive "last mile" gap standard apps ignore by providing dynamic prayer anchoring and live Halal geofencing.<br>• **Scalability:** By shifting to handle mixed-group edge cases, we drastically expanded our target audience to include diverse university and corporate travel groups.<br>• **UX Innovation:** Replaces binary voting with an AI Auto-Split and Compromise Engine, resolving conflicting dietary and cultural preferences without forcing anyone to sacrifice their travel goals. |
+| 🕌 **Strictly Muslim / DIY Umrah Planner**<br><br>*A travel planner built exclusively for Muslim-only groups, focusing entirely on Halal routing and religious obligations.* | **Dropped:**<br>• **Scope Limitation:** This was our initial concept, but mentor feedback revealed it was too narrow.<br>• **Real-World Friction:** It ignored the reality of modern, cross-cultural travel dynamics. By focusing exclusively on Muslims, the app completely failed to solve the friction of mixed groups trying to balance their differing needs on a shared itinerary. |
+| 👥 **General Family/Group Planner based on shared preferences**<br><br>*An app where group members input general travel preferences and the app builds an itinerary based on a majority vote.* | **Dropped:**<br>• **Market Saturation:** Existing giants like Wanderlog already execute collaborative preference planning flawlessly.<br>• **Failure on Core Needs:** These platforms treat religious obligations (strict prayer times, dietary laws) as optional "preferences."<br>• **Ineffective Resolution:** Relying on basic "majority rules" voting to handle strict requirements just triggers the same arguments found in manual WhatsApp planning. |
+| ✈️ **All-in-one Flight, Train, and Hotel AI Builder**<br><br>*A generic AI planner that aggregates all travel booking details and tickets into one automated timeline.* | **Dropped:**<br>• **Scope Creep:** The target audience was far too broad, which diluted the core value proposition.<br>• **Lack of Differentiation:** Building another generic aggregator forces us to compete with established online travel agencies without any unique cultural differentiator.<br>• **Misaligned Focus:** It solves pre-trip booking logistics rather than the actual on-the-ground itinerary pain points the user group faces. |
+| 💬 **Wanderboat: AI Travel Chat Companion**<br><br>*A conversational AI chatbot that suggests points of interest, signature dishes, and photo spots on the fly through a chat interface.* | **Dropped:**<br>• **UX Mismatch:** A chat interface is great for spontaneous discovery but highly inefficient for structured, multi-person group coordination.<br>• **Logistical Risks:** Muslim travel requires strict, non-negotiable logistical anchors. A conversational AI lacks the visual timeline visibility, document verification, and emergency re-routing required to keep a complex group trip on track. |
+
+---
 
 <a id="22-ideation-boards"></a>
 ### 2.2 Ideation Boards
 *[Drop your Figma/Miro links or embedded images here. E.g., User Flows, SCAMPER grids, Crazy Eights]*
 
 <a id="23-mentor-consultation"></a>
-### 2.3 Mentor Consultation
-| Date | Mentor | Feedback Received | Action Taken |
+### 👨‍🏫 2.3 Mentor Consultation
+
+| Date & Time | Mentor | Feedback Received | What Was Changed |
 | :--- | :--- | :--- | :--- |
-| *[MM/DD]* | *[Name]* | *[Notes]* | *[Pivot/Persevere decision]* |
+| **8 Sep 2026, 21:45 PM** | **Daniel Koh Yu Hang** | **1. Expanding Beyond Muslim-Only (Mixed-Group Edge Cases):**<br>During our pitch, our app was aimed strictly at Muslim travelers. The mentor challenged this narrow scope, pointing out that real-world travel often involves mixed groups (e.g., university friends or corporate trips). When we suggested using a "voting" feature to handle preference clashes, he pointed out a major flaw: a basic voting system does not resolve strict religious/dietary constraints and offers no real advantage over arguing in a WhatsApp group. | **The Pivot to the AI Compromise Engine:**<br>We pivoted our core value proposition. While keeping Halal features, we designed the app to handle mixed-group travel actively. We scrapped the basic voting idea and engineered the **AI Compromise & Auto-Split Engine**.<br><br>**System Impact:** Instead of forcing a "majority rules" compromise, the AI now actively calculates a middle-ground venue (e.g., suggesting a food district with both Halal and non-Halal stalls) or temporarily splits the itinerary, generating synchronized "regroup" pins on the map. This transforms the app from a simple planner into an active conflict-resolution tool. |
+| **8 Sep 2026, 21:45 PM** | **Daniel Koh Yu Hang** | **2. Missing UI Flow for Group Formation & Onboarding:**<br>The mentor noticed our UI prototype lacked a logical starting point. He specifically asked how a group is actually formed in the app and what exact data inputs are required from users before the trip is created. Because our initial flow skipped this, the mentor pointed out that the AI wouldn't have enough context to generate an accurate itinerary right from the start. | **Redesigning the Phase 1 Onboarding Architecture:**<br>We completely restructured the user journey by building a step-by-step "Onboarding & Group Sync" flow.<br><br>**System Impact:** We implemented a system where the "Admin" creates the trip skeleton (dates/destination) and sends an invite link. Crucially, before joining the canvas, each member now passes through a "Preference Setup" screen to lock in their specific constraints (e.g., strictly Halal, mobility limits, dietary allergies). This data is immediately fed into the AI, ensuring the initial itinerary generation respects everyone's constraints from step one, drastically reducing the need for manual re-routing later. |
 
 ---
 
@@ -93,10 +100,43 @@ Planning a trip as a Muslim traveler is exhausting because you have to **juggle 
 ---
 
 <a id="4-competitive-edge-what-makes-it-different"></a>
-## 4. Competitive Edge (What Makes It Different)
+## ⚡ 4. Competitive Edge (What Makes It Different)
 
-*   **[Feature]**: *[Why it's a game-changer compared to Wanderlog/HalalTrip]*
-*   **[Feature]**: *[The original twist]*
+While standard apps like Wanderlog handle basic collaborative planning, they treat religious and dietary requirements as optional preferences rather than strict constraints. **SalamSync** introduces a culturally aware AI that actively resolves group conflicts instead of just logging them.
+
+### 🌟 Distinctive Twists
+
+* ⏱️ **1. Dynamic Prayer-Anchored Timeline**  
+  >Instead of just giving static prayer notifications, it uses live GPS to automatically insert prayer and wudu-friendly facility blocks into the schedule while simultaneously assigning nearby activities for non-Muslim companions so group travel never stalls.
+
+* 🤖 **2. AI Compromise & Auto-Split Engine**  
+  >Instead of using basic "majority rules" voting where someone always loses, the AI arbitrates disputes by either finding common-ground venues or creating temporary, synchronized split routes that regroup seamlessly.
+
+* 📍 **3. Live Geo-Fenced Halal Radar**  
+  >Rather than relying on generic directories, it drops dynamic meal blocks based on current coordinates with a transparent 3-tier safety tag (*Certified Halal*, *Muslim-Owned*, *Pork-Free*) alongside live wait times.
+
+* 📲 **4. Social-to-Itinerary Engine**  
+  >Instead of manually copying spots from social media, users drop TikTok or Instagram links to auto-generate itinerary blocks that are instantly pre-screened through the Halal Radar.
+
+* 🛡️ **5. AI Document Cross-Check Vault**  
+  >Moving beyond passive cloud storage, it proactively cross-checks uploaded passport metadata and visa validity rules against flight dates to prevent airport check-in rejections weeks in advance.
+
+* 🔄 **6. Emergency Fallback Engine**  
+  >When a transit delay or cancellation hits, the app doesn't just display flight alerts; it runs a "self-healing" protocol that recalculates delay impact, auto-shifts downstream bookings, and updates prayer/dining checkpoints.
+
+---
+
+### 📊 Competitor Comparison Matrix
+
+| Feature | SalamSync (Ours) | Wanderlog | HalalTrip | Lambus | TripAdvisor (Trips) | Excel & WhatsApp |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Primary Use Case** | **Mixed/Muslim Groups** | Group Itinerary Builder | Static Muslim Directory | Group Expense & Travel | Venue Discovery & Saves | Manual Tracking |
+| 🗓️ **Collaborative Timeline** | ✅ **Yes** | ✅ Yes | ❌ No | ✅ Yes | ⚠️ View Only | ❌ No |
+| 🌙 **Live Geo-Fenced Halal Radar** | ✅ **Yes** | ❌ No | ⚠️ Static Only | ❌ No | ⚠️ Filters Only | ❌ No |
+| 🕌 **Auto-Syncs Prayers to Map** | ✅ **Yes** | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No |
+| ⚖️ **AI Conflict Resolution (Auto-Split)**| ✅ **Yes** | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No |
+| 🚨 **Emergency Fallback Re-Routing** | ✅ **Yes** | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No |
+| 🗂️ **Group Document Vault & Checks** | ✅ **Yes** | ⚠️ Manual | ❌ No | ✅ Yes | ❌ No | ⚠️ Unsecure |
 
 ---
 
