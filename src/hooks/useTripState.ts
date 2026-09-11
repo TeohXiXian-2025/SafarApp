@@ -6,6 +6,8 @@ import {
   MapLayer,
   ItineraryStop,
   ItineraryDay,
+  DEFAULT_PRAYER_SETTINGS,
+  PrayerSettings,
 } from '../types/itinerary';
 
 // =====================================================
@@ -23,6 +25,7 @@ export const INITIAL_TRIP_STATE: TripState = {
   activeMapLayer: 'all',
   navRailCollapsed: false,
   aiAssistantOpen: false,
+  prayerSettings: DEFAULT_PRAYER_SETTINGS,
   members: [
     {
       id: 'amina',
@@ -1044,6 +1047,26 @@ export function tripReducer(state: TripState, action: TripAction): TripState {
     }
     case 'TOGGLE_AI_ASSISTANT':
       return { ...state, aiAssistantOpen: !state.aiAssistantOpen };
+    case 'INSERT_PRAYER_BREAK': {
+      const days = state.days.map((d) => {
+        if (d.id !== action.dayId) return d;
+        const afterIndex = d.stops.findIndex((s) => s.id === action.afterStopId);
+        if (afterIndex === -1) return { ...d, stops: [...d.stops, action.prayerStop] };
+        const newStops = [...d.stops];
+        newStops.splice(afterIndex + 1, 0, action.prayerStop);
+        // Re-index orderIndex
+        return { ...d, stops: newStops.map((s, i) => ({ ...s, orderIndex: i })) };
+      });
+      return { ...state, days };
+    }
+    case 'UPDATE_PRAYER_SETTINGS':
+      return {
+        ...state,
+        prayerSettings: { ...state.prayerSettings, ...action.settings },
+      };
+    case 'DISMISS_PRAYER_CONFLICT':
+      // Handled at component level via local state
+      return state;
     default:
       return state;
   }

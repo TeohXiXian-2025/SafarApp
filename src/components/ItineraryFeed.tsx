@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
   MapPin,
   Clock,
@@ -19,6 +19,7 @@ import {
   Calendar,
   Layers,
   Filter,
+  Settings2,
 } from 'lucide-react';
 import {
   ItineraryStop,
@@ -27,8 +28,24 @@ import {
   StopCategory,
   StopStatus,
   TripState,
+  SalahTime,
+  PrayerConflict,
+  PrayerPlaceResult,
+  PrayerSettings,
+  DEFAULT_PRAYER_SETTINGS,
 } from '../types/itinerary';
-import { fetchKyotoPrayerTimes, KyotoPrayerData } from '../services/prayerTimeService';
+import {
+  fetchPrayerTimesForCity,
+  PrayerData,
+  timeToMinutes,
+  formatTo12Hour,
+} from '../services/prayerTimeService';
+import {
+  detectPrayerConflicts,
+  getItineraryHealth,
+  getNearbyPrayerPlaces,
+} from '../services/prayerConflictEngine';
+import { PrayerTimelineMarker } from './PrayerTimelineMarker';
 
 // ─────────────────────────────────────────────────────
 // Category Icons & Badges
@@ -298,7 +315,7 @@ function StopCard({
 }
 
 // ─────────────────────────────────────────────────────
-// Overview Mode Component (Format matching screenshot)
+// Overview Mode Component
 // ─────────────────────────────────────────────────────
 function OverviewFeed({
   days,
@@ -322,7 +339,7 @@ function OverviewFeed({
         </span>
       </div>
 
-      {/* Day Overview Cards matching reference screenshot */}
+      {/* Day Overview Cards */}
       <div className="space-y-3">
         {days.map((day) => {
           const dayColor =
@@ -341,7 +358,6 @@ function OverviewFeed({
 
               <div className="flex items-center justify-between gap-3 mb-2">
                 <div className="flex items-center gap-2 flex-wrap">
-                  {/* Date Pill (like 09.01 周二 in screenshot) */}
                   <span
                     className="text-xs font-black text-white px-2.5 py-1 rounded-full shadow-sm"
                     style={{ backgroundColor: dayColor }}
@@ -358,7 +374,6 @@ function OverviewFeed({
                   )}
                 </div>
 
-                {/* Distance Badge (like 09.02 周三 22km in screenshot) */}
                 {day.distanceMiles && (
                   <span
                     className="text-xs font-black px-2.5 py-1 rounded-full text-white shadow-sm shrink-0"
@@ -370,7 +385,7 @@ function OverviewFeed({
                 )}
               </div>
 
-              {/* Route Summary Chain (e.g. 清水寺 → 二年坂 → 高台寺 → 鸭川) */}
+              {/* Route Summary Chain */}
               <div className="text-xs font-bold text-[#526360] flex items-center gap-1.5 flex-wrap py-1">
                 {day.routeSummary ? (
                   day.routeSummary
@@ -404,7 +419,7 @@ function OverviewFeed({
           );
         })}
 
-        {/* Empty / Future Day Placeholder card (like 09.03 暂无行程安排 in screenshot) */}
+        {/* Empty / Future Day Placeholder */}
         <div className="p-4 rounded-2xl border border-dashed border-[#C4BCB3] bg-[#FAF8F5] opacity-75">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-black text-white bg-[#8B5CF6]/60 px-2.5 py-0.5 rounded-full">
@@ -422,6 +437,54 @@ function OverviewFeed({
 }
 
 // ─────────────────────────────────────────────────────
+// Prayer Strip — Compact day header prayer timeline
+// ─────────────────────────────────────────────────────
+function PrayerStrip({
+  prayerData,
+  conflicts,
+  city,
+}: {
+  prayerData: PrayerData | null;
+  conflicts: PrayerConflict[];
+  city: string;
+}) {
+  if (!prayerData) return null;
+
+  const conflictPrayers = new Set(conflicts.map((c) => c.prayerName));
+
+  return (
+    <div className="flex items-center gap-1 px-4 py-1.5 bg-gradient-to-r from-teal-50/60 to-transparent overflow-x-auto">
+      <span className="text-xs shrink-0">🕌</span>
+      <span className="text-[10px] font-extrabold text-[#0D6955] shrink-0 mr-1">
+        {city}
+      </span>
+      {prayerData.fiveDailySalah.map((salah, idx) => (
+        <React.Fragment key={salah.name}>
+          {idx > 0 && <span className="text-[10px] text-[#C4BCB3] shrink-0">·</span>}
+          <span
+            className={`text-[10px] font-bold shrink-0 flex items-center gap-0.5 ${
+              salah.isPassed
+                ? 'text-[#8A9592]'
+                : conflictPrayers.has(salah.name)
+                ? 'text-amber-700'
+                : salah.isNext
+                ? 'text-[#0D6955] font-extrabold'
+                : 'text-[#526360]'
+            }`}
+          >
+            {salah.isPassed ? '✓' : conflictPrayers.has(salah.name) ? '⚠' : salah.isNext ? '🕌' : ''}
+            {' '}{salah.name} {salah.formattedTime12 || salah.time}
+          </span>
+        </React.Fragment>
+      ))}
+      <span className="text-[9px] text-[#8A9592] font-medium shrink-0 ml-1">
+        ({prayerData.isLive ? 'Live' : 'Cached'})
+      </span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────
 // Main: ItineraryFeed
 // ─────────────────────────────────────────────────────
 interface ItineraryFeedProps {
@@ -434,6 +497,7 @@ interface ItineraryFeedProps {
   onAddStop?: (dayId: string, placeName: string) => void;
   collaboratorsCount?: number;
   isLead?: boolean;
+  onInsertPrayerBreak?: (dayId: string, afterStopId: string, prayerStop: ItineraryStop) => void;
 }
 
 export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
@@ -446,14 +510,19 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
   onAddStop,
   collaboratorsCount = 4,
   isLead = true,
+  onInsertPrayerBreak,
 }) => {
   const feedRef = useRef<HTMLDivElement>(null);
   const [filterCategory, setFilterCategory] = useState<string>('all');
-  const [prayerData, setPrayerData] = useState<KyotoPrayerData | null>(null);
+  const [prayerData, setPrayerData] = useState<PrayerData | null>(null);
+  const [dismissedConflicts, setDismissedConflicts] = useState<Set<string>>(new Set());
 
+  // Fetch prayer times based on active day's city (location-aware)
   useEffect(() => {
-    fetchKyotoPrayerTimes().then(setPrayerData);
-  }, []);
+    if (activeDay) {
+      fetchPrayerTimesForCity(activeDay.city, activeDay.date).then(setPrayerData);
+    }
+  }, [activeDay?.city, activeDay?.date]);
 
   // Scroll to selected stop card
   useEffect(() => {
@@ -462,6 +531,84 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
       el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [state.selectedStopId]);
+
+  // Detect prayer conflicts for the active day
+  const conflicts = useMemo(() => {
+    if (!activeDay || !prayerData) return [];
+    const salahTimes: SalahTime[] = prayerData.fiveDailySalah.map((s) => ({
+      name: s.name,
+      time: s.formattedTime12 || s.time,
+      isPassed: s.isPassed,
+      isNext: s.isNext,
+    }));
+    return detectPrayerConflicts(
+      activeStops,
+      salahTimes,
+      activeDay.city,
+      state.prayerSettings,
+    );
+  }, [activeDay, prayerData, activeStops, state.prayerSettings]);
+
+  // Itinerary health
+  const health = useMemo(() => getItineraryHealth(conflicts), [conflicts]);
+
+  // Build prayer timeline markers to insert between stops
+  const prayerMarkers = useMemo(() => {
+    if (!prayerData || !activeDay) return [];
+    return prayerData.fiveDailySalah.map((salah) => ({
+      salah: {
+        name: salah.name,
+        time: salah.formattedTime12 || salah.time,
+        isPassed: salah.isPassed,
+        isNext: salah.isNext,
+      } as SalahTime,
+      timeMinutes: timeToMinutes(salah.time),
+      conflict: conflicts.find(
+        (c) =>
+          c.prayerName === salah.name &&
+          !dismissedConflicts.has(`${c.stopId}-${c.prayerName}`)
+      ),
+    }));
+  }, [prayerData, activeDay, conflicts, dismissedConflicts]);
+
+  // Handle "Add Prayer Break" action
+  const handleAddPrayerBreak = (conflict: PrayerConflict, place: PrayerPlaceResult) => {
+    if (!activeDay || !onInsertPrayerBreak) return;
+
+    const prayerStop: ItineraryStop = {
+      id: `prayer-break-${conflict.prayerName.toLowerCase()}-${Date.now()}`,
+      dayId: activeDay.id,
+      orderIndex: 0,
+      title: `${conflict.prayerName} Prayer — ${place.name}`,
+      description: `${conflict.prayerName} prayer break at ${place.name}. ${place.hasWudu ? 'Wudu facilities available.' : ''}`,
+      address: place.name,
+      coordinate: place.coordinate,
+      timeWindow: {
+        start: conflict.prayerTimeStr,
+        end: formatTo12Hour(
+          `${Math.floor((conflict.prayerTimeMinutes + state.prayerSettings.prayerDurationMinutes) / 60)}:${((conflict.prayerTimeMinutes + state.prayerSettings.prayerDurationMinutes) % 60).toString().padStart(2, '0')}`
+        ),
+      },
+      durationMinutes: state.prayerSettings.prayerDurationMinutes,
+      category: 'PRAYER',
+      status: 'CONFIRMED',
+      halalTier: 'certified',
+      halalBadge: place.hasWudu ? 'Wudu Available' : 'Prayer Space',
+      tags: [conflict.prayerName, 'Prayer Break', 'Auto-Added'],
+      transitToNext: {
+        mode: 'WALK',
+        distanceMeters: place.walkMinutes * 80, // rough estimate
+        durationMinutes: place.walkMinutes,
+      },
+    };
+
+    onInsertPrayerBreak(activeDay.id, conflict.stopId, prayerStop);
+  };
+
+  // Handle dismiss conflict
+  const handleDismissConflict = (conflict: PrayerConflict) => {
+    setDismissedConflicts((prev) => new Set(prev).add(`${conflict.stopId}-${conflict.prayerName}`));
+  };
 
   // If in overview mode, render OverviewFeed
   if (state.activeDayId === 'overview') {
@@ -502,6 +649,20 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
     return true;
   });
 
+  // ─── Determine where to insert prayer timeline markers ───
+  // Insert a marker between stops when a prayer time falls between two consecutive stops
+  function getStopEndMinutes(stop: ItineraryStop): number {
+    if (stop.timeWindow?.end) return timeToMinutes(stop.timeWindow.end);
+    if (stop.timeWindow?.start && stop.durationMinutes) {
+      return timeToMinutes(stop.timeWindow.start) + stop.durationMinutes;
+    }
+    return timeToMinutes(stop.timeWindow?.start || '00:00');
+  }
+
+  function getStopStartMinutes(stop: ItineraryStop): number {
+    return timeToMinutes(stop.timeWindow?.start || '00:00');
+  }
+
   return (
     <div
       ref={feedRef}
@@ -509,7 +670,7 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
       style={{ minWidth: 0 }}
     >
       <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
-        {/* ── Top Navigation Tabs (like 总览, 09.01, 09.02 in screenshot) ── */}
+        {/* ── Top Navigation Tabs ── */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-[#E7DFD5]">
           <button
             type="button"
@@ -582,7 +743,7 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
               </div>
             </div>
 
-            {/* Members + City info */}
+            {/* Members + City info + Health */}
             <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/20">
               <div className="flex -space-x-2">
                 {state.members.slice(0, 4).map((m) => (
@@ -601,49 +762,28 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
               <span className="ml-auto text-xs font-bold bg-white/20 px-2.5 py-0.5 rounded-full">
                 {activeStops.length} stops planned
               </span>
+              {/* Itinerary Health Pill */}
+              <span
+                className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                  health.prayerConflicts === 0
+                    ? 'bg-emerald-400/30 text-emerald-100'
+                    : 'bg-amber-400/30 text-amber-100'
+                }`}
+              >
+                {health.prayerConflicts === 0 ? '✓' : '⚠'} {health.label}
+              </span>
             </div>
           </div>
 
-          {/* ── 5 Daily Solat Time Zone Bar ── */}
-          <div className="bg-gradient-to-r from-teal-50/90 via-emerald-50/50 to-white px-4 py-2.5 border-b border-[#E7DFD5]">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm">🕌</span>
-                <span className="text-xs font-extrabold text-[#0D6955]">
-                  {activeDay.city === 'Kyoto' ? 'Kyoto' : 'Tokyo/Kyoto'} 5 Daily Solat Times
-                </span>
-                <span className="text-[10px] text-[#8A9592]">(Aladhan API Sync)</span>
-              </div>
-              <div className="flex items-center gap-2 text-[10px] font-bold text-teal-800">
-                <span>🧭 Qibla: 287° WNW</span>
-                <span>·</span>
-                <span>Asia/Tokyo</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-5 gap-1.5 text-center">
-              {[
-                { name: 'Fajr', time: '04:10 AM' },
-                { name: 'Dhuhr', time: '11:54 AM' },
-                { name: 'Asr', time: '03:28 PM' },
-                { name: 'Maghrib', time: '06:10 PM' },
-                { name: 'Isha', time: '07:31 PM' },
-              ].map((salah) => (
-                <div
-                  key={salah.name}
-                  className="p-1.5 rounded-xl bg-white border border-teal-100 shadow-xs"
-                >
-                  <div className="text-[10px] font-bold text-[#526360]">{salah.name}</div>
-                  <div className="text-[11px] font-mono font-black text-[#0D6955]">
-                    {salah.time}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* ── Compact Prayer Strip (replaces large solat card) ── */}
+          <PrayerStrip
+            prayerData={prayerData}
+            conflicts={conflicts}
+            city={activeDay.city}
+          />
 
           {/* Quick Filters */}
-          <div className="px-4 py-2 flex items-center gap-2 overflow-x-auto text-xs">
+          <div className="px-4 py-2 flex items-center gap-2 overflow-x-auto text-xs border-t border-[#E7DFD5]">
             <span className="text-[#8A9592] font-semibold flex items-center gap-1 shrink-0">
               <Filter className="w-3 h-3" /> Filter:
             </span>
@@ -678,25 +818,63 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
           </div>
         </div>
 
-        {/* ── Stops List ── */}
+        {/* ── Stops List with Inline Prayer Markers ── */}
         <div className="space-y-1">
-          {filteredStops.map((stop, i) => (
-            <React.Fragment key={stop.id}>
-              <StopCard
-                stop={stop}
-                index={i}
-                isSelected={state.selectedStopId === stop.id}
-                isHovered={state.hoveredStopId === stop.id}
-                isLead={isLead}
-                dayColor={dayColor}
-                onSelect={onSelectStop}
-                onHover={onHoverStop}
-              />
-              {stop.transitToNext && i < filteredStops.length - 1 && (
-                <TransitSeparator transit={stop.transitToNext} />
-              )}
-            </React.Fragment>
-          ))}
+          {filteredStops.map((stop, i) => {
+            // Determine which prayer markers should appear BEFORE this stop
+            const stopStartMin = getStopStartMinutes(stop);
+            const prevStopEndMin = i > 0 ? getStopEndMinutes(filteredStops[i - 1]) : 0;
+
+            // Find prayers that fall between previous stop's end and this stop's start
+            const markersBeforeThisStop = prayerMarkers.filter((pm) => {
+              // Only show markers between stops (not inside prayer stops themselves)
+              if (stop.category === 'PRAYER') return false;
+              return pm.timeMinutes > prevStopEndMin && pm.timeMinutes <= stopStartMin;
+            });
+
+            return (
+              <React.Fragment key={stop.id}>
+                {/* Prayer timeline markers that fall before this stop */}
+                {markersBeforeThisStop.map((pm) => (
+                  <PrayerTimelineMarker
+                    key={`prayer-marker-${pm.salah.name}`}
+                    salah={pm.salah}
+                    conflict={pm.conflict}
+                    onAddPrayerBreak={handleAddPrayerBreak}
+                    onIgnoreConflict={handleDismissConflict}
+                  />
+                ))}
+
+                <StopCard
+                  stop={stop}
+                  index={i}
+                  isSelected={state.selectedStopId === stop.id}
+                  isHovered={state.hoveredStopId === stop.id}
+                  isLead={isLead}
+                  dayColor={dayColor}
+                  onSelect={onSelectStop}
+                  onHover={onHoverStop}
+                />
+                {stop.transitToNext && i < filteredStops.length - 1 && (
+                  <TransitSeparator transit={stop.transitToNext} />
+                )}
+              </React.Fragment>
+            );
+          })}
+
+          {/* Prayer markers that come after the last stop */}
+          {filteredStops.length > 0 &&
+            prayerMarkers
+              .filter((pm) => pm.timeMinutes > getStopEndMinutes(filteredStops[filteredStops.length - 1]))
+              .map((pm) => (
+                <PrayerTimelineMarker
+                  key={`prayer-marker-end-${pm.salah.name}`}
+                  salah={pm.salah}
+                  conflict={pm.conflict}
+                  onAddPrayerBreak={handleAddPrayerBreak}
+                  onIgnoreConflict={handleDismissConflict}
+                />
+              ))}
         </div>
 
         <div className="h-8" />

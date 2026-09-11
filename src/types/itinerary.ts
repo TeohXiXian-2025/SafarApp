@@ -56,6 +56,50 @@ export interface SalahTime {
   isNext?: boolean;
 }
 
+// ─── Prayer Intelligence Types ─────────────────────────
+
+export interface PrayerPlaceResult {
+  id: string;
+  name: string;
+  distance: string;       // "0.6 km"
+  walkMinutes: number;    // 8
+  coordinate: GeoCoordinate;
+  type: 'mosque' | 'musalla' | 'quiet_space';
+  hasWudu?: boolean;
+  openingHours?: string;
+}
+
+export type PrayerConflictSeverity = 'ok' | 'tight' | 'overlap';
+
+export interface PrayerConflict {
+  stopId: string;
+  stopTitle: string;
+  prayerName: 'Fajr' | 'Dhuhr' | 'Asr' | 'Maghrib' | 'Isha';
+  prayerTimeStr: string;      // "15:28"
+  prayerTimeMinutes: number;  // 928
+  activityStartMin: number;
+  activityEndMin: number;
+  overlapMinutes: number;
+  severity: PrayerConflictSeverity;
+  travelToNearest?: number;   // minutes to walk to nearest prayer place
+  nearbyPrayerPlaces?: PrayerPlaceResult[];
+  suggestion?: string;        // AI-generated suggestion text
+}
+
+export interface PrayerSettings {
+  bufferMinutes: number;         // default 10
+  showMarkers: boolean;          // default true
+  prayerDurationMinutes: number; // default 20
+}
+
+export const DEFAULT_PRAYER_SETTINGS: PrayerSettings = {
+  bufferMinutes: 10,
+  showMarkers: true,
+  prayerDurationMinutes: 20,
+};
+
+// ─── Day & Trip State ──────────────────────────────────
+
 export interface ItineraryDay {
   id: string;
   dayNumber: number;
@@ -115,6 +159,7 @@ export interface TripState {
     zoom: number;
   };
   navRailCollapsed: boolean;
+  prayerSettings: PrayerSettings;
 }
 
 // Action types for the useTripState hook dispatcher
@@ -129,4 +174,7 @@ export type TripAction =
   | { type: 'REORDER_STOPS'; dayId: string; stops: ItineraryStop[] }
   | { type: 'UPDATE_STOP'; dayId: string; stop: ItineraryStop }
   | { type: 'REMOVE_STOP'; dayId: string; stopId: string }
-  | { type: 'TOGGLE_AI_ASSISTANT' };
+  | { type: 'TOGGLE_AI_ASSISTANT' }
+  | { type: 'INSERT_PRAYER_BREAK'; dayId: string; afterStopId: string; prayerStop: ItineraryStop }
+  | { type: 'UPDATE_PRAYER_SETTINGS'; settings: Partial<PrayerSettings> }
+  | { type: 'DISMISS_PRAYER_CONFLICT'; stopId: string; prayerName: string };

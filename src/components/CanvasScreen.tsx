@@ -454,6 +454,11 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
           }}
           collaboratorsCount={collaborators.length}
           isLead={isTeamLead}
+          onInsertPrayerBreak={(dayId, afterStopId, prayerStop) => {
+            tripState.dispatch({ type: 'INSERT_PRAYER_BREAK', dayId, afterStopId, prayerStop });
+            setNotificationToast(`🕌 Prayer break added: ${prayerStop.title}`);
+            setTimeout(() => setNotificationToast(null), 3500);
+          }}
         />
 
         {/* ── Pane 3: Google Map ── */}
