@@ -971,47 +971,6 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
           </div>
         </div>
 
-        {/* ───────────────────────────────────────────────────────────── */}
-        {/* Tourist Attraction Point Quick-Finder Bar (Top Horizon Strip) */}
-        {/* ───────────────────────────────────────────────────────────── */}
-        {mapMode === 'google' && (
-          <div className="absolute top-15 left-3 right-3 z-10 pointer-events-none flex items-center gap-1.5 overflow-x-auto py-1">
-            <div className="pointer-events-auto bg-white/95 backdrop-blur-md border border-[#E7DFD5] shadow-md rounded-2xl px-2.5 py-1 flex items-center gap-1.5 shrink-0">
-              <span className="text-[10px] font-black uppercase text-[#0D6955] flex items-center gap-1">
-                <Sparkles className="w-3 h-3" /> Attractions ({displayItems.length}):
-              </span>
-              {displayItems.map((item) => {
-                const isSelected = selectedDiscoveryItem?.id === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleDiscoveryCardClick(item)}
-                    className={`px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0 transition-all cursor-pointer flex items-center gap-1 ${
-                      isSelected
-                        ? 'bg-[#0D6955] text-white shadow-xs scale-105'
-                        : 'bg-[#FAF8F5] text-[#161C23] hover:bg-emerald-50 hover:text-[#0D6955] border border-[#E7DFD5]'
-                    }`}
-                    title={`Fly to ${item.title}`}
-                  >
-                    <span>{item.icon}</span>
-                    <span className="truncate max-w-[90px]">{item.title.split('—')[0].split(' ')[0]}</span>
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => setFitTrigger((prev) => prev + 1)}
-                className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-[#161C23] text-white hover:bg-black shrink-0 cursor-pointer shadow-xs flex items-center gap-1 ml-1"
-                title="Fit and show all tourist attractions in view"
-              >
-                <LocateFixed className="w-3 h-3 text-emerald-400" />
-                <span>Fit All</span>
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Floating Zoom & Layer Controls directly on Right Edge of Map */}
         {mapMode === 'google' && (
           <div

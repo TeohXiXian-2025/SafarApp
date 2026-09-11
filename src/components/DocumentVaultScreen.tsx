@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  Wifi,
+  Train,
+  AlertOctagon,
+  ExternalLink,
+  MapPin as MapPinIcon,
+} from 'lucide-react';
+import {
   ShieldCheck,
   FileText,
   Upload,
@@ -68,6 +75,54 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
 
   // Drag and drop states
   const [dragActiveCategory, setDragActiveCategory] = useState<DocumentCategory | null>(null);
+
+  // ─── Live Transit Dashboard State ───────────────────────────────
+  type FlightStatus = 'active' | 'delayed';
+  interface FlightData {
+    flight: string;
+    origin: string;
+    dest: string;
+    status: FlightStatus;
+    scheduled_dep: string;
+    estimated_dep: string;
+  }
+  interface TrainData {
+    line: string;
+    status: 'on-time' | 'delayed';
+    next_departure: string;
+  }
+
+  // 1. State Management & API Structure
+  const [flightData, setFlightData] = useState<FlightData | null>(null);
+  const [trainData, setTrainData] = useState<TrainData | null>(null);
+  const [showPivotModal, setShowPivotModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasUploaded, setHasUploaded] = useState(true);
+  const [flightStatus, setFlightStatus] = useState<'on-time' | 'delayed'>('on-time');
+  const [pivotAccepted, setPivotAccepted] = useState(false);
+
+  // 2. The Live API Simulation (useEffect hook)
+  useEffect(() => {
+    // Architecture Intent: fetch('https://api.aviationstack.com/v1/flights?access_key=YOUR_KEY&flight_iata=MH70')
+    const timer = setTimeout(() => {
+      setFlightData({
+        flight: 'MH70',
+        origin: 'KUL',
+        dest: 'NRT',
+        status: 'active',
+        scheduled_dep: '16:00',
+        estimated_dep: '16:00',
+      });
+      // Architecture Intent: fetch('https://navitime-transit.p.rapidapi.com/route_simple')
+      setTrainData({
+        line: 'Skyliner Express',
+        status: 'on-time',
+        next_departure: '16:45',
+      });
+      setIsLoading(false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Handle custom dummy file upload
   const handleFileUpload = (category: DocumentCategory, file: File) => {
@@ -254,16 +309,16 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
         </div>
       </div>
 
-      {/* THREE FILE INPUT FIELDS (Passport, Flights, Hotels) */}
+      {/* 2. Top Section: The Upload Vault */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-base md:text-lg font-bold text-[#161C23] flex items-center gap-2">
               <Upload className="w-4 h-4 text-[#00685F]" />
-              <span>Upload Travel Documents</span>
+              <span>The Upload Vault</span>
             </h2>
             <p className="text-xs text-[#6D7A77]">
-              Provide dummy PDFs or photos to test date extraction and hotel-flight cross-referencing.
+              Drag and drop your travel confirmation PDFs, booking receipts, and visa documents.
             </p>
           </div>
 
@@ -276,6 +331,42 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
             <span>Load All 3 Sample Docs</span>
           </button>
         </div>
+
+        {/* Clean dashed-border upload box */}
+        <div
+          onClick={() => flightsInputRef.current?.click()}
+          className="border-2 border-dashed border-[#B2D8D2] hover:border-[#00685F] bg-[#F7FAF9] hover:bg-[#F0F7F5] rounded-3xl p-8 text-center transition-all cursor-pointer group shadow-xs mb-4"
+        >
+          <div className="w-12 h-12 rounded-2xl bg-white border border-[#B2D8D2] shadow-xs flex items-center justify-center mx-auto mb-3 group-hover:scale-105 transition-transform">
+            <span className="text-2xl">📄</span>
+          </div>
+          <h3 className="text-sm md:text-base font-bold text-[#161C23]">
+            📄 Drag &amp; Drop Flight PDFs, Hotel Confirmations, and Visas
+          </h3>
+          <p className="text-xs text-[#6D7A77] mt-1">
+            or click to browse from device (PDF, PNG, JPG supported · up to 25MB)
+          </p>
+        </div>
+
+        {/* 3 Extracted Document Chips (Green background, Check icon) */}
+        {hasUploaded && (
+          <div className="mb-6 flex flex-wrap items-center gap-2.5">
+            {[
+              { label: 'MH70_Ticket.pdf', size: '1.2 MB' },
+              { label: 'Tokyo_Hotel_Confirm.pdf', size: '850 KB' },
+              { label: 'Japan_E-Visa.pdf', size: '520 KB' },
+            ].map((doc) => (
+              <div
+                key={doc.label}
+                className="flex items-center gap-2 bg-green-100 border border-green-200 text-green-800 px-3.5 py-1.5 rounded-full shadow-xs text-xs font-semibold"
+              >
+                <Check className="w-3.5 h-3.5 text-green-700 shrink-0 stroke-[2.5]" />
+                <span className="font-mono text-[11px] font-bold">{doc.label}</span>
+                <span className="text-[10px] text-green-600 font-normal">({doc.size})</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* FIELD 1: PASSPORT */}
@@ -611,6 +702,336 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
           </div>
         </div>
 
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* LIVE TRANSIT DASHBOARD SECTION (Aviationstack + Navitime APIs) */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+
+        {/* Uploaded Doc Chips */}
+        <div className="mt-6 mb-2">
+          <div className="flex items-center gap-2 mb-3">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span className="text-xs font-black uppercase tracking-wider text-[#161C23]">AI-Extracted Documents</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { label: 'MH70_Ticket.pdf', icon: '✈️' },
+              { label: 'Tokyo_Hotel_Confirm.pdf', icon: '🏨' },
+              { label: 'Japan_E-Visa.pdf', icon: '🛂' },
+            ].map((doc) => (
+              <div
+                key={doc.label}
+                className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1.5 shadow-sm"
+              >
+                <span>{doc.icon}</span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span className="text-[11px] font-bold text-emerald-800">{doc.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </div>{/* end upload section wrapper */}
+
+      {/* 3. Middle Section: Live Transit Dashboard (API Simulation) */}
+      <div className="mb-8">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-[#00685F]/10 flex items-center justify-center">
+              <Wifi className="w-4 h-4 text-[#00685F]" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-[#161C23]">Live Transit Status (AI Extracted)</h2>
+              <p className="text-[10px] text-[#6D7A77]">Real-time synchronization · Aviationstack &amp; Navitime APIs</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#00685F] bg-[#00685F]/10 px-2.5 py-1 rounded-full border border-[#00685F]/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00685F] animate-pulse" />
+            <span>Live APIs Connected</span>
+          </div>
+        </div>
+
+        {isLoading ? (
+          /* Loading skeleton */
+          <div className="space-y-3">
+            {[1, 2].map((i) => (
+              <div key={i} className="bg-white rounded-3xl p-5 border border-[#E7DFD5] animate-pulse">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-gray-100" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3 bg-gray-100 rounded w-1/3" />
+                    <div className="h-2 bg-gray-100 rounded w-1/2" />
+                  </div>
+                  <div className="w-24 h-7 bg-gray-100 rounded-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* ── Large Elevated Card for the Flight ── */}
+            {flightData && (
+              <div className={`bg-white rounded-3xl border shadow-md overflow-hidden transition-all ${
+                flightStatus === 'delayed'
+                  ? 'border-red-200 shadow-red-100'
+                  : 'border-[#E7DFD5]'
+              }`}>
+                {/* Top accent line */}
+                <div className={`h-1 w-full ${
+                  flightStatus === 'delayed'
+                    ? 'bg-gradient-to-r from-red-500 to-rose-400'
+                    : 'bg-gradient-to-r from-[#00685F] to-emerald-400'
+                }`} />
+
+                <div className="p-5">
+                  {/* Flex row: Left side Flight Info, Right side Status badge */}
+                  <div className="flex items-start justify-between gap-4">
+                    {/* Left: Flight Info */}
+                    <div className="flex items-start gap-3">
+                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
+                        flightStatus === 'delayed' ? 'bg-red-50' : 'bg-[#00685F]/10'
+                      }`}>
+                        <Plane className={`w-5 h-5 ${
+                          flightStatus === 'delayed' ? 'text-red-500' : 'text-[#00685F]'
+                        }`} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-black text-[#161C23]">MH70 Kuala Lumpur to Tokyo</span>
+                          <span className="text-[10px] font-bold text-[#6D7A77] bg-gray-100 px-2 py-0.5 rounded-full font-mono">
+                            {flightData.origin} → {flightData.dest}
+                          </span>
+                        </div>
+                        <p className="text-xs font-semibold text-[#6D7A77] mt-0.5">
+                          Malaysia Airlines · Flight {flightData.flight}
+                        </p>
+                        <div className="flex items-center gap-3 mt-2 text-[11px]">
+                          <div className="flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-[#6D7A77]" />
+                            <span className="font-semibold text-[#6D7A77]">Scheduled:</span>
+                            <span className="font-bold text-[#161C23]">{flightData.scheduled_dep}</span>
+                          </div>
+                          {flightStatus === 'delayed' && (
+                            <div className="flex items-center gap-1">
+                              <AlertOctagon className="w-3 h-3 text-red-500" />
+                              <span className="font-semibold text-red-600">New ETD:</span>
+                              <span className="font-black text-red-700">{flightData.estimated_dep}</span>
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-[#6D7A77] mt-1 font-mono">
+                          {/* Architecture Intent: fetch('https://api.aviationstack.com/v1/flights?access_key=YOUR_KEY&flight_iata=MH70') */}
+                          Source: api.aviationstack.com · flight_iata=MH70
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Right: Status Badge (Dynamic Status Logic) */}
+                    <div className="shrink-0 flex flex-col items-end gap-2">
+                      {flightStatus === 'on-time' ? (
+                        <span className="bg-green-100 text-green-700 px-3.5 py-1.5 rounded-full text-xs font-bold inline-flex items-center gap-1.5 shadow-xs">
+                          <span className="w-2 h-2 rounded-full bg-green-500" />
+                          🟢 Live API: On Time - Departs 4:00 PM
+                        </span>
+                      ) : (
+                        <span className="bg-red-100 text-red-700 animate-pulse px-3.5 py-1.5 rounded-full text-xs font-bold inline-flex items-center gap-1.5 shadow-xs">
+                          <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                          🔴 Live API: DELAYED - New Departs 8:00 PM
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Impact warning when delayed */}
+                  {flightStatus === 'delayed' && (
+                    <div className="mt-4 rounded-2xl bg-red-50 border border-red-200 p-3 flex items-start gap-2.5">
+                      <AlertOctagon className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                      <div className="text-xs">
+                        <span className="font-black text-red-700">Schedule Impact: </span>
+                        <span className="font-medium text-red-600">
+                          4-hour gap at NRT terminal. Hotel check-in pushed to midnight. AI has prepared a rescue itinerary.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 4. The Demo Trigger (Emergency Button) */}
+                  <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {pivotAccepted && (
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          AI Pivot Accepted — Itinerary Updated
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {flightStatus === 'delayed' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFlightStatus('on-time');
+                            if (flightData) {
+                              setFlightData({ ...flightData, status: 'active', estimated_dep: '16:00' });
+                            }
+                            setPivotAccepted(false);
+                          }}
+                          className="text-xs text-emerald-600 hover:text-emerald-800 underline cursor-pointer"
+                        >
+                          Reset to On-Time
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFlightStatus('delayed');
+                          if (flightData) {
+                            setFlightData({ ...flightData, status: 'delayed', estimated_dep: '20:00' });
+                          }
+                          setShowPivotModal(true);
+                        }}
+                        className="text-xs text-gray-400 hover:text-red-500 underline cursor-pointer transition-colors"
+                      >
+                        Simulate API Delay Trigger
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Train Card (Navitime Transit API) ── */}
+            {trainData && (
+              <div className="bg-white rounded-3xl border border-[#E7DFD5] shadow-sm overflow-hidden">
+                <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-400" />
+                <div className="p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-11 h-11 rounded-2xl bg-blue-50 flex items-center justify-center shrink-0">
+                        <Train className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-black text-[#161C23]">{trainData.line}</span>
+                          <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                            Express Rail
+                          </span>
+                        </div>
+                        <p className="text-xs font-semibold text-[#6D7A77] mt-0.5">
+                          Narita Airport T1 → Nippori / Ueno (Tokyo)
+                        </p>
+                        <div className="flex items-center gap-1 mt-2 text-[11px]">
+                          <Clock className="w-3 h-3 text-[#6D7A77]" />
+                          <span className="font-semibold text-[#6D7A77]">Next departure:</span>
+                          <span className="font-bold text-[#161C23]">{trainData.next_departure}</span>
+                        </div>
+                        <p className="text-[10px] text-[#6D7A77] mt-1 font-mono">
+                          {/* Architecture Intent: fetch('https://navitime-transit.p.rapidapi.com/route_simple') */}
+                          Source: navitime-transit.p.rapidapi.com · route_simple
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      {trainData.status === 'on-time' ? (
+                        <span className="inline-flex items-center gap-1.5 bg-blue-100 text-blue-700 border border-blue-200 rounded-full px-3 py-1.5 text-xs font-black">
+                          <span className="w-2 h-2 rounded-full bg-blue-500" />
+                          🚆 On Time - {trainData.next_departure}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 bg-red-100 text-red-700 border border-red-200 rounded-full px-3 py-1.5 text-xs font-black animate-pulse">
+                          🔴 Delayed
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 5. The AI Emergency Reschedule Modal (The Rescue Flow) */}
+      {showPivotModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+          onClick={() => setShowPivotModal(false)}
+        >
+          <div
+            className="bg-white max-w-md w-full rounded-2xl p-6 shadow-2xl overflow-hidden relative"
+            onClick={(e) => e.stopPropagation()}
+            style={{ animation: 'slideUp 0.28s cubic-bezier(0.32,0.72,0,1) both' }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+              <h3 className="text-base font-black text-red-600 flex items-center gap-2">
+                🚨 Live API Alert: Major Delay Detected
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowPivotModal(false)}
+                className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 transition-colors cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <p className="py-4 text-xs font-semibold text-gray-700 leading-relaxed">
+              Your flight MH70 has been delayed by 4 hours. Your new departure is 8:00 PM. This creates a gap in your schedule and impacts your hotel check-in.
+            </p>
+
+            {/* AI Solution Box */}
+            <div className="bg-[#E6F0EE] p-4 rounded-xl mt-1 border border-[#0D6955]">
+              <div className="text-xs font-bold text-[#0D6955] flex items-center gap-1.5 mb-2.5">
+                <Sparkles className="w-3.5 h-3.5 text-[#0D6955]" />
+                <span>✨ AI Reschedule Plan Ready</span>
+              </div>
+              <ul className="text-xs text-gray-700 space-y-2">
+                <li className="flex items-start gap-2">
+                  <span className="text-[#0D6955] font-bold mt-0.5">•</span>
+                  <span>Added 'Mitsui Outlet Park (10 mins from Airport)' to fill the 4-hour gap.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#0D6955] font-bold mt-0.5">•</span>
+                  <span>Auto-drafted a notification to 'Tokyo Bay Hotel' regarding your late arrival.</span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Action Buttons (Flex row) */}
+            <div className="flex items-center gap-3 mt-5">
+              <button
+                type="button"
+                onClick={() => setShowPivotModal(false)}
+                className="px-4 py-2 text-xs font-bold text-gray-600 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                Ignore
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPivotModal(false);
+                  setPivotAccepted(true);
+                }}
+                className="bg-[#0D6955] text-white px-4 py-2 rounded-lg font-bold w-full text-xs hover:bg-[#095041] transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                Accept AI Pivot &amp; Update Itinerary
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(30px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0)    scale(1);    }
+        }
+      `}</style>
+
+      <div className="mb-8">
         {/* TURQUOISE GREEN "RUN AI VERIFICATION" BUTTON */}
         <div className="mt-5 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-4 rounded-3xl border border-[#E7DFD5]">
           <div className="flex items-center gap-3">
@@ -1037,3 +1458,6 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
     </div>
   );
 };
+
+export const DocumentVault = DocumentVaultScreen;
+export default DocumentVaultScreen;
