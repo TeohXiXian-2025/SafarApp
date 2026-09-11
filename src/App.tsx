@@ -44,6 +44,8 @@ export default function App() {
     'Kyoto, Japan (Autumn Foliage & Halal Corridors)'
   );
   const [radarReturnScreen, setRadarReturnScreen] = useState<'canvas' | 'landing'>('canvas');
+  const [canvasInitialView, setCanvasInitialView] = useState<string>('day-1');
+  const [fallbackToast, setFallbackToast] = useState(false);
 
   // Test Firebase connection on mount
   useEffect(() => {
@@ -302,6 +304,9 @@ export default function App() {
           onDismissDateConflict={() => setDateConflictNotice(false)}
           onAddMate={handleAddMate}
           onOpenHalalRadar={handleOpenHalalRadar}
+          initialDayId={canvasInitialView}
+          fallbackToast={fallbackToast}
+          onDismissFallbackToast={() => setFallbackToast(false)}
         />
       ) : currentScreen === 'radar' ? (
         <HalalRadarScreen onClose={() => setCurrentScreen(radarReturnScreen)} />
@@ -362,6 +367,12 @@ export default function App() {
                   if (focusConflict) {
                     setDateConflictNotice(true);
                   }
+                  setCanvasInitialView('day-1');
+                  setCurrentScreen('canvas');
+                }}
+                onNavigateToItinerary={() => {
+                  setCanvasInitialView('overview');
+                  setFallbackToast(true);
                   setCurrentScreen('canvas');
                 }}
                 onNavigateHome={() => setCurrentScreen('landing')}

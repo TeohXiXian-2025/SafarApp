@@ -79,6 +79,9 @@ interface CanvasScreenProps {
   dateConflictNotice?: boolean;
   onDismissDateConflict?: () => void;
   onAddMate?: (newMate: Collaborator) => void;
+  initialDayId?: string;
+  fallbackToast?: boolean;
+  onDismissFallbackToast?: () => void;
 }
 
 export const CanvasScreen: React.FC<CanvasScreenProps> = ({
@@ -95,6 +98,9 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
   dateConflictNotice = false,
   onDismissDateConflict,
   onAddMate,
+  initialDayId,
+  fallbackToast = false,
+  onDismissFallbackToast,
 }) => {
   const [activeSidebarTab, setActiveSidebarTab] = useState<string>('multiplayer');
   const [isConflictModalOpen, setIsConflictModalOpen] = useState<boolean>(false);
@@ -115,13 +121,25 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [currentWeather, setCurrentWeather] = useState<WeatherData | null>(null);
 
   // Three-pane itinerary state (new Wanderlog-pattern)
-  const tripState = useTripState();
+  const tripState = useTripState(initialDayId);
 
   const activeCity = tripState.activeDay?.city || 'Tokyo';
 
   useEffect(() => {
     fetchLiveWeather(activeCity).then(setCurrentWeather);
   }, [activeCity]);
+
+  // Show the "itinerary updated" confirmation toast when redirected here
+  // after executing the AI fallback plan in the Document Vault.
+  useEffect(() => {
+    if (!fallbackToast) return;
+    setNotificationToast('Itinerary updated: Schedules and transit synced to delayed arrival.');
+    const timer = setTimeout(() => {
+      setNotificationToast(null);
+      onDismissFallbackToast?.();
+    }, 4200);
+    return () => clearTimeout(timer);
+  }, [fallbackToast]);
 
   // Check if current active user is Team Lead
   const isTeamLead =

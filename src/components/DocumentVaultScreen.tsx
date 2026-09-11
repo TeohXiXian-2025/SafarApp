@@ -33,18 +33,69 @@ import {
 } from 'lucide-react';
 import { TravelDocument, DocumentCategory, DocumentVerificationReport } from '../types';
 import { SAMPLE_DOCUMENTS, MOCK_VERIFICATION_REPORT } from '../data/documentVaultData';
-import { FallbackPivotModal } from './FallbackPivotModal';
 
 interface DocumentVaultScreenProps {
   onNavigateToCanvas: (focusDateConflict?: boolean) => void;
   onNavigateHome: () => void;
+  onNavigateToItinerary?: () => void;
 }
 
 type VerificationState = 'idle' | 'verifying' | 'completed';
 
+type RecoveryAction = {
+  id: string;
+  badge: string;
+  badgeClass: string;
+  title: string;
+  description: string;
+  image: string;
+  imageAlt: string;
+};
+
+const IMAGE_FALLBACK =
+  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="240"%3E%3Crect width="100%25" height="100%25" fill="%23E6F0EE"/%3E%3Ctext x="50%25" y="52%25" font-family="sans-serif" font-size="28" fill="%230D6955" text-anchor="middle" dominant-baseline="middle"%3ESafar%3C/text%3E%3C/svg%3E';
+
+const FALLBACK_RECOVERY_ACTIONS: RecoveryAction[] = [
+  {
+    id: 'lounge',
+    badge: '🛋️ Airport Lounge',
+    badgeClass: 'bg-[#E6F0EE] text-[#0D6955]',
+    title: 'KLIA Plaza Premium Lounge (Halal Certified)',
+    description: 'Relax & refresh during your 4-hour delay. Prayer room and Halal buffet included.',
+    image: 'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=400&q=60',
+    imageAlt: 'Airport lounge seating area',
+  },
+  {
+    id: 'train',
+    badge: '🚄 Transit Reroute',
+    badgeClass: 'bg-sky-50 text-sky-700',
+    title: 'Rebook 20:45 Narita Express (NEX)',
+    description: 'Auto-refunded 16:45 Keisei Skyliner. NEX reserved to Shinjuku/Tokyo station.',
+    image: 'https://images.unsplash.com/photo-1474487548417-781cb71495f3?auto=format&fit=crop&w=400&q=60',
+    imageAlt: 'Narita Express train',
+  },
+  {
+    id: 'hotel',
+    badge: 'Sent in Japanese 🇯🇵',
+    badgeClass: 'bg-amber-50 text-amber-700',
+    title: 'Late Check-in Automated Notice',
+    description: 'Hotel Granvia informed of delayed arrival (est. 22:30). Booking secured.',
+    image: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=400&q=60',
+    imageAlt: 'Hotel front desk',
+  },
+];
+
+const handleImageFallback = (e: React.SyntheticEvent<HTMLImageElement>) => {
+  const img = e.currentTarget;
+  if (img.src !== IMAGE_FALLBACK) {
+    img.src = IMAGE_FALLBACK;
+  }
+};
+
 export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
   onNavigateToCanvas,
   onNavigateHome,
+  onNavigateToItinerary = () => {},
 }) => {
   // Uploaded documents state (Passport, Flights, Hotels)
   const [documents, setDocuments] = useState<Record<DocumentCategory, TravelDocument | null>>(() => {
@@ -114,11 +165,11 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
   // 1. State Management & API Structure
   const [flightData, setFlightData] = useState<FlightData | null>(null);
   const [trainData, setTrainData] = useState<TrainData | null>(null);
-  const [showPivotModal, setShowPivotModal] = useState(false);
+  const [showFallbackModal, setShowFallbackModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [hasUploaded, setHasUploaded] = useState(true);
   const [flightStatus, setFlightStatus] = useState<'on-time' | 'delayed'>('on-time');
-  const [pivotAccepted, setPivotAccepted] = useState(false);
+  const [isFallbackExecuted, setIsFallbackExecuted] = useState(false);
 
   // 2. The Live API Simulation (useEffect hook)
   useEffect(() => {
@@ -280,6 +331,14 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
   // Quick action: Fix Itinerary (jump directly to Multiplayer Canvas)
   const handleFixItinerary = () => {
     onNavigateToCanvas(true);
+  };
+
+  // AI Fallback Strategy: execute the rescue plan when the user confirms.
+  const handleExecuteFallback = () => {
+    setShowFallbackModal(false);
+    setIsFallbackExecuted(true);
+    // Jump straight to the updated itinerary (Overview) so the user sees the re-synced timeline.
+    onNavigateToItinerary();
   };
 
   return (
@@ -925,7 +984,7 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
                   {/* 4. The Demo Trigger (Emergency Button) */}
                   <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      {pivotAccepted && (
+                      {isFallbackExecuted && (
                         <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           AI Pivot Accepted — Itinerary Updated
@@ -941,7 +1000,7 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
                             if (flightData) {
                               setFlightData({ ...flightData, status: 'active', estimated_dep: '16:00' });
                             }
-                            setPivotAccepted(false);
+                            setIsFallbackExecuted(false);
                           }}
                           className="text-xs text-emerald-600 hover:text-emerald-800 underline cursor-pointer"
                         >
@@ -955,11 +1014,12 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
                           if (flightData) {
                             setFlightData({ ...flightData, status: 'delayed', estimated_dep: '20:00' });
                           }
-                          setShowPivotModal(true);
+                          setShowFallbackModal(true);
                         }}
-                        className="text-xs text-gray-400 hover:text-red-500 underline cursor-pointer transition-colors"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold bg-[#0D6955] text-white hover:bg-[#095041] rounded-xl shadow-md transition-all"
                       >
-                        Simulate API Delay Trigger
+                        <AlertOctagon className="w-3.5 h-3.5" />
+                        AI Reroute
                       </button>
                     </div>
                   </div>
@@ -1019,16 +1079,6 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
         )}
       </div>
 
-      {/* 5. The AI Emergency Reschedule Modal (The Rescue Flow) */}
-      {showPivotModal && (
-        <FallbackPivotModal
-          onReviewManually={() => setShowPivotModal(false)}
-          onExecute={() => {
-            setShowPivotModal(false);
-            setPivotAccepted(true);
-          }}
-        />
-      )}
 
       <div className="mb-8">
         {/* TURQUOISE GREEN "RUN AI VERIFICATION" BUTTON */}
@@ -1447,15 +1497,149 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
         </div>
       )}
 
-      {/* AI Emergency Fallback Pivot Modal */}
-      {showPivotModal && (
-        <FallbackPivotModal
-          onReviewManually={() => setShowPivotModal(false)}
-          onExecute={() => {
-            setShowPivotModal(false);
-            setPivotAccepted(true);
-          }}
-        />
+      {/* AI Fallback Strategy Modal */}
+      {showFallbackModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white max-w-lg w-full rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="px-6 pt-6 pb-4 border-b border-gray-100 flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-rose-50 flex items-center justify-center shrink-0">
+                <AlertOctagon className="w-5 h-5 text-rose-600" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-gray-900 leading-tight">
+                  🚨 Transit Exception Detected
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  MH70 is delayed 4 hours. Your arrival window and downstream transit have shifted.
+                </p>
+              </div>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="max-h-[65vh] overflow-y-auto px-6 py-5 space-y-4">
+              {/* 1. Boarding Pass / Flight Card */}
+              <div className="rounded-2xl overflow-hidden shadow-lg border border-gray-200 bg-white">
+                <div className="bg-gradient-to-r from-[#0D6955] to-[#0A4F43] px-5 py-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center">
+                      <Plane className="w-4 h-4 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-white text-sm font-bold tracking-wide leading-tight">Malaysia Airlines</p>
+                      <p className="text-white/70 text-xs font-medium">Flight MH70</p>
+                    </div>
+                  </div>
+                  <span className="bg-amber-500 text-white text-[11px] font-black px-3 py-1 rounded-full shadow-sm">
+                    Delayed: +4 Hours
+                  </span>
+                </div>
+
+                <div className="px-5 py-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold">From</p>
+                      <p className="text-2xl font-black text-gray-900 leading-none">KUL</p>
+                      <p className="text-[11px] text-gray-500 mt-1">Kuala Lumpur Intl</p>
+                    </div>
+                    <div className="flex flex-col items-center px-3">
+                      <Plane className="w-5 h-5 text-[#0D6955] rotate-45" />
+                      <p className="text-[10px] font-bold text-gray-400 mt-1">4h 0m</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold">To</p>
+                      <p className="text-2xl font-black text-gray-900 leading-none">NRT</p>
+                      <p className="text-[11px] text-gray-500 mt-1">Tokyo Narita</p>
+                    </div>
+                  </div>
+
+                  {/* Chips */}
+                  <div className="grid grid-cols-3 gap-2 mt-4">
+                    <div className="bg-gray-50 border border-gray-100 rounded-xl p-2 text-center">
+                      <p className="text-[9px] uppercase tracking-wide text-gray-400 font-bold">Gate</p>
+                      <p className="text-sm font-black text-gray-800">C14</p>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-100 rounded-xl p-2 text-center">
+                      <p className="text-[9px] uppercase tracking-wide text-gray-400 font-bold">Seat</p>
+                      <p className="text-sm font-black text-gray-800">22A</p>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-100 rounded-xl p-2 text-center">
+                      <p className="text-[9px] uppercase tracking-wide text-gray-400 font-bold">Terminal</p>
+                      <p className="text-sm font-black text-gray-800">1</p>
+                    </div>
+                  </div>
+
+                  {/* Barcode */}
+                  <div className="mt-4 pt-4 border-t border-dashed border-gray-200 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[9px] uppercase tracking-widest text-gray-400 font-bold">Boarding Pass</p>
+                      <p className="text-[11px] font-mono text-gray-600 mt-1 truncate">MH70 · KUL → NRT · 22A</p>
+                    </div>
+                    <div className="h-12 w-32 flex items-end gap-[2px] shrink-0" aria-hidden="true">
+                      {[2, 1, 3, 1, 2, 4, 1, 2, 1, 3, 2, 1, 4, 1, 2, 1, 3, 2, 1, 2, 4, 1, 3, 1, 2, 1, 4, 2, 1, 3].map((w, i) => (
+                        <span
+                          key={i}
+                          className="bg-gray-900 rounded-[1px]"
+                          style={{ width: `${w}px`, height: i % 3 === 0 ? '100%' : '82%' }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. AI Recovery Recommendations */}
+              <div className="flex items-center gap-2">
+                <span className="h-px flex-1 bg-gray-200" />
+                <span className="text-[11px] font-bold text-[#0D6955] uppercase tracking-wider">AI Fallback Plan</span>
+                <span className="h-px flex-1 bg-gray-200" />
+              </div>
+
+              {FALLBACK_RECOVERY_ACTIONS.map((action) => (
+                <div
+                  key={action.id}
+                  className="flex gap-3.5 rounded-2xl border border-gray-100 bg-white p-3 shadow-sm hover:shadow-md transition-shadow"
+                >
+                  <div className="relative w-24 h-24 rounded-xl overflow-hidden shrink-0 bg-gray-100">
+                    <img
+                      src={action.image}
+                      alt={action.imageAlt}
+                      loading="lazy"
+                      onError={handleImageFallback}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0 flex flex-col">
+                    <span className={`self-start text-[10px] font-bold px-2 py-0.5 rounded-full ${action.badgeClass}`}>
+                      {action.badge}
+                    </span>
+                    <h5 className="text-sm font-bold text-gray-900 mt-1.5 leading-snug">{action.title}</h5>
+                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">{action.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Action Footer */}
+            <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/60 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowFallbackModal(false)}
+                className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:bg-gray-100 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteFallback}
+                className="px-5 py-2.5 text-sm font-bold bg-[#0D6955] text-white hover:bg-[#095041] rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Execute Fallback & Update Itinerary
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Reminder Toast */}

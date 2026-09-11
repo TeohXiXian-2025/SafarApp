@@ -1120,8 +1120,11 @@ export function tripReducer(state: TripState, action: TripAction): TripState {
 
 import { TripAction as TripActionType } from '../types/itinerary';
 
-export function useTripState() {
-  const [state, dispatch] = useReducer(tripReducer, INITIAL_TRIP_STATE);
+export function useTripState(initialDayId?: string) {
+  const initialState: TripState = initialDayId
+    ? { ...INITIAL_TRIP_STATE, activeDayId: initialDayId }
+    : INITIAL_TRIP_STATE;
+  const [state, dispatch] = useReducer(tripReducer, initialState);
 
   const setActiveDay = useCallback(
     (dayId: string) => dispatch({ type: 'SET_ACTIVE_DAY', dayId }),
