@@ -297,14 +297,6 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
 
   const navItems = [
     {
-      id: 'multiplayer',
-      icon: <Users className="w-4 h-4" />,
-      label: 'Multiplayer Hub',
-      badge: `${state.members.length} online`,
-      action: onOpenMultiplayer,
-      color: 'text-[#526360]',
-    },
-    {
       id: 'conflict',
       icon: <AlertTriangle className="w-4 h-4 text-amber-500" />,
       label: 'Conflict Radar',
@@ -325,11 +317,6 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
       badge: '¥0',
       badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
       action: onOpenBudget,
-    },
-    {
-      id: 'wishlist',
-      icon: <Bookmark className="w-4 h-4" />,
-      label: `Wishlist Places (${state.unassignedPlaces.length})`,
     },
   ];
 
@@ -445,7 +432,7 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
             {!isCollapsed && (
               <div className="px-2 mb-1">
                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#8A9592]">
-                  Tools & Wishlist
+                  Tools
                 </span>
               </div>
             )}

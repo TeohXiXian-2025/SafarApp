@@ -34,6 +34,7 @@ import {
   PrayerPlaceResult,
   PrayerSettings,
   DEFAULT_PRAYER_SETTINGS,
+  SplitPlan,
 } from '../types/itinerary';
 import {
   fetchPrayerTimesForCity,
@@ -51,6 +52,9 @@ import {
   getNearbyPrayerPlaces,
 } from '../services/prayerConflictEngine';
 import { PrayerTimelineMarker } from './PrayerTimelineMarker';
+import { AiMediatorModal } from './AiMediatorModal';
+import { AiSplitRoute } from './AiSplitRoute';
+import { MOCK_SPLIT_PLAN } from '../data/splitRouteMock';
 
 // ─────────────────────────────────────────────────────
 // Category Icons & Badges
@@ -577,8 +581,9 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
   const [isDragOverDropZone, setIsDragOverDropZone] = useState<boolean>(false);
 
   // AI Conflict Mediator flow state
-  const [timelineState, setTimelineState] = useState<'normal' | 'conflict' | 'resolved'>('conflict');
-  const [showAIModal, setShowAIModal] = useState<boolean>(false);
+  const [aiSplitPhase, setAiSplitPhase] = useState<'conflict' | 'resolved'>('conflict');
+  const [activeSplitPlan, setActiveSplitPlan] = useState<SplitPlan>(MOCK_SPLIT_PLAN);
+  const [isMediatorOpen, setIsMediatorOpen] = useState<boolean>(false);
 
   const handleDropKiyomizu = () => {
     setIsDragOverDropZone(false);
@@ -898,60 +903,57 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
           </div>
         </div>
 
-        {/* ── AI Conflict Mediator: Phase 1 — Conflict Warning ── */}
-        {timelineState === 'conflict' && (
-          <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-xl my-4">
-            <h4 className="text-sm font-black text-[#161C23]">1:00 PM • Ichiran Ramen</h4>
-            <p className="text-xs font-medium text-[#526360] mt-1">
-              ⚠️ Contradiction Detected: This selection violates the Halal dietary requirements set for this group.
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowAIModal(true)}
-              className="mt-3 bg-red-600 hover:bg-red-700 text-white font-medium px-4 py-2 rounded-lg shadow-sm flex items-center gap-2 cursor-pointer"
-            >
-              ✨ Ask AI Planner
-            </button>
+        {/* ── AI Conflict Mediator: Phase 1 — Contradiction Warning Banner ── */}
+        {aiSplitPhase === 'conflict' && (
+          <div className="my-4 overflow-hidden rounded-2xl border border-red-200 bg-red-50 shadow-sm">
+            {/* Top accent bar */}
+            <div className="h-1 w-full bg-gradient-to-r from-red-500 to-orange-400" />
+            <div className="p-4">
+              <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wide text-red-600">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                <span>Dietary Contradiction Detected</span>
+                <span className="ml-auto rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-black text-red-700 border border-red-200">
+                  {activeSplitPlan.timeSlot}
+                </span>
+              </div>
+              <h4 className="mt-2 text-sm font-black text-[#161C23]">
+                🍜 {activeSplitPlan.optionB.name} — Pork Tonkotsu
+              </h4>
+              <p className="mt-1 text-xs font-medium leading-relaxed text-[#526360]">
+                This restaurant's pork-based broth violates <span className="font-bold text-[#161C23]">Halal</span> requirements for the following group members:
+              </p>
+              {/* Affected member chips */}
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {activeSplitPlan.optionA.assignedMembers
+                  .filter(m => m.dietaryRestriction === 'Halal')
+                  .map(m => (
+                    <div key={m.id} className="flex items-center gap-1.5 rounded-full bg-white border border-red-200 px-2.5 py-1 shadow-sm">
+                      <img src={m.avatarUrl} alt={m.name} className="h-5 w-5 rounded-full object-cover" />
+                      <span className="text-[11px] font-bold text-[#161C23]">{m.name}</span>
+                      <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-black text-emerald-800 border border-emerald-200">Halal</span>
+                    </div>
+                  ))
+                }
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsMediatorOpen(true)}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:from-red-700 hover:to-rose-700 transition-all cursor-pointer"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Ask AI Planner
+                </button>
+                <span className="text-[11px] font-medium text-[#8A9592]">
+                  AI proposes a win-win split · You decide
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
         {/* ── AI Conflict Mediator: Phase 3 — Split & Sync ── */}
-        {timelineState === 'resolved' && (
-          <div className="my-4">
-            {/* Split Header */}
-            <div className="flex justify-center mb-3">
-              <span className="bg-gray-100 text-gray-600 text-xs font-bold px-3 py-1 rounded-full">
-                ⚡ AI SPLIT ROUTE
-              </span>
-            </div>
-
-            {/* Parallel Tracks */}
-            <div className="flex flex-row w-full gap-3 relative">
-              <div className="absolute left-1/2 top-0 bottom-0 border-l-2 border-dashed border-gray-300" />
-
-              {/* Left Track (Halal) */}
-              <div className="flex-1 bg-[#E6F0EE] border border-[#0D6955] rounded-xl p-3 z-10">
-                <div className="text-xs font-black text-[#0D6955]">1:15 PM • Narita-ya Halal Ramen</div>
-                <span className="inline-flex items-center gap-1 mt-2 bg-[#0D6955] text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full">
-                  100% Halal
-                </span>
-              </div>
-
-              {/* Right Track (Standard) */}
-              <div className="flex-1 bg-white border border-gray-200 rounded-xl p-3 z-10">
-                <div className="text-xs font-black text-[#161C23]">1:15 PM • Ichiran Ramen</div>
-                <span className="inline-flex items-center gap-1 mt-2 bg-gray-100 text-gray-600 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
-                  Non-Halal
-                </span>
-              </div>
-            </div>
-
-            {/* Merge/Sync Block */}
-            <div className="bg-[#0D6955] text-white rounded-xl p-3 mt-4 text-center shadow-md">
-              🤝 Group Sync: Senso-ji Temple @ 2:30 PM
-            </div>
-          </div>
-        )}
+        {aiSplitPhase === 'resolved' && <AiSplitRoute plan={activeSplitPlan} />}
 
         {/* ── Stops List with Inline Prayer Markers ── */}
         <div className="space-y-1">
@@ -1157,35 +1159,16 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
         <div className="h-8" />
       </div>
 
-      {/* ── AI Conflict Mediator: Phase 2 — Win-Win Modal ── */}
-      {showAIModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6">
-            <h2 className="text-lg font-black text-[#161C23]">🤖 AI Mediator</h2>
-            <div className="bg-[#E6F0EE] p-4 rounded-xl my-4 text-[#0D6955]">
-              I found a win-win compromise in Asakusa. We can split the group for 1 hour so everyone gets what they want, then sync up immediately after.
-            </div>
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowAIModal(false)}
-                className="text-gray-500 hover:bg-gray-100 px-4 py-2 rounded-lg cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAIModal(false);
-                  setTimelineState('resolved');
-                }}
-                className="bg-[#0D6955] hover:bg-[#095041] text-white px-4 py-2 rounded-lg font-medium cursor-pointer"
-              >
-                Accept AI Plan &amp; Split Route -&gt;
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* ── AI Conflict Mediator Modal (proper wiring) ── */}
+      {isMediatorOpen && (
+        <AiMediatorModal
+          plan={activeSplitPlan}
+          onClose={() => setIsMediatorOpen(false)}
+          onAccept={() => {
+            setIsMediatorOpen(false);
+            setAiSplitPhase('resolved');
+          }}
+        />
       )}
     </div>
   );

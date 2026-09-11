@@ -136,6 +136,53 @@ export interface AIPlanSolution {
   proposedStops: ItineraryStop[];
 }
 
+// ─── AI Split Route Rich Data ────────────────────────────────
+
+export interface GroupMember {
+  id: string;
+  name: string;
+  avatarUrl: string;
+  dietaryRestriction?: 'Halal' | 'Vegetarian' | 'None';
+}
+
+export type SplitTagColor = 'green' | 'gray' | 'amber';
+
+export interface SplitVenueDetail {
+  name: string;
+  tag: string; // e.g. "100% Halal Certified", "Original Tonkotsu"
+  tagColor: SplitTagColor;
+  rating: number; // e.g., 4.7
+  reviewsCount: number; // e.g., 1420
+  address: string;
+  distanceFromCurrent: string; // e.g., "350m (4 min walk)"
+  walkingToSyncPoint: string; // e.g., "6 min walk to Senso-ji"
+  imageUrl: string;
+  assignedMembers: GroupMember[];
+  cuisineType: string;
+  priceRange: string; // "$$", "$$$"
+}
+
+export interface SplitPlan {
+  id: string;
+  timeSlot: string; // e.g., "1:15 PM – 2:15 PM"
+  duration: string; // "1 hr"
+  reason: string;
+  optionA: SplitVenueDetail;
+  optionB: SplitVenueDetail;
+  syncPoint: {
+    locationName: string;
+    meetingTime: string; // "2:30 PM"
+    address: string;
+    bufferMinutes: number; // 15 mins buffer
+    landmarkTip: string; // e.g., "Meet at Kaminarimon Gate entrance"
+  };
+  alternativeSuggestions?: {
+    id: string;
+    title: string;
+    description: string;
+  }[];
+}
+
 // ─── Day & Trip State ──────────────────────────────────
 
 export interface ItineraryDay {
