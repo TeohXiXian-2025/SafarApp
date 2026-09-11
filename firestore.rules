@@ -58,6 +58,15 @@ service cloud.firestore {
       }
     }
 
+    // Restaurants collection (Halal Radar geospatial index)
+    match /restaurants/{restaurantId} {
+      allow read: if isSignedIn() && isValidId(restaurantId);
+      allow create, update: if isSignedIn() && isValidId(restaurantId)
+        && incoming().name is string && incoming().name.size() <= 200
+        && incoming().status in ['CERTIFIED_HALAL', 'MUSLIM_OWNED', 'PORK_FREE'];
+      allow delete: if isSignedIn() && isValidId(restaurantId);
+    }
+
     // Connection test document
     match /test/{docId} {
       allow read: if true;

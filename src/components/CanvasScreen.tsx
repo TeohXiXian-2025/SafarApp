@@ -61,6 +61,7 @@ import { AIPlannerWorkspace } from './AIPlannerWorkspace';
 import { AnimeWeatherOverlay } from './AnimeWeatherOverlay';
 import { WeatherData, fetchLiveWeather } from '../services/weatherService';
 import { ShareInviteModal } from './ShareInviteModal';
+import { HalalRadarScreen } from './HalalRadarScreen';
 
 interface CanvasScreenProps {
   itinerary: Itinerary;
@@ -72,6 +73,7 @@ interface CanvasScreenProps {
   onOpenAddModal: (dayId: string) => void;
   onOpenVault?: () => void;
   onOpenInspiration?: () => void;
+  onOpenHalalRadar?: () => void;
   dateConflictNotice?: boolean;
   onDismissDateConflict?: () => void;
   onAddMate?: (newMate: Collaborator) => void;
@@ -87,6 +89,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
   onOpenAddModal,
   onOpenVault,
   onOpenInspiration,
+  onOpenHalalRadar,
   dateConflictNotice = false,
   onDismissDateConflict,
   onAddMate,
@@ -97,6 +100,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [isAddMateModalOpen, setIsAddMateModalOpen] = useState<boolean>(false);
   const [isSuggestModalOpen, setIsSuggestModalOpen] = useState<boolean>(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+  const [isHalalRadarOpen, setIsHalalRadarOpen] = useState<boolean>(false);
   const [showSuggestionsDrawer, setShowSuggestionsDrawer] = useState<boolean>(false);
   const [showBudgetDrawer, setShowBudgetDrawer] = useState<boolean>(false);
   const [selectedDayId, setSelectedDayId] = useState<string>('day-3');
@@ -369,6 +373,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
           onOpenVault={onOpenVault}
           onOpenBudget={() => setShowBudgetDrawer((b) => !b)}
           onToggleGroupTravel={() => tripState.dispatch({ type: 'TOGGLE_GROUP_TRAVEL_MODE' })}
+          onOpenHalalRadar={() => setIsHalalRadarOpen(true)}
         />
 
         {/* ── Pane 2: Itinerary Feed ── */}
@@ -571,6 +576,11 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       {/* Live Weather & Anime Simulation Overlay with Controls */}
       <AnimeWeatherOverlay city={activeCity} />
+
+      {/* Halal Radar Screen Overlay */}
+      {isHalalRadarOpen && (
+        <HalalRadarScreen onClose={() => setIsHalalRadarOpen(false)} />
+      )}
     </div>
   );
 };

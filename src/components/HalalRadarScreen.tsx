@@ -8,6 +8,7 @@ import {
   APIProvider,
   Map,
   AdvancedMarker,
+  AdvancedMarkerAnchorPoint,
   InfoWindow,
 } from '@vis.gl/react-google-maps';
 import {
@@ -121,6 +122,7 @@ const RestaurantMarker: React.FC<{
       position={result.restaurant.coordinates}
       onClick={onClick}
       zIndex={isTop ? 100 : isSelected ? 50 : 10}
+      anchorPoint={AdvancedMarkerAnchorPoint.CENTER}
     >
       <div className="relative cursor-pointer" style={{ transform: isTop ? 'scale(1)' : 'scale(0.85)' }}>
         {/* Glow ring for top pick */}
@@ -196,7 +198,7 @@ const RestaurantMarker: React.FC<{
 const UserLocationMarker: React.FC<{ position: { lat: number; lng: number } }> = ({
   position,
 }) => (
-  <AdvancedMarker position={position} zIndex={200}>
+  <AdvancedMarker position={position} zIndex={200} anchorPoint={AdvancedMarkerAnchorPoint.CENTER}>
     <div className="relative">
       {/* Pulse ring */}
       <div className="absolute -inset-4 rounded-full bg-blue-500/20 animate-ping" style={{ animationDuration: '2.5s' }} />

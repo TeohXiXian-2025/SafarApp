@@ -17,6 +17,7 @@ import {
   ChevronUp,
   Compass,
   Layers,
+  Radar,
 } from 'lucide-react';
 import { TripState, ItineraryDay, SalahTime } from '../types/itinerary';
 import { fetchKyotoPrayerTimes, KyotoPrayerData } from '../services/prayerTimeService';
@@ -30,6 +31,7 @@ interface NavigationRailProps {
   onOpenVault?: () => void;
   onOpenBudget?: () => void;
   onToggleGroupTravel?: () => void;
+  onOpenHalalRadar?: () => void;
 }
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -292,6 +294,7 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
   onOpenVault,
   onOpenBudget,
   onToggleGroupTravel,
+  onOpenHalalRadar,
 }) => {
   const { days, activeDayId, navRailCollapsed: isCollapsed } = state;
 
@@ -317,6 +320,14 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
       badge: '¥0',
       badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
       action: onOpenBudget,
+    },
+    {
+      id: 'halalRadar',
+      icon: <Radar className="w-4 h-4 text-emerald-600" />,
+      label: 'Halal Radar',
+      badge: 'Live',
+      badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      action: onOpenHalalRadar,
     },
   ];
 

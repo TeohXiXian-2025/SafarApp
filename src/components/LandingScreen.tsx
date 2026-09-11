@@ -17,6 +17,7 @@ import {
   Bookmark,
   Share2,
   FileCheck,
+  Radar,
 } from 'lucide-react';
 
 interface LandingScreenProps {
@@ -24,6 +25,7 @@ interface LandingScreenProps {
   onQuickReelGenerate: (url: string) => void;
   onOpenWorkspace: () => void;
   onOpenVault: () => void;
+  onOpenHalalRadar: () => void;
   onSelectCommunityPlan: (planId: string) => void;
 }
 
@@ -32,6 +34,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   onQuickReelGenerate,
   onOpenWorkspace,
   onOpenVault,
+  onOpenHalalRadar,
   onSelectCommunityPlan,
 }) => {
   const [reelUrl, setReelUrl] = useState('https://instagram.com/reel/C8k9xM2... (Kyoto Halal Guide)');
@@ -271,6 +274,14 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={onOpenHalalRadar}
+            className="px-4 py-3 rounded-xl bg-white border border-[#E7DFD5] text-[#161C23] text-xs font-bold hover:bg-[#FAF8F5] transition-colors cursor-pointer flex items-center gap-1.5"
+          >
+            <Radar className="w-3.5 h-3.5 text-emerald-600" />
+            Halal Radar
+          </button>
           <button
             type="button"
             onClick={onOpenVault}

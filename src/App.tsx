@@ -22,12 +22,13 @@ import { CanvasScreen } from './components/CanvasScreen';
 import { RefinementModal } from './components/RefinementModal';
 import { AuthModal } from './components/AuthModal';
 import { AddActivityModal } from './components/AddActivityModal';
+import { HalalRadarScreen } from './components/HalalRadarScreen';
 
 export default function App() {
   // Application State & Flow:
   // 'landing' -> 'setup' (Team Lead setup wizard) -> 'generating' -> 'canvas'
   const [currentScreen, setCurrentScreen] = useState<
-    'landing' | 'setup' | 'generating' | 'canvas' | 'vault'
+    'landing' | 'setup' | 'generating' | 'canvas' | 'vault' | 'radar'
   >('landing');
 
   const [itinerary, setItinerary] = useState<Itinerary>(() => multiplayerSync.getSavedItinerary());
@@ -42,6 +43,7 @@ export default function App() {
   const [generatingSource, setGeneratingSource] = useState<string>(
     'Kyoto, Japan (Autumn Foliage & Halal Corridors)'
   );
+  const [radarReturnScreen, setRadarReturnScreen] = useState<'canvas' | 'landing'>('canvas');
 
   // Test Firebase connection on mount
   useEffect(() => {
@@ -166,6 +168,12 @@ export default function App() {
   // Generation screen completes
   const handleGeneratingComplete = () => {
     setCurrentScreen('canvas');
+  };
+
+  // Open the Halal Radar, remembering where to return on close
+  const handleOpenHalalRadar = () => {
+    setRadarReturnScreen(currentScreen === 'canvas' ? 'canvas' : 'landing');
+    setCurrentScreen('radar');
   };
 
   // Switch or select active user (to test Team Lead vs Mate perspective)
@@ -293,7 +301,10 @@ export default function App() {
           dateConflictNotice={dateConflictNotice}
           onDismissDateConflict={() => setDateConflictNotice(false)}
           onAddMate={handleAddMate}
+          onOpenHalalRadar={handleOpenHalalRadar}
         />
+      ) : currentScreen === 'radar' ? (
+        <HalalRadarScreen onClose={() => setCurrentScreen(radarReturnScreen)} />
       ) : (
         <>
           {/* Header Bar for Landing, Setup, and Vault */}
@@ -318,6 +329,7 @@ export default function App() {
                 onQuickReelGenerate={handleQuickReelGenerate}
                 onOpenWorkspace={() => setCurrentScreen('canvas')}
                 onOpenVault={() => setCurrentScreen('vault')}
+                onOpenHalalRadar={handleOpenHalalRadar}
                 onSelectCommunityPlan={(planId) => {
                   setGeneratingSource('Community Curated Halal Guide');
                   setCurrentScreen('generating');

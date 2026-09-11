@@ -22,6 +22,7 @@ import {
   Map,
   useMap,
   AdvancedMarker,
+  AdvancedMarkerAnchorPoint,
   InfoWindow,
 } from '@vis.gl/react-google-maps';
 import {
@@ -402,6 +403,7 @@ function DiscoverySpotMarker({
       position={item.coordinate}
       onClick={() => onClick(item)}
       zIndex={isSelected ? 350 : 180}
+      anchorPoint={AdvancedMarkerAnchorPoint.BOTTOM}
     >
       <div
         className="relative flex flex-col items-center cursor-pointer select-none transition-all duration-200"

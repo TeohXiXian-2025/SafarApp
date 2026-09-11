@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { TravelDocument, DocumentCategory, DocumentVerificationReport } from '../types';
 import { SAMPLE_DOCUMENTS, MOCK_VERIFICATION_REPORT } from '../data/documentVaultData';
+import { FallbackPivotModal } from './FallbackPivotModal';
 
 interface DocumentVaultScreenProps {
   onNavigateToCanvas: (focusDateConflict?: boolean) => void;
@@ -954,82 +955,14 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
 
       {/* 5. The AI Emergency Reschedule Modal (The Rescue Flow) */}
       {showPivotModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
-          onClick={() => setShowPivotModal(false)}
-        >
-          <div
-            className="bg-white max-w-md w-full rounded-2xl p-6 shadow-2xl overflow-hidden relative"
-            onClick={(e) => e.stopPropagation()}
-            style={{ animation: 'slideUp 0.28s cubic-bezier(0.32,0.72,0,1) both' }}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-              <h3 className="text-base font-black text-red-600 flex items-center gap-2">
-                🚨 Live API Alert: Major Delay Detected
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowPivotModal(false)}
-                className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 transition-colors cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Body */}
-            <p className="py-4 text-xs font-semibold text-gray-700 leading-relaxed">
-              Your flight MH70 has been delayed by 4 hours. Your new departure is 8:00 PM. This creates a gap in your schedule and impacts your hotel check-in.
-            </p>
-
-            {/* AI Solution Box */}
-            <div className="bg-[#E6F0EE] p-4 rounded-xl mt-1 border border-[#0D6955]">
-              <div className="text-xs font-bold text-[#0D6955] flex items-center gap-1.5 mb-2.5">
-                <Sparkles className="w-3.5 h-3.5 text-[#0D6955]" />
-                <span>✨ AI Reschedule Plan Ready</span>
-              </div>
-              <ul className="text-xs text-gray-700 space-y-2">
-                <li className="flex items-start gap-2">
-                  <span className="text-[#0D6955] font-bold mt-0.5">•</span>
-                  <span>Added 'Mitsui Outlet Park (10 mins from Airport)' to fill the 4-hour gap.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-[#0D6955] font-bold mt-0.5">•</span>
-                  <span>Auto-drafted a notification to 'Tokyo Bay Hotel' regarding your late arrival.</span>
-                </li>
-              </ul>
-            </div>
-
-            {/* Action Buttons (Flex row) */}
-            <div className="flex items-center gap-3 mt-5">
-              <button
-                type="button"
-                onClick={() => setShowPivotModal(false)}
-                className="px-4 py-2 text-xs font-bold text-gray-600 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
-              >
-                Ignore
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPivotModal(false);
-                  setPivotAccepted(true);
-                }}
-                className="bg-[#0D6955] text-white px-4 py-2 rounded-lg font-bold w-full text-xs hover:bg-[#095041] transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                Accept AI Pivot &amp; Update Itinerary
-              </button>
-            </div>
-          </div>
-        </div>
+        <FallbackPivotModal
+          onReviewManually={() => setShowPivotModal(false)}
+          onExecute={() => {
+            setShowPivotModal(false);
+            setPivotAccepted(true);
+          }}
+        />
       )}
-
-      <style>{`
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(30px) scale(0.97); }
-          to   { opacity: 1; transform: translateY(0)    scale(1);    }
-        }
-      `}</style>
 
       <div className="mb-8">
         {/* TURQUOISE GREEN "RUN AI VERIFICATION" BUTTON */}

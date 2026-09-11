@@ -3,6 +3,7 @@ import {
   APIProvider,
   Map,
   AdvancedMarker,
+  AdvancedMarkerAnchorPoint,
   InfoWindow,
   useMap,
   useMapsLibrary,
@@ -138,6 +139,7 @@ export const StopMarker: React.FC<StopMarkerProps> = ({
       onMouseEnter={() => onHover(stop.id)}
       onMouseLeave={() => onHover(null)}
       zIndex={isHighlighted ? 200 : stop.category === 'PRAYER' ? 50 : 100}
+      anchorPoint={AdvancedMarkerAnchorPoint.BOTTOM}
     >
       <div
         className="relative flex flex-col items-center cursor-pointer transition-transform duration-200 select-none"
@@ -205,6 +207,7 @@ const RouteBadgeMarker: React.FC<RouteBadgeMarkerProps> = ({ day }) => {
     <AdvancedMarker
       position={{ lat: midStop.coordinate.lat + 0.003, lng: midStop.coordinate.lng + 0.003 }}
       zIndex={300}
+      anchorPoint={AdvancedMarkerAnchorPoint.CENTER}
     >
       <div
         className="px-3 py-1 rounded-full text-white text-xs font-black shadow-xl flex items-center gap-1.5 border-2 border-white cursor-default select-none pointer-events-none"

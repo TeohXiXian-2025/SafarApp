@@ -14,7 +14,7 @@ import {
   MealtimeTrigger,
   HALAL_STATUS_PRIORITY,
 } from '../types/halalRadar';
-import { getAllHalalRestaurants } from '../data/halalRadarData';
+import { queryRestaurantsByGeoFence } from '../services/halalRadarService';
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -265,13 +265,23 @@ export function useHalalRadar(options: HalalRadarOptions = {}): UseHalalRadarRet
 
   const refreshCountRef = useRef(0);
 
+  // Monotonic token used to invalidate in-flight pipeline runs. This prevents
+  // stale "live" results from bleeding into state after the component unmounts
+  // or when a newer radius change supersedes the previous request (race).
+  const requestIdRef = useRef(0);
+
   /**
    * Core pipeline: location → filter → distance → rank
    */
   const runPipeline = useCallback(
     async (radiusM: number) => {
+      // Claim the latest request slot; any older in-flight run is now stale.
+      const requestId = ++requestIdRef.current;
+      const isCurrent = () => requestId === requestIdRef.current;
+
       setIsLoading(true);
       setError(null);
+      setRestaurants([]); // clear stale results before re-fetching
 
       try {
         // Step 1: Get user location
@@ -283,48 +293,55 @@ export function useHalalRadar(options: HalalRadarOptions = {}): UseHalalRadarRet
             // Fallback: use Tokyo Station coordinates for demo
             console.warn('Geolocation failed, using Tokyo Station fallback:', locErr);
             location = { lat: 35.6812, lng: 139.7671 };
-            setError(locErr as LocationError);
+            if (isCurrent()) setError(locErr as LocationError);
           }
         }
 
+        if (!isCurrent()) return;
         setUserLocation(location);
 
         if (!location) {
-          setRestaurants([]);
-          setIsLoading(false);
+          if (isCurrent()) {
+            setRestaurants([]);
+            setIsLoading(false);
+          }
           return;
         }
 
-        // Step 2: Get all restaurants (mock; replace with Firestore query in prod)
-        const allRestaurants = getAllHalalRestaurants();
+        // Step 2: Query restaurants within the geo-fence.
+        // Backed by a Firestore geohash geospatial query with mock fallback.
+        const nearby = await queryRestaurantsByGeoFence(location, radiusM);
+        if (!isCurrent()) return;
 
-        // Step 3: Filter by geo-fence
-        const nearby = filterByGeoFence(allRestaurants, location, radiusM);
-
-        // Step 4: Calculate walking distances
+        // Step 3: Calculate walking distances
         const withDistances = nearby.map((restaurant) => ({
           restaurant,
           walkingDistance: calculateWalkingDistance(location!, restaurant.coordinates),
         }));
 
-        // Step 5: Rank results
+        // Step 4: Rank results
         const ranked = rankRestaurants(withDistances);
 
+        if (!isCurrent()) return;
         setRestaurants(ranked);
         setMealtime(mealtimeTrigger ?? detectMealtime());
       } catch (err) {
         console.error('Halal Radar pipeline error:', err);
-        setRestaurants([]);
+        if (isCurrent()) setRestaurants([]);
       } finally {
-        setIsLoading(false);
+        if (isCurrent()) setIsLoading(false);
       }
     },
     [overrideLocation, mealtimeTrigger]
   );
 
-  // Run pipeline on mount and when radius changes
+  // Run pipeline on mount and when radius changes; invalidate on unmount so no
+  // live result can land on an unmounted (or stale) view.
   useEffect(() => {
     runPipeline(radiusKm * 1_000);
+    return () => {
+      requestIdRef.current += 1;
+    };
   }, [radiusKm, runPipeline]);
 
   // Refresh handler
