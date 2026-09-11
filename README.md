@@ -157,9 +157,17 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 ## 5. Technical Architecture & Feasibility
 
 **Stack Breakdown**
-*   **Frontend:** *[e.g., React Native]* - *[Why & Constraints]*
-*   **Backend & DB:** *[e.g., Supabase/Node.js]* - *[Why & Constraints]*
-*   **APIs:** *[e.g., Google Maps Places API]* - *[Why & Constraints]*
+*   **Frontend Core:** **React 19** + **TypeScript (~5.8)** + **Vite 6** - Provides bleeding-edge rendering speed, strict type safety across multi-user travel data models, and instantaneous hot-module replacement during live presentations.
+*   **Styling & Motion:** **Tailwind CSS v4** (`@tailwindcss/vite`) + **Framer Motion** (`motion: ^12.23`) + **Lucide React** - Custom responsive Islamic travel UI palette (Emerald/Sand/Amber accents), fluid drawer gestures, and accessible SVG iconography.
+*   **AI Engine & Multimodal Parser:** **Google Gemini 2.0 (`@google/genai: ^2.4.0`)** - Performs zero-shot extraction on social video links (TikTok/Xiaohongshu/Instagram) to parse hidden venues, geocodes coordinates, classifies Halal certification tiers, conducts group conflict auto-splits, and runs automated document expiry & accommodation gap checks.
+*   **Real-Time Collaboration & State Sync:** **Firebase Firestore (`firebase: ^12.18.0`)** + **HTML5 BroadcastChannel API** - Cloud-persisted live presence, synchronized group pin drops, and instant zero-latency multi-tab updates for seamless multiplayer group planning.
+*   **Mapping & Geospatial Intelligence:** **`@vis.gl/react-google-maps` (`^1.10.0`)** + **Google Maps JavaScript API (Places & Advanced Markers)** with **OpenStreetMap / Leaflet Fallback** - Real-time venue discovery, draggable drawer exploration, live geo-fenced Halal radar, and route visualization.
+*   **Prayer & Weather Intelligence:** **Aladhan Prayer Times API** + **Kyoto/GPS Astronomical Calculation Models** + **Open-Meteo API** - Computes GPS-anchored Dhuhr/Asr/Maghrib prayer blocks, Qibla headings, and live weather conditions with real-time transit delay simulations.
+*   **Document Generation & Offline Exports:** **jsPDF (`^4.2.1`)** - Generates print-ready emergency offline itineraries, prayer schedules, and travel compliance dossiers directly client-side.
 
-**Build Plan & Scope**
-*[Define exactly what modules are being shipped for this specific competition phase]*
+**Build Plan & Scope (Shipped Competition Phase Modules)**
+1.  **Social-to-Itinerary Reel Parser:** Paste any travel reel/short URL to automatically detect spots, geocode locations, and tag 3-tier Halal compliance into the collaborative itinerary.
+2.  **Prayer-Anchored Collaborative Workspace:** Draggable discovery drawer with dynamic prayer block locks, synced regroup pins, and live Google Maps venue markers.
+3.  **Cross-Screen Hotel Vault & Group Preference Sync:** Auto-syncs accommodations uploaded to the Document Vault directly into the workspace planning canvas with group preference fallback suggestions.
+4.  **AI Group Conflict Auto-Split:** Detects conflicting pace and dietary requirements (e.g. Mosque visit vs. local cafe break) and recalculates dual parallel paths with a shared regroup marker.
+5.  **Emergency Fallback Pivot Engine:** One-click blast radius calculation for transit/flight delays with automatic itinerary shift, nearby Halal dining, and prayer room discovery.
