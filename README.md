@@ -78,7 +78,19 @@ Planning a trip as a Muslim traveler is exhausting because you have to **juggle 
 
 <a id="22-ideation-boards"></a>
 ### 2.2 Ideation Boards
-*[Ideation Board Link](https://miro.com/app/board/uXjVJxp-TU8=/?share_link_id=677056059932)*
+
+To view our complete and interactive ideation flow, please click the link below. The embedded pictures below are just provided as a fallback summary in case you are unable to enter the live link.
+
+🔗 **[Full Ideation Board Link](https://miro.com/app/board/uXjVJxp-TU8=/?share_link_id=677056059932)**
+
+![Brainstorming Process](Brainstorming%20process.png)
+*This flowchart outlines our three-stage brainstorming methodology. It details how we moved from initial problem discovery to solution mapping, and finally through our mentor pivot iterations.*
+
+![Problem and Solution Tree](FinalIdea.png)
+*This board visualizes our core logic tree mapping. It shows exactly how we extracted root causes from market research and connected them directly to our problem statement and AI features.*
+
+![Idea Evolution Sequence](IdeaFormation.png)
+*This sequence tracks the evolution of the five major ideas we considered. It highlights the fatal flaws in our earlier concepts and the specific mentor advice that led us to our final chosen solution.*
 
 <a id="23-mentor-consultation"></a>
 ### 👨‍🏫 2.3 Mentor Consultation
