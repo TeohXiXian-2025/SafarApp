@@ -78,7 +78,7 @@ Planning a trip as a Muslim traveler is exhausting because you have to **juggle 
 
 <a id="22-ideation-boards"></a>
 ### 2.2 Ideation Boards
-*[Drop your Figma/Miro links or embedded images here. E.g., User Flows, SCAMPER grids, Crazy Eights]*
+*[Ideation Board Link](https://miro.com/app/board/uXjVJxp-TU8=/?share_link_id=677056059932)*
 
 <a id="23-mentor-consultation"></a>
 ### 👨‍🏫 2.3 Mentor Consultation
