@@ -317,6 +317,7 @@ export default function App() {
             onNavigateHome={() => setCurrentScreen('landing')}
             onOpenVault={() => setCurrentScreen('vault')}
             onOpenCanvas={() => setCurrentScreen('canvas')}
+            onOpenHalalRadar={handleOpenHalalRadar}
             recentAction={recentAction}
           />
 

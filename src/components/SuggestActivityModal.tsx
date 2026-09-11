@@ -59,7 +59,15 @@ export const SuggestActivityModal: React.FC<SuggestActivityModalProps> = ({
     setIsSimulatingExtract(true);
     setTimeout(() => {
       setIsSimulatingExtract(false);
-      if (url.toLowerCase().includes('ramen') || url.toLowerCase().includes('food')) {
+      if (url.toLowerCase().includes('xhs') || url.toLowerCase().includes('xiaohongshu') || url.toLowerCase().includes('rednote')) {
+        setExtractedPlace({
+          title: 'Gion Karyo Halal Kaiseki & Tea Garden',
+          location: 'Higashiyama Ward, Kyoto',
+          type: 'cultural',
+          halalBadge: '100% Halal Verified (RedNote 爆款)',
+          description: 'Trending on RedNote (小红书): Traditional multi-course Kyoto kaiseki prepared with halal certified dashi, non-alcoholic mirin, and private wudu space.',
+        });
+      } else if (url.toLowerCase().includes('ramen') || url.toLowerCase().includes('food')) {
         setExtractedPlace({
           title: 'Ayam-YA Halal Ramen Karasuma',
           location: 'Shimogyo Ward, Kyoto',
@@ -242,11 +250,20 @@ export const SuggestActivityModal: React.FC<SuggestActivityModalProps> = ({
                 <button
                   type="button"
                   onClick={() =>
+                    handleSimulateUrlExtract('https://xhslink.com/a/kyoto_halal_kaiseki')
+                  }
+                  className="px-2.5 py-1 rounded-lg bg-red-50 text-red-700 border border-red-200 text-[11px] font-bold hover:bg-red-600 hover:text-white transition-colors"
+                >
+                  📕 RedNote (小红书) Kaiseki
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
                     handleSimulateUrlExtract('https://tiktok.com/@kyoto_halal/video/ayam_ya_ramen')
                   }
                   className="px-2.5 py-1 rounded-lg bg-[#EEF4FE] text-[#00685F] text-[11px] font-bold hover:bg-[#00685F] hover:text-white transition-colors"
                 >
-                  🍜 Halal Ramen Reel
+                  🍜 Halal Ramen TikTok
                 </button>
                 <button
                   type="button"

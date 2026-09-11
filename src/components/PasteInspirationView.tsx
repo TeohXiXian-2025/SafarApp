@@ -115,12 +115,12 @@ export const PasteInspirationView: React.FC<PasteInspirationViewProps> = ({
           <span>AI Travel Copilot for Halal &amp; Umrah</span>
         </div>
 
-        <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-neutral-900 tracking-tight leading-tight">
-          Turn Inspiration into Your Itinerary
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-neutral-900 tracking-tight">
+          Turn Social Inspiration into Itinerary
         </h1>
 
         <p className="text-sm md:text-base text-neutral-600 leading-relaxed max-w-xl mx-auto">
-          Paste any Instagram Reel or TikTok travel video. We extract locations, verify 100% Halal dining, and anchor your day around prayer times.
+          Paste any RedNote (小红书), TikTok, or Instagram Reel travel link. We extract locations, verify 100% Halal dining, check live weather, and anchor around prayer times.
         </p>
       </div>
 
@@ -135,7 +135,7 @@ export const PasteInspirationView: React.FC<PasteInspirationViewProps> = ({
                 className="text-neutral-800 flex items-center gap-1.5"
               >
                 <LinkIcon className="w-4 h-4 text-[#0D6955]" />
-                <span>Reel or TikTok URL</span>
+                <span>RedNote (小红书), TikTok, or Reel Link</span>
               </label>
 
               <span className="flex items-center gap-1 text-emerald-700 text-[11px] font-bold">
@@ -154,7 +154,7 @@ export const PasteInspirationView: React.FC<PasteInspirationViewProps> = ({
                 type="text"
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
-                placeholder="Paste an IG Reel or TikTok link here..."
+                placeholder="Paste RedNote (xhslink.com/...), TikTok, or IG Reel link..."
                 className="w-full h-12 pl-10 pr-24 bg-[#EEF4FE]/70 hover:bg-[#EEF4FE] rounded-2xl text-xs sm:text-sm font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-[#0D6955]/30 focus:bg-white border border-neutral-200/80 transition-all shadow-inner"
               />
 

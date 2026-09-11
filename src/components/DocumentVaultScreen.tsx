@@ -47,10 +47,28 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
   onNavigateHome,
 }) => {
   // Uploaded documents state (Passport, Flights, Hotels)
-  const [documents, setDocuments] = useState<Record<DocumentCategory, TravelDocument | null>>({
-    passport: SAMPLE_DOCUMENTS.passport,
-    flights: SAMPLE_DOCUMENTS.flights,
-    hotels: SAMPLE_DOCUMENTS.hotels,
+  const [documents, setDocuments] = useState<Record<DocumentCategory, TravelDocument | null>>(() => {
+    try {
+      const isRemoved = localStorage.getItem('safar_vault_hotel_removed');
+      let hotelDoc: TravelDocument | null = SAMPLE_DOCUMENTS.hotels;
+      if (isRemoved === 'true') {
+        hotelDoc = null;
+      } else {
+        const savedHotel = localStorage.getItem('safar_vault_hotel_document');
+        if (savedHotel) hotelDoc = JSON.parse(savedHotel);
+      }
+      return {
+        passport: SAMPLE_DOCUMENTS.passport,
+        flights: SAMPLE_DOCUMENTS.flights,
+        hotels: hotelDoc,
+      };
+    } catch {
+      return {
+        passport: SAMPLE_DOCUMENTS.passport,
+        flights: SAMPLE_DOCUMENTS.flights,
+        hotels: SAMPLE_DOCUMENTS.hotels,
+      };
+    }
   });
 
   // Verification state & AI loading stages
@@ -133,6 +151,20 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
         ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
         : `${Math.round(file.size / 1024)} KB`;
 
+    // Smart hotel extraction
+    let hotelName = 'Hotel Granvia Kyoto (JR Kyoto Station)';
+    const lower = file.name.toLowerCase();
+    if (lower.includes('tokyo') || lower.includes('shinjuku')) {
+      hotelName = 'MIMARU Tokyo Shinjuku West';
+    } else if (lower.includes('mimaru')) {
+      hotelName = 'MIMARU Kyoto Station Suites';
+    } else if (lower.includes('nazuna') || lower.includes('ryokan')) {
+      hotelName = 'Nazuna Kyoto Gion Machiya Ryokan';
+    } else if (file.name && !file.name.toLowerCase().includes('sample')) {
+      const cleaned = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+      hotelName = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    }
+
     const newDoc: TravelDocument = {
       id: `doc-${category}-${Date.now()}`,
       category,
@@ -140,13 +172,27 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
       fileSize: sizeFormatted,
       fileType: isPdf ? 'pdf' : 'image',
       uploadedAt: 'Uploaded just now',
-      extractedDetails: SAMPLE_DOCUMENTS[category].extractedDetails,
+      extractedDetails: category === 'hotels' ? {
+        hotelName,
+        bookingReference: `HTL-${Math.floor(10000 + Math.random() * 90000)}`,
+        checkInDate: '2026-10-21 15:00',
+        checkOutDate: '2026-10-25 11:00',
+        nights: 4,
+      } : SAMPLE_DOCUMENTS[category].extractedDetails,
     };
 
     setDocuments((prev) => ({
       ...prev,
       [category]: newDoc,
     }));
+
+    if (category === 'hotels') {
+      try {
+        localStorage.setItem('safar_vault_hotel_document', JSON.stringify(newDoc));
+        localStorage.removeItem('safar_vault_hotel_removed');
+        window.dispatchEvent(new CustomEvent('safar_vault_hotel_updated', { detail: newDoc }));
+      } catch {}
+    }
   };
 
   const handleInputChange = (category: DocumentCategory, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -160,6 +206,13 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
       ...prev,
       [category]: null,
     }));
+    if (category === 'hotels') {
+      try {
+        localStorage.removeItem('safar_vault_hotel_document');
+        localStorage.setItem('safar_vault_hotel_removed', 'true');
+        window.dispatchEvent(new CustomEvent('safar_vault_hotel_updated', { detail: null }));
+      } catch {}
+    }
     if (verificationState === 'completed') {
       setVerificationState('idle');
       setReport(null);
@@ -167,10 +220,18 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
   };
 
   const handleLoadSample = (category: DocumentCategory) => {
+    const sample = SAMPLE_DOCUMENTS[category];
     setDocuments((prev) => ({
       ...prev,
-      [category]: SAMPLE_DOCUMENTS[category],
+      [category]: sample,
     }));
+    if (category === 'hotels') {
+      try {
+        localStorage.setItem('safar_vault_hotel_document', JSON.stringify(sample));
+        localStorage.removeItem('safar_vault_hotel_removed');
+        window.dispatchEvent(new CustomEvent('safar_vault_hotel_updated', { detail: sample }));
+      } catch {}
+    }
   };
 
   const handleLoadAllSamples = () => {
@@ -179,6 +240,11 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
       flights: SAMPLE_DOCUMENTS.flights,
       hotels: SAMPLE_DOCUMENTS.hotels,
     });
+    try {
+      localStorage.setItem('safar_vault_hotel_document', JSON.stringify(SAMPLE_DOCUMENTS.hotels));
+      localStorage.removeItem('safar_vault_hotel_removed');
+      window.dispatchEvent(new CustomEvent('safar_vault_hotel_updated', { detail: SAMPLE_DOCUMENTS.hotels }));
+    } catch {}
   };
 
   // Simulated AI Logic: exactly 3 seconds with the 3 mandated sequential states:
@@ -1379,6 +1445,17 @@ export const DocumentVaultScreen: React.FC<DocumentVaultScreenProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI Emergency Fallback Pivot Modal */}
+      {showPivotModal && (
+        <FallbackPivotModal
+          onReviewManually={() => setShowPivotModal(false)}
+          onExecute={() => {
+            setShowPivotModal(false);
+            setPivotAccepted(true);
+          }}
+        />
       )}
 
       {/* Reminder Toast */}

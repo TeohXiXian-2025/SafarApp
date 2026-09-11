@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { TRENDING_COMMUNITY_PLANS } from '../data/mockData';
 import {
   Sparkles,
   Compass,
@@ -18,6 +17,14 @@ import {
   Share2,
   FileCheck,
   Radar,
+  CloudSun,
+  Route,
+  BookOpen,
+  Radio,
+  Footprints,
+  Video,
+  Layers,
+  Heart,
 } from 'lucide-react';
 
 interface LandingScreenProps {
@@ -37,239 +44,392 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   onOpenHalalRadar,
   onSelectCommunityPlan,
 }) => {
-  const [reelUrl, setReelUrl] = useState('https://instagram.com/reel/C8k9xM2... (Kyoto Halal Guide)');
-  const [showReelInput, setShowReelInput] = useState(false);
+  const [activeConsoleTab, setActiveConsoleTab] = useState<'plan' | 'social'>('plan');
+  const [destinationSearch, setDestinationSearch] = useState('Kyoto, Japan');
+  const [socialLinkInput, setSocialLinkInput] = useState('https://xhslink.com/a/kyoto_halal_guide');
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractedPreview, setExtractedPreview] = useState<{
+    source: 'rednote' | 'tiktok' | 'instagram';
+    title: string;
+    points: string[];
+    halalInfo: string;
+    weatherNote: string;
+  } | null>(null);
 
-  const handleReelSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!reelUrl.trim()) return;
-    onQuickReelGenerate(reelUrl.trim());
+  const handleSimulateExtract = (url: string) => {
+    setSocialLinkInput(url);
+    setIsExtracting(true);
+    setExtractedPreview(null);
+
+    setTimeout(() => {
+      setIsExtracting(false);
+      if (url.includes('xhs') || url.includes('rednote')) {
+        setExtractedPreview({
+          source: 'rednote',
+          title: '小红书京都3日清真深度游 (RedNote Curated Guide)',
+          points: ['Ayam-YA Halal Ramen', 'Arashiyama Bamboo Grove', 'Kiyomizu-dera Sunset', 'Gion Tea Stroll'],
+          halalInfo: '100% Halal Verified Kitchens · Dedicated Wudu Spot',
+          weatherNote: '☀️ 22°C Clear Autumn · Weather-Optimized Routing Recommended',
+        });
+      } else if (url.includes('tiktok')) {
+        setExtractedPreview({
+          source: 'tiktok',
+          title: 'Viral Kyoto Halal Wagyu & Shrines (TikTok Guide)',
+          points: ['Halal Wagyu Panga Gion', 'Fushimi Inari Torii Gates', 'Kyoto Islamic Center'],
+          halalInfo: 'Certified Halal Wagyu (NAHA / JHA)',
+          weatherNote: '☀️ Morning walk advised before afternoon drizzle buffer',
+        });
+      } else {
+        setExtractedPreview({
+          source: 'instagram',
+          title: 'Autumn in Kansai: Cafes & Prayer Spaces (IG Reel)',
+          points: ['% Arabica Higashiyama', 'Nishiki Market Skewers', 'Matsubara Musalla'],
+          halalInfo: 'Pork-Free & Muslim-Friendly Corridor',
+          weatherNote: '🍂 Peak Autumn Foliage season detected',
+        });
+      }
+    }, 500);
   };
 
   return (
-    <div className="w-full min-h-screen pt-12 pb-24 px-4 sm:px-6 md:px-8 max-w-6xl mx-auto flex flex-col items-center">
-      {/* 1. HERO BADGE */}
-      <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#EEF4FE] border border-[#00685F]/20 text-[#00685F] text-xs font-black tracking-wide shadow-xs mb-6 animate-in fade-in slide-in-from-bottom-2">
+    <div className="w-full min-h-screen pt-8 pb-24 px-4 sm:px-6 md:px-8 max-w-6xl mx-auto flex flex-col items-center">
+      {/* 1. TOP BRAND BADGE */}
+      <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#EEF4FE] border border-[#00685F]/20 text-[#00685F] text-xs font-black tracking-wide shadow-xs mb-5 animate-in fade-in slide-in-from-bottom-2">
         <Sparkles className="w-4 h-4 text-[#008378]" />
-        <span>Safar • The Muslim Travel OS · CodeNection 2026</span>
+        <span>SAFAR OS • THE MUSLIM TRAVEL OPERATING SYSTEM</span>
       </div>
 
-      {/* 2. MAIN HERO HEADLINE */}
-      <div className="text-center max-w-3xl mx-auto space-y-4 mb-10">
-        <h1 className="text-4xl sm:text-6xl font-black text-[#161C23] tracking-tight leading-[1.08]">
-          Effortless Halal Travel. <br />
-          <span className="text-[#00685F]">Faith-Anchored</span> &amp; AI-Synced.
+      {/* 2. HERO HEADLINE */}
+      <div className="text-center max-w-3xl mx-auto space-y-3.5 mb-8">
+        <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-[#161C23] tracking-tight leading-[1.1]">
+          Faith-Anchored Trips. <br />
+          <span className="text-[#00685F]">Weather-Smart</span> &amp; Group-Synced.
         </h1>
-        <p className="text-sm sm:text-base md:text-lg text-[#6D7A77] font-medium leading-relaxed max-w-2xl mx-auto">
-          Built specifically for Muslim travelers and mixed-faith groups. Automatically locks daily prayer times with nearby wudu facilities, pinpoints verified Halal gastronomy, and arbitrates group decisions without anyone sacrificing their trip.
+        <p className="text-sm sm:text-base text-[#6D7A77] font-medium leading-relaxed max-w-2xl mx-auto">
+          Built for Muslim travelers and mixed-faith groups. Syncs daily prayer times with wudu facilities, organizes verified Halal dining, and clusters routes by distance &amp; weather — <strong>with you in full control, not letting AI dominate.</strong>
         </p>
-
-        {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 pt-2">
-          {/* Primary CTA: Start as Team Lead */}
-          <button
-            type="button"
-            onClick={onStartPlanningLead}
-            className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-[#00685F] hover:bg-[#008378] active:scale-[0.99] text-white font-black text-base shadow-xl hover:shadow-2xl transition-all flex items-center justify-center gap-3 cursor-pointer group"
-          >
-            <Crown className="w-5 h-5 text-[#62FAE3] group-hover:rotate-12 transition-transform" />
-            <span>Plan Trip (as Team Lead 👑)</span>
-            <ChevronRight className="w-4 h-4" />
-          </button>
-
-          {/* Secondary CTA: Quick Reel / TikTok URL */}
-          <button
-            type="button"
-            onClick={() => setShowReelInput(!showReelInput)}
-            className="w-full sm:w-auto px-6 py-4 rounded-2xl bg-white hover:bg-[#FAF8F5] border border-[#E7DFD5] text-[#161C23] font-bold text-sm shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Play className="w-4 h-4 text-[#00685F]" />
-            <span>Paste TikTok / Reel Link</span>
-          </button>
-        </div>
-
-        {/* Collapsible Reel Input Drawer */}
-        {showReelInput && (
-          <div className="w-full max-w-xl mx-auto mt-4 p-4 rounded-2xl bg-white border border-[#E7DFD5] shadow-lg animate-in fade-in slide-in-from-top-2">
-            <form onSubmit={handleReelSubmit} className="flex gap-2">
-              <input
-                type="text"
-                value={reelUrl}
-                onChange={(e) => setReelUrl(e.target.value)}
-                placeholder="Paste Instagram Reel or TikTok link..."
-                className="flex-1 h-12 px-4 rounded-xl bg-[#FAF8F5] border border-[#E7DFD5] text-xs font-bold text-[#161C23] focus:outline-none focus:bg-white"
-              />
-              <button
-                type="submit"
-                className="px-5 h-12 rounded-xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-black shrink-0 flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4 text-[#62FAE3]" />
-                <span>Extract</span>
-              </button>
-            </form>
-          </div>
-        )}
-
-        {/* Feature Pills */}
-        <div className="flex flex-wrap items-center justify-center gap-2 pt-4">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-[#E7DFD5] text-xs font-bold text-[#161C23]">
-            <Clock className="w-3.5 h-3.5 text-[#00685F]" />
-            <span>Dynamic Prayer Anchoring</span>
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-[#E7DFD5] text-xs font-bold text-[#161C23]">
-            <UtensilsCrossed className="w-3.5 h-3.5 text-[#00685F]" />
-            <span>3-Tier Halal Dining Radar</span>
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-[#E7DFD5] text-xs font-bold text-[#161C23]">
-            <Users className="w-3.5 h-3.5 text-[#00685F]" />
-            <span>Team Lead &amp; Mate Suggestion Engine</span>
-          </span>
-        </div>
       </div>
 
-      {/* 3. 4 CORE PRODUCT PILLARS (Aligned with Mentor Pitch Deck) */}
-      <div className="w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-16">
-        <div className="p-5 rounded-3xl bg-white border border-[#E7DFD5] shadow-xs space-y-2.5">
-          <div className="w-10 h-10 rounded-2xl bg-[#00685F]/10 text-[#00685F] flex items-center justify-center font-bold text-lg">
-            🕌
-          </div>
-          <h3 className="text-sm font-black text-[#161C23]">
-            1. Dynamic Prayer Anchors
-          </h3>
-          <p className="text-xs text-[#6D7A77] leading-relaxed">
-            GPS calculates local Dhuhr, Asr &amp; Fajr times. Automatically maps nearest wudu facilities while reserving café pauses for non-Muslim companions.
-          </p>
-        </div>
-
-        <div className="p-5 rounded-3xl bg-white border border-[#E7DFD5] shadow-xs space-y-2.5">
-          <div className="w-10 h-10 rounded-2xl bg-[#00685F]/10 text-[#00685F] flex items-center justify-center font-bold text-lg">
-            🍽️
-          </div>
-          <h3 className="text-sm font-black text-[#161C23]">
-            2. Geo-Fenced Halal Radar
-          </h3>
-          <p className="text-xs text-[#6D7A77] leading-relaxed">
-            Transparent 3-tier verification: Certified Halal, Muslim-Owned, or Pork-Free. Live wait times &amp; verified menus on one single map.
-          </p>
-        </div>
-
-        <div className="p-5 rounded-3xl bg-white border border-[#E7DFD5] shadow-xs space-y-2.5">
-          <div className="w-10 h-10 rounded-2xl bg-[#00685F]/10 text-[#00685F] flex items-center justify-center font-bold text-lg">
-            👑
-          </div>
-          <h3 className="text-sm font-black text-[#161C23]">
-            3. Lead &amp; Mate Permissions
-          </h3>
-          <p className="text-xs text-[#6D7A77] leading-relaxed">
-            Team Lead holds prior authorization to edit and finalize. Tripmates submit suggestions and social links (TikTok/Reels) to the approval queue.
-          </p>
-        </div>
-
-        <div className="p-5 rounded-3xl bg-white border border-[#E7DFD5] shadow-xs space-y-2.5">
-          <div className="w-10 h-10 rounded-2xl bg-[#00685F]/10 text-[#00685F] flex items-center justify-center font-bold text-lg">
-            🛡️
-          </div>
-          <h3 className="text-sm font-black text-[#161C23]">
-            4. Smart Document Vault
-          </h3>
-          <p className="text-xs text-[#6D7A77] leading-relaxed">
-            Proactively cross-checks passport 6-month validity, flight times, and hotel booking reference numbers (BRN) to catch errors before the airport.
-          </p>
-        </div>
-      </div>
-
-      {/* 4. POPULAR DESTINATIONS SHOWCASE */}
-      <div className="w-full space-y-4 mb-14">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-black text-[#161C23]">
-              Curated Halal Destinations
-            </h2>
-            <p className="text-xs text-[#6D7A77]">
-              Pre-verified itineraries with locked prayer anchors and Halal food corridors
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onStartPlanningLead}
-            className="text-xs font-bold text-[#00685F] hover:underline flex items-center gap-1 cursor-pointer"
-          >
-            <span>Plan Custom Trip</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            {
-              city: 'Kyoto, Japan',
-              flag: '🇯🇵',
-              subtitle: 'Autumn foliage & Halal Wagyu',
-              points: 'Arashiyama, Fushimi Inari, Gion',
-              spots: '24 Halal Spots',
-            },
-            {
-              city: 'Makkah & Madinah',
-              flag: '🇸🇦',
-              subtitle: 'Hajj & Umrah Pilgrimage',
-              points: 'Kaaba, Nabawi, Quba Mosque',
-              spots: '100% Halal City',
-            },
-            {
-              city: 'Istanbul, Turkey',
-              flag: '🇹🇷',
-              subtitle: 'Ottoman Heritage & Bosphorus',
-              points: 'Hagia Sophia, Blue Mosque, Grand Bazaar',
-              spots: '4.2k Community Saves',
-            },
-            {
-              city: 'Kuala Lumpur, Malaysia',
-              flag: '🇲🇾',
-              subtitle: 'Gastronomy & Modern Hub',
-              points: 'KLCC, Masjid Negara, Batu Caves',
-              spots: 'Global Halal Capital',
-            },
-          ].map((item) => (
-            <div
-              key={item.city}
-              className="bg-white rounded-2xl border border-[#E7DFD5] p-4 shadow-xs hover:shadow-md transition-all flex flex-col justify-between"
+      {/* 3. CENTERPIECE INTERACTIVE PLANNING CONSOLE */}
+      <div className="w-full max-w-3xl bg-white rounded-3xl p-5 sm:p-7 shadow-xl border border-[#E7DFD5] space-y-5 mb-14 transition-all">
+        {/* Console Mode Switcher Tabs */}
+        <div className="flex items-center justify-between border-b border-[#E7DFD5] pb-3 flex-wrap gap-2">
+          <div className="flex items-center gap-2 bg-[#FAF8F5] p-1 rounded-2xl border border-[#E7DFD5]">
+            <button
+              type="button"
+              onClick={() => setActiveConsoleTab('plan')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeConsoleTab === 'plan'
+                  ? 'bg-[#00685F] text-white shadow-xs'
+                  : 'text-[#6D7A77] hover:text-[#161C23]'
+              }`}
             >
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-2xl">{item.flag}</span>
-                  <span className="text-[10px] font-extrabold text-[#00685F] bg-[#EEF4FE] px-2 py-0.5 rounded-full">
-                    {item.spots}
-                  </span>
-                </div>
-                <div>
-                  <h4 className="text-sm font-black text-[#161C23]">{item.city}</h4>
-                  <p className="text-xs text-[#6D7A77] mt-0.5">{item.subtitle}</p>
-                </div>
-                <div className="text-[11px] text-[#526360] font-medium pt-2 border-t border-[#E7DFD5]/60">
-                  <span className="font-bold text-[#161C23]">Key stops:</span> {item.points}
-                </div>
-              </div>
+              <Crown className="w-3.5 h-3.5" />
+              <span>Plan as Team Lead 👑</span>
+            </button>
 
+            <button
+              type="button"
+              onClick={() => {
+                setActiveConsoleTab('social');
+                if (!extractedPreview) handleSimulateExtract(socialLinkInput);
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeConsoleTab === 'social'
+                  ? 'bg-[#00685F] text-white shadow-xs'
+                  : 'text-[#6D7A77] hover:text-[#161C23]'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5 text-red-500" />
+              <span>RedNote 📕 / TikTok / IG Link</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-xs text-[#00685F] font-extrabold bg-[#EEF4FE] px-3 py-1 rounded-full border border-[#00685F]/20">
+            <CloudSun className="w-3.5 h-3.5" />
+            <span>Kyoto Live: 22°C Clear</span>
+          </div>
+        </div>
+
+        {/* TAB 1: PLAN AS TEAM LEAD (WEATHER & DISTANCE AWARE) */}
+        {activeConsoleTab === 'plan' && (
+          <div className="space-y-4 animate-in fade-in duration-200">
+            <div>
+              <label className="text-xs font-bold text-[#161C23] mb-1.5 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <MapPin className="w-4 h-4 text-[#00685F]" />
+                  <span>Where are you traveling?</span>
+                </span>
+                <span className="text-[11px] text-[#6D7A77] font-semibold">
+                  Weather &amp; Walking Distance Optimized
+                </span>
+              </label>
+
+              <div className="relative">
+                <input
+                  type="text"
+                  value={destinationSearch}
+                  onChange={(e) => setDestinationSearch(e.target.value)}
+                  placeholder="e.g. Kyoto, Japan or Mecca, Saudi Arabia"
+                  className="w-full h-13 pl-4 pr-32 rounded-2xl bg-[#FAF8F5] border border-[#E7DFD5] text-sm font-bold text-[#161C23] focus:outline-none focus:ring-2 focus:ring-[#00685F]/30 focus:bg-white transition-all shadow-inner"
+                />
+
+                <button
+                  type="button"
+                  onClick={onStartPlanningLead}
+                  className="absolute right-2 top-2 bottom-2 px-5 rounded-xl bg-[#00685F] hover:bg-[#008378] active:scale-98 text-white font-black text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-[#62FAE3]" />
+                  <span>Plan Route</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Hub Buttons with Live Temperature Pills */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-xs font-bold text-[#6D7A77]">Trending Hubs:</span>
+              {[
+                { name: 'Kyoto 🍁', temp: '22°C' },
+                { name: 'Makkah 🕋', temp: '34°C' },
+                { name: 'Istanbul 🕌', temp: '19°C' },
+                { name: 'Kuala Lumpur 🌴', temp: '30°C' },
+                { name: 'Tokyo 🗼', temp: '21°C' },
+              ].map((hub) => (
+                <button
+                  key={hub.name}
+                  type="button"
+                  onClick={() => {
+                    setDestinationSearch(hub.name.split(' ')[0]);
+                    onStartPlanningLead();
+                  }}
+                  className="px-2.5 py-1 rounded-xl bg-[#FAF8F5] hover:bg-white border border-[#E7DFD5] text-xs font-bold text-[#161C23] flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <span>{hub.name}</span>
+                  <span className="text-[10px] text-[#00685F] font-mono font-extrabold bg-[#EEF4FE] px-1 rounded">
+                    {hub.temp}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Human-in-Control Feature Strip */}
+            <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-[#E7DFD5] flex items-center justify-between text-xs text-[#526360] flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Route className="w-4 h-4 text-[#00685F]" />
+                <span className="font-semibold">
+                  <strong>User Priority Guarantee:</strong> You define must-visit stops &amp; reorder; AI only organizes weather windows &amp; distances.
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={onStartPlanningLead}
-                className="mt-4 w-full py-2.5 rounded-xl bg-[#FAF8F5] hover:bg-[#00685F] hover:text-white text-xs font-bold text-[#161C23] transition-all cursor-pointer text-center"
+                className="text-[#00685F] font-bold hover:underline shrink-0"
               >
-                Plan as Team Lead →
+                Open Setup Wizard →
               </button>
             </div>
-          ))}
+          </div>
+        )}
+
+        {/* TAB 2: REDNOTE (小红书), TIKTOK & IG SOCIAL EXTRACTION */}
+        {activeConsoleTab === 'social' && (
+          <div className="space-y-4 animate-in fade-in duration-200">
+            <div>
+              <label className="text-xs font-bold text-[#161C23] mb-1.5 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="text-base">📕</span>
+                  <span>Paste RedNote (小红书), TikTok, or Instagram Link</span>
+                </span>
+                <span className="text-[11px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">
+                  RedNote Supported
+                </span>
+              </label>
+
+              <div className="relative flex gap-2">
+                <input
+                  type="text"
+                  value={socialLinkInput}
+                  onChange={(e) => handleSimulateExtract(e.target.value)}
+                  placeholder="Paste RedNote link (xhslink.com/...) or TikTok / Reel..."
+                  className="flex-1 h-13 px-4 rounded-2xl bg-[#FAF8F5] border border-[#E7DFD5] text-xs font-medium text-[#161C23] focus:outline-none focus:ring-2 focus:ring-red-400 focus:bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => onQuickReelGenerate(socialLinkInput)}
+                  className="px-5 h-13 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-black text-xs shadow-md flex items-center gap-1.5 shrink-0 cursor-pointer transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-white" />
+                  <span>Build Itinerary</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Test Links */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-bold text-[#6D7A77]">Test Sample Notes:</span>
+              <button
+                type="button"
+                onClick={() => handleSimulateExtract('https://xhslink.com/a/kyoto_halal_guide')}
+                className="px-2.5 py-1 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700 hover:bg-red-100 flex items-center gap-1"
+              >
+                <span>📕 小红书京都清真打卡</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSimulateExtract('https://tiktok.com/@halaltraveler/kyoto_food_walk')}
+                className="px-2.5 py-1 rounded-xl bg-[#EEF4FE] text-xs font-bold text-[#00685F] hover:bg-[#00685F] hover:text-white transition-colors flex items-center gap-1"
+              >
+                <span>🎵 TikTok Food Guide</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSimulateExtract('https://instagram.com/reel/autumn_kyoto_spots')}
+                className="px-2.5 py-1 rounded-xl bg-[#FAF8F5] text-xs font-bold text-[#161C23] border border-[#E7DFD5] hover:bg-white flex items-center gap-1"
+              >
+                <span>📸 IG Autumn Reel</span>
+              </button>
+            </div>
+
+            {/* Simulated Live Extraction Preview Card */}
+            {isExtracting ? (
+              <div className="p-4 rounded-2xl bg-[#FAF8F5] border border-[#E7DFD5] flex items-center justify-center gap-2 text-xs font-bold text-[#00685F] animate-pulse">
+                <Sparkles className="w-4 h-4" />
+                <span>Safar AI is reading note captions, locations &amp; Halal credentials...</span>
+              </div>
+            ) : extractedPreview ? (
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-red-50/50 via-white to-emerald-50/50 border border-[#E7DFD5] shadow-xs space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-red-700 flex items-center gap-1">
+                    <span>📕</span>
+                    <span>{extractedPreview.title}</span>
+                  </span>
+                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                    {extractedPreview.halalInfo}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {extractedPreview.points.map((pt) => (
+                    <span
+                      key={pt}
+                      className="px-2.5 py-0.5 rounded-full bg-white border border-[#E7DFD5] text-xs font-bold text-[#161C23]"
+                    >
+                      📍 {pt}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-[#E7DFD5] text-[11px] text-[#526360]">
+                  <span>{extractedPreview.weatherNote}</span>
+                  <button
+                    type="button"
+                    onClick={() => onQuickReelGenerate(socialLinkInput)}
+                    className="font-bold text-[#00685F] hover:underline flex items-center gap-1"
+                  >
+                    <span>Import to Plan</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {/* 4. THE 4 PILLARS OF SAFAR OS (Directly addressing all 4 user requirements) */}
+      <div className="w-full space-y-4 mb-16">
+        <div className="text-center max-w-xl mx-auto space-y-1 mb-8">
+          <h2 className="text-2xl sm:text-3xl font-black text-[#161C23]">
+            Engineered for Modern Halal Travel
+          </h2>
+          <p className="text-xs sm:text-sm text-[#6D7A77]">
+            Every feature is designed to protect your faith, optimize routes, and keep groups unified.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Pillar 1: Weather & Distance (Requirement 1) */}
+          <div className="p-5 rounded-3xl bg-white border border-[#E7DFD5] shadow-xs space-y-3 hover:shadow-md transition-all">
+            <div className="w-11 h-11 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-xl border border-amber-200/60">
+              🌤️
+            </div>
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                Human-in-Control
+              </span>
+              <h3 className="text-sm font-black text-[#161C23] mt-1.5">
+                Weather &amp; Distance Optimizer
+              </h3>
+            </div>
+            <p className="text-xs text-[#6D7A77] leading-relaxed">
+              Considers live temperature, rain probability, and transit walking distances. You hold the final say to reorder and lock stops — AI never dominates your choices.
+            </p>
+          </div>
+
+          {/* Pillar 2: Group Sync at Map (Requirement 2) */}
+          <div className="p-5 rounded-3xl bg-white border border-[#E7DFD5] shadow-xs space-y-3 hover:shadow-md transition-all">
+            <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-[#00685F] flex items-center justify-center font-bold text-xl border border-emerald-200/60">
+              🤝
+            </div>
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#00685F] bg-[#EEF4FE] px-2 py-0.5 rounded-full">
+                Visual Radar
+              </span>
+              <h3 className="text-sm font-black text-[#161C23] mt-1.5">
+                Interactive Group Sync on Map
+              </h3>
+            </div>
+            <p className="text-xs text-[#6D7A77] leading-relaxed">
+              Allows Muslim &amp; Non-Muslim party members to split for prayer or artisan cafes, then reconverge at a synchronized, GPS-monitored rendezvous pin with zero awkward pauses.
+            </p>
+          </div>
+
+          {/* Pillar 3: RedNote & Social Import (Requirement 3) */}
+          <div className="p-5 rounded-3xl bg-white border border-[#E7DFD5] shadow-xs space-y-3 hover:shadow-md transition-all">
+            <div className="w-11 h-11 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center font-bold text-xl border border-red-200/60">
+              📕
+            </div>
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-red-800 bg-red-100 px-2 py-0.5 rounded-full">
+                Multi-Platform
+              </span>
+              <h3 className="text-sm font-black text-[#161C23] mt-1.5">
+                RedNote, TikTok &amp; Reel Import
+              </h3>
+            </div>
+            <p className="text-xs text-[#6D7A77] leading-relaxed">
+              Directly import travel guides from RedNote (小红书), TikTok, and Instagram. AI extracts attractions, verifies Halal kitchens, and places them into your itinerary.
+            </p>
+          </div>
+
+          {/* Pillar 4: Smart Document Vault */}
+          <div className="p-5 rounded-3xl bg-white border border-[#E7DFD5] shadow-xs space-y-3 hover:shadow-md transition-all">
+            <div className="w-11 h-11 rounded-2xl bg-[#EEF4FE] text-[#00685F] flex items-center justify-center font-bold text-xl border border-[#00685F]/20">
+              🛡️
+            </div>
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#00685F] bg-[#EEF4FE] px-2 py-0.5 rounded-full">
+                Zero Airport Chaos
+              </span>
+              <h3 className="text-sm font-black text-[#161C23] mt-1.5">
+                AI Document Cross-Check
+              </h3>
+            </div>
+            <p className="text-xs text-[#6D7A77] leading-relaxed">
+              Sweeps group passports, flight bookings, and hotel confirmation codes for expiry issues and accommodation date gaps before departure.
+            </p>
+          </div>
         </div>
       </div>
 
       {/* 5. QUICK ACTIONS FOOTER BANNER */}
-      <div className="w-full bg-[#EEF4FE]/80 border border-[#00685F]/20 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-sm">
+      <div className="w-full bg-[#EEF4FE]/90 border border-[#00685F]/25 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-sm">
         <div className="space-y-1 text-center sm:text-left">
           <h3 className="text-lg font-black text-[#161C23]">
-            Ready to explore Kyoto with your group?
+            Experience the Live Interactive Canvas
           </h3>
           <p className="text-xs sm:text-sm text-[#6D7A77]">
-            View the live workspace with Team Lead authorization, mate suggestion feeds, and real-time conflict auto-split.
+            Test live group sync pins, weather-adaptive route clustering, and RedNote/TikTok suggestion queues.
           </p>
         </div>
 

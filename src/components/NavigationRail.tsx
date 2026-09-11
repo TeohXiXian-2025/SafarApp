@@ -316,10 +316,18 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
     {
       id: 'budget',
       icon: <DollarSign className="w-4 h-4" />,
-      label: 'Budget (PDF MYR 0.00)',
-      badge: '¥0',
+      label: 'Budget & PDF Export',
+      badge: 'PDF Ready',
       badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
       action: onOpenBudget,
+    },
+    {
+      id: 'multiplayer',
+      icon: <Users className="w-4 h-4 text-teal-600" />,
+      label: 'Tripmates & Share',
+      badge: `${state.members.length} Active`,
+      badgeColor: 'bg-teal-50 text-teal-700 border-teal-200',
+      action: onOpenMultiplayer,
     },
     {
       id: 'halalRadar',

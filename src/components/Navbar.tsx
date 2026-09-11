@@ -13,6 +13,7 @@ import {
   Compass,
   MapPin,
   Hotel,
+  Radar,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -26,6 +27,7 @@ interface NavbarProps {
   onSelectStep?: (step: 'planTrip' | 'pasteInspiration') => void;
   onOpenVault: () => void;
   onOpenCanvas: () => void;
+  onOpenHalalRadar?: () => void;
   recentAction?: string;
 }
 
@@ -40,6 +42,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectStep,
   onOpenVault,
   onOpenCanvas,
+  onOpenHalalRadar,
   recentAction,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
@@ -111,17 +114,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
             <button
               onClick={() => {
-                onNavigateHome();
-                if (onSelectStep) onSelectStep('planTrip');
+                localStorage.setItem('safar_discovery_active_tab', 'Hotels');
+                onOpenCanvas();
               }}
-              className="px-3 py-1.5 rounded-xl transition-colors hover:text-neutral-900 hover:bg-neutral-100 cursor-pointer"
+              className={`px-3 py-1.5 rounded-xl transition-colors cursor-pointer ${
+                currentScreen === 'canvas'
+                  ? 'hover:text-[#0D6955] hover:bg-[#0D6955]/10'
+                  : 'hover:text-neutral-900 hover:bg-neutral-100'
+              }`}
             >
               Hotels
             </button>
           </nav>
         </div>
 
-        {/* Center: Stateful Navigation Pills [Inspiration (active)] -> [Document Vault (badge: 2.5)] -> [Workspace] */}
+        {/* Center: Stateful Navigation Pills [Inspiration] -> [Document Vault] -> [Workspace] -> [Halal Radar] */}
         <div className="hidden md:flex items-center gap-1 bg-[#EEF4FE] p-1 rounded-full border border-neutral-200/80 text-xs font-semibold">
           <button
             onClick={() => {
@@ -163,6 +170,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Workspace</span>
             <span className="w-1.5 h-1.5 rounded-full bg-[#0D6955] animate-pulse"></span>
           </button>
+          {onOpenHalalRadar && (
+            <button
+              onClick={onOpenHalalRadar}
+              className="px-3.5 py-1.5 rounded-full transition-all flex items-center gap-1.5 cursor-pointer text-neutral-600 hover:text-neutral-900"
+              title="Live Halal Radar & Mosques"
+            >
+              <Radar className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Halal Radar</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            </button>
+          )}
         </div>
 
         {/* Right Section: Notification Bell & User Profile Avatar ("Amina") */}

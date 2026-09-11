@@ -1,189 +1,286 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Compass,
   Layers,
   Crosshair,
-  Plus,
-  Minus,
-  CheckCircle2,
   Navigation,
   Sparkles,
   MapPin,
   Footprints,
+  Clock,
+  Users,
+  Bell,
+  CheckCircle2,
+  CloudSun,
+  ShieldCheck,
+  Eye,
+  Radio,
+  Coffee,
+  Heart,
+  ChevronRight,
 } from 'lucide-react';
 
 export const WorkspaceMapPlaceholder: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'sync' | 'spiritual' | 'secular'>('sync');
+  const [showPingToast, setShowPingToast] = useState(false);
+  const [selectedSyncLocation, setSelectedSyncLocation] = useState('East Torii Gate Pavilion');
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+
+  const syncOptions = [
+    { name: 'East Torii Gate Pavilion', distMuslim: '180m (3m)', distNonMuslim: '210m (4m)', type: 'Scenic Garden' },
+    { name: 'Takase Riverside Teahouse', distMuslim: '120m (2m)', distNonMuslim: '280m (5m)', type: 'Covered Cafe (Rain Option)' },
+    { name: 'Gion Historic Clock Tower', distMuslim: '320m (6m)', distNonMuslim: '150m (3m)', type: 'Central Landmark' },
+  ];
+
+  const handleSendPing = () => {
+    setShowPingToast(true);
+    setTimeout(() => setShowPingToast(false), 3500);
+  };
+
   return (
-    <div className="h-full w-full rounded-3xl bg-[#F0EBE1] border border-[#E7DFD5] relative overflow-hidden flex flex-col justify-between shadow-xs select-none">
-      {/* Map Vector Graphic Background Canvas */}
+    <div className="h-full w-full rounded-3xl bg-[#F4EFE6] border border-[#E7DFD5] relative overflow-hidden flex flex-col justify-between shadow-xs select-none">
+      {/* 1. Map Canvas Background Graphic */}
       <svg
-        className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-40"
+        className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-45"
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>
-          <pattern id="grid-pattern" width="36" height="36" patternUnits="userSpaceOnUse">
-            <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#D8CEBF" strokeWidth="0.75" />
+          <pattern id="grid-canvas-pattern" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#D3C7B6" strokeWidth="0.8" />
           </pattern>
         </defs>
-        <rect width="100%" height="100%" fill="url(#grid-pattern)" />
+        <rect width="100%" height="100%" fill="url(#grid-canvas-pattern)" />
         {/* River Canal Representation */}
         <path
-          d="M 120 0 Q 180 200 130 450 T 220 800"
+          d="M 100 0 Q 170 240 120 480 T 210 820"
           fill="none"
-          stroke="#BFE3DE"
-          strokeWidth="16"
+          stroke="#B4DFD9"
+          strokeWidth="18"
           strokeLinecap="round"
         />
         <path
-          d="M 120 0 Q 180 200 130 450 T 220 800"
+          d="M 100 0 Q 170 240 120 480 T 210 820"
           fill="none"
-          stroke="#9FD4CC"
+          stroke="#8FCAC2"
           strokeWidth="6"
           strokeLinecap="round"
         />
+
+        {/* Path A (Muslim track to sync) */}
+        <path
+          d="M 80 280 Q 140 330 180 390"
+          fill="none"
+          stroke="#00685F"
+          strokeWidth="3.5"
+          strokeDasharray="6 4"
+        />
+        {/* Path B (Non-Muslim track to sync) */}
+        <path
+          d="M 280 290 Q 230 340 180 390"
+          fill="none"
+          stroke="#D97706"
+          strokeWidth="3.5"
+          strokeDasharray="6 4"
+        />
       </svg>
 
-      {/* Top Map Header Strip */}
-      <div className="relative z-10 p-3.5 flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/95 border border-[#E7DFD5] shadow-xs text-xs font-bold text-[#161C23]">
-            <span className="w-2 h-3 rounded-full bg-[#0D6955]"></span>
-            <span>Kyoto Old District Geo-Track</span>
+      {/* 2. Top Status Bar: Live Sync & Weather Pill */}
+      <div className="relative z-10 p-3 flex items-center justify-between gap-2 flex-wrap bg-white/80 backdrop-blur-md border-b border-[#E7DFD5]">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-black text-[#00685F]">
+            <Radio className="w-3.5 h-3.5 text-[#00685F] animate-pulse" />
+            <span>Group Sync Map (Live Radar)</span>
           </div>
 
-          <div className="px-2 py-0.8 rounded-xl bg-white/90 border border-[#E7DFD5] text-[10px] font-bold text-[#6D7A77]">
-            Live Mesh
+          <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#00685F] text-white text-xs font-bold font-mono shadow-xs">
+            <Compass className="w-3 h-3 text-[#62FAE3]" />
+            <span>Qibla 292° WNW</span>
           </div>
 
-          <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#0D6955] text-white shadow-xs text-xs font-bold font-mono">
-            <Compass className="w-3.5 h-3.5 text-[#62FAE3]" />
-            <span>Qibla Direction 292° WNW</span>
+          <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-900">
+            <CloudSun className="w-3 h-3 text-amber-600" />
+            <span>22°C Clear</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            className="p-1.5 rounded-xl bg-white/90 border border-[#E7DFD5] text-[#161C23] hover:bg-white shadow-xs transition-colors cursor-pointer"
-            title="Layer Settings"
-          >
-            <Layers className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            className="p-1.5 rounded-xl bg-white/90 border border-[#E7DFD5] text-[#161C23] hover:bg-white shadow-xs transition-colors cursor-pointer"
-            title="Recenter Map"
-          >
-            <Crosshair className="w-3.5 h-3.5" />
-          </button>
+        {/* Sync Ping Action Button */}
+        <button
+          type="button"
+          onClick={handleSendPing}
+          className="px-3 py-1 rounded-xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95"
+          title="Send immediate rendezvous ping to all party members"
+        >
+          <Bell className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Send Regroup Ping</span>
+        </button>
+      </div>
+
+      {/* 3. Interactive Central Map Workspace with Visible Group Sync Pin */}
+      <div className="relative flex-1 flex flex-col items-center justify-center p-3 overflow-hidden">
+        
+        {/* TOP PATH TRACKS: Track 2A (Muslim Mosque) and Track 2B (Non-Muslim Cafe) */}
+        <div className="w-full max-w-sm flex items-center justify-between gap-4 mb-2 z-10">
+          {/* Node 2A: Mosque Path */}
+          <div className="flex-1 bg-white/95 rounded-2xl border-2 border-[#00685F] p-2.5 shadow-md space-y-1 animate-in fade-in">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black uppercase text-[#00685F] bg-[#EEF4FE] px-1.5 py-0.5 rounded">
+                🕌 Muslim Path
+              </span>
+              <span className="w-2 h-2 rounded-full bg-[#00685F] animate-ping"></span>
+            </div>
+            <div className="text-xs font-black text-[#161C23] truncate">
+              Kyoto Islamic Center
+            </div>
+            <div className="text-[10px] text-[#6D7A77] flex items-center gap-1">
+              <span>Amina &amp; Tariq</span>
+              <span>·</span>
+              <span className="font-bold text-[#00685F]">Dhuhr 12:48 PM</span>
+            </div>
+            <div className="text-[10px] font-mono font-bold text-[#00685F] pt-1 border-t border-[#E7DFD5]">
+              ↓ 180m (3m walk) to Sync
+            </div>
+          </div>
+
+          {/* Node 2B: Cafe Path */}
+          <div className="flex-1 bg-white/95 rounded-2xl border-2 border-[#D97706] p-2.5 shadow-md space-y-1 animate-in fade-in">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black uppercase text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
+                ☕ Secular Path
+              </span>
+              <span className="w-2 h-2 rounded-full bg-[#D97706] animate-ping"></span>
+            </div>
+            <div className="text-xs font-black text-[#161C23] truncate">
+              % Arabica &amp; Tea House
+            </div>
+            <div className="text-[10px] text-[#6D7A77] flex items-center gap-1">
+              <span>John &amp; Fatima</span>
+              <span>·</span>
+              <span className="font-bold text-amber-800">Relaxing</span>
+            </div>
+            <div className="text-[10px] font-mono font-bold text-amber-800 pt-1 border-t border-[#E7DFD5]">
+              ↓ 210m (4m walk) to Sync
+            </div>
+          </div>
+        </div>
+
+        {/* ── CENTRAL GROUP SYNC PIN (RENDEZVOUS ANCHOR) ── */}
+        <div className="relative z-20 my-auto flex flex-col items-center">
+          {/* Animated radar rings around group sync pin */}
+          <div className="absolute -inset-6 rounded-full bg-[#00685F]/15 animate-ping pointer-events-none"></div>
+          <div className="absolute -inset-10 rounded-full bg-[#00685F]/10 pointer-events-none"></div>
+
+          {/* Group Sync Card */}
+          <div className="bg-white rounded-3xl border-3 border-[#00685F] p-4 shadow-2xl space-y-2 text-center max-w-xs transition-all hover:scale-102">
+            <div className="flex items-center justify-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full bg-[#00685F] text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                <Users className="w-3 h-3" />
+                <span>★ GROUP SYNC POINT</span>
+              </span>
+              <span className="text-[10px] font-bold text-[#00685F] bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                02:00 PM
+              </span>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-black text-[#161C23]">
+                {selectedSyncLocation}
+              </h3>
+              <p className="text-[11px] text-[#6D7A77] mt-0.5">
+                Botanical Gardens rendezvous. Shaded benches, tatami rest pavilion &amp; scenic autumn foliage.
+              </p>
+            </div>
+
+            {/* Convergence Proximity Pill */}
+            <div className="p-2 rounded-xl bg-[#EEF4FE] border border-[#00685F]/20 flex items-center justify-between text-[11px] font-bold">
+              <div className="flex items-center gap-1 text-[#00685F]">
+                <Clock className="w-3 h-3" />
+                <span>Rendezvous in 25m</span>
+              </div>
+              <div className="text-[#161C23]">
+                Max Separation: <span className="text-[#00685F] font-mono">210m</span>
+              </div>
+            </div>
+
+            {/* Change Sync Anchor Trigger */}
+            <button
+              type="button"
+              onClick={() => setShowLocationPicker(!showLocationPicker)}
+              className="w-full py-1 text-[11px] font-bold text-[#00685F] hover:underline flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <span>Switch Sync Location</span>
+              <ChevronRight className="w-3 h-3" />
+            </button>
+          </div>
+
+          {/* Collapsible Location Picker */}
+          {showLocationPicker && (
+            <div className="absolute top-full mt-2 w-64 bg-white rounded-2xl border border-[#E7DFD5] shadow-xl p-2 z-30 space-y-1 animate-in fade-in">
+              <div className="text-[10px] font-bold uppercase text-[#8A9592] px-2 py-0.5">
+                Nearby Safe Rendezvous Points:
+              </div>
+              {syncOptions.map((opt) => (
+                <button
+                  key={opt.name}
+                  type="button"
+                  onClick={() => {
+                    setSelectedSyncLocation(opt.name);
+                    setShowLocationPicker(false);
+                  }}
+                  className={`w-full text-left p-2 rounded-xl text-xs transition-colors cursor-pointer ${
+                    selectedSyncLocation === opt.name
+                      ? 'bg-[#00685F] text-white font-bold'
+                      : 'hover:bg-[#FAF8F5] text-[#161C23]'
+                  }`}
+                >
+                  <div className="font-bold">{opt.name}</div>
+                  <div className="text-[10px] opacity-80">{opt.type}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* BOTTOM: Next Joint Stop */}
+        <div className="w-full max-w-xs mt-2 z-10">
+          <div className="bg-white/95 rounded-2xl border border-[#E7DFD5] p-2.5 shadow-xs flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-[#00685F] text-white text-[10px] font-bold flex items-center justify-center">
+                4
+              </span>
+              <div>
+                <span className="font-black text-[#161C23] block">Next: Halal Wagyu Panga</span>
+                <span className="text-[10px] text-[#6D7A77]">Full group departs together at 04:45 PM</span>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+              Table #4
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Central Interactive Route Visualization */}
-      <div className="relative flex-1 flex flex-col items-center justify-center p-4">
-        {/* Collaborative scout tooltip */}
-        <div className="absolute top-12 left-1/3 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#185ADB] text-white text-[11px] font-bold shadow-md animate-bounce">
-          <Navigation className="w-3 h-3 rotate-45" />
-          <span>John is scouting route</span>
-        </div>
-
-        {/* Route Graph SVG Container */}
-        <div className="w-full max-w-xs relative my-auto space-y-4">
-          {/* Node 1: Museum Tour */}
-          <div className="flex flex-col items-center">
-            <div className="px-3 py-1.5 rounded-2xl bg-white border border-[#E7DFD5] shadow-xs text-xs font-bold text-[#161C23] flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-gray-100 text-[#161C23] font-bold text-[10px] flex items-center justify-center">
-                1
-              </span>
-              <span>Museum Tour</span>
-            </div>
-            <div className="h-8 w-0.5 bg-gray-400 border-l border-dashed border-gray-500 my-1 flex items-center justify-center">
-              <span className="text-[9px] bg-white px-1 font-bold text-gray-500 rounded">8 min</span>
-            </div>
-          </div>
-
-          {/* Node 2: Split Corridor (Central Mosque vs Artisan Cafe) */}
-          <div className="relative py-2">
-            {/* Safety corridor polygon highlight */}
-            <div className="absolute inset-0 bg-[#0D6955]/10 rounded-3xl border border-[#0D6955]/30 pointer-events-none"></div>
-
-            <div className="relative z-10 p-3 flex items-center justify-between gap-3">
-              {/* Spiritual Node (2A) */}
-              <div className="px-2.5 py-1.5 rounded-xl bg-[#0D6955] text-white shadow-xs text-[11px] font-extrabold flex items-center gap-1.5 shrink-0">
-                <span className="bg-white/20 px-1 rounded text-[10px]">2A</span>
-                <span>Central Mosque</span>
-              </div>
-
-              {/* Connecting Walk Metric */}
-              <div className="flex flex-col items-center text-center">
-                <span className="text-[9px] font-mono font-bold text-[#0D6955] bg-white/90 px-1.5 py-0.5 rounded-md border border-[#0D6955]/20">
-                  150m (2m) walk
-                </span>
-              </div>
-
-              {/* Secular Node (2B) */}
-              <div className="px-2.5 py-1.5 rounded-xl bg-[#E58A2B] text-white shadow-xs text-[11px] font-extrabold flex items-center gap-1.5 shrink-0">
-                <span className="bg-white/20 px-1 rounded text-[10px]">2B</span>
-                <span>Artisan Cafe &amp; Art</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Node 3: Reconvergence at Botanical Garden */}
-          <div className="flex flex-col items-center">
-            <div className="h-8 w-0.5 bg-gray-400 border-l border-dashed border-gray-500 my-1 flex items-center justify-center">
-              <span className="text-[9px] bg-white px-1 font-bold text-gray-500 rounded">6 min walk</span>
-            </div>
-            <div className="px-3.5 py-1.5 rounded-2xl bg-[#0D6955] text-white shadow-xs text-xs font-bold flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-white text-[#0D6955] font-black text-[10px] flex items-center justify-center">
-                3
-              </span>
-              <span>★ SYNC: Botanical Garden</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Map Status & Zoom Controls */}
-      <div className="relative z-10 p-3.5 space-y-2">
-        <div className="flex items-center justify-between">
-          {/* Split Distance Separation Pill */}
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/95 border border-[#E7DFD5] text-xs font-bold text-[#161C23] shadow-xs">
-            <span className="w-2 h-2 rounded-full bg-[#0D6955]"></span>
-            <span>Split Distance Separation</span>
-            <span className="text-[#0D6955] font-mono">150m (2-min safety corridor)</span>
-          </div>
-
-          {/* Zoom Buttons */}
-          <div className="flex items-center gap-1 bg-white/95 border border-[#E7DFD5] rounded-xl p-1 shadow-xs">
-            <button
-              type="button"
-              className="p-1 rounded-lg hover:bg-gray-100 text-[#161C23] transition-colors cursor-pointer"
-              title="Zoom in"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              className="p-1 rounded-lg hover:bg-gray-100 text-[#161C23] transition-colors cursor-pointer"
-              title="Zoom out"
-            >
-              <Minus className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Offline Vector Tiles & Battery Status */}
-        <div className="p-2 rounded-xl bg-white/90 border border-[#E7DFD5] flex items-center justify-between text-[11px] text-[#6D7A77] font-medium">
-          <div className="flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5 text-[#0D6955]" />
-            <span>Offline Kyoto vector tiles cached · Battery-efficient mode</span>
-          </div>
-          <span className="font-mono text-[10px] font-bold text-[#161C23]">
-            SYNC MESH V3.4
+      {/* 4. Bottom Map Footer: Metrics Bar */}
+      <div className="relative z-10 p-3 bg-white/95 border-t border-[#E7DFD5] flex items-center justify-between text-xs text-[#6D7A77] flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <Footprints className="w-3.5 h-3.5 text-[#00685F]" />
+          <span className="font-semibold text-[11px]">
+            Split Duration: <strong className="text-[#161C23]">45 mins</strong>
           </span>
         </div>
+
+        <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#00685F]">
+          <ShieldCheck className="w-3.5 h-3.5" />
+          <span>No Member Left Isolated · Auto-Sync Confirmed</span>
+        </div>
       </div>
+
+      {/* Live Regroup Notification Toast */}
+      {showPingToast && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 bg-[#161C23] text-white px-4 py-2.5 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+          <Bell className="w-4 h-4 text-[#62FAE3] animate-bounce" />
+          <span>Regroup Ping Broadcasted! Tripmates received 15-minute alert to meet at {selectedSyncLocation}.</span>
+        </div>
+      )}
     </div>
   );
 };

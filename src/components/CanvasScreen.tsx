@@ -62,6 +62,8 @@ import { AnimeWeatherOverlay } from './AnimeWeatherOverlay';
 import { WeatherData, fetchLiveWeather } from '../services/weatherService';
 import { ShareInviteModal } from './ShareInviteModal';
 import { HalalRadarScreen } from './HalalRadarScreen';
+import { AddActivityModal } from './AddActivityModal';
+import { ItineraryStop } from '../types/itinerary';
 
 interface CanvasScreenProps {
   itinerary: Itinerary;
@@ -101,6 +103,9 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [isSuggestModalOpen, setIsSuggestModalOpen] = useState<boolean>(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [isHalalRadarOpen, setIsHalalRadarOpen] = useState<boolean>(false);
+  const [isAddActivityModalOpen, setIsAddActivityModalOpen] = useState<boolean>(false);
+  const [addActivityDayId, setAddActivityDayId] = useState<string>('day-3');
+  const [showMoreMenu, setShowMoreMenu] = useState<boolean>(false);
   const [showSuggestionsDrawer, setShowSuggestionsDrawer] = useState<boolean>(false);
   const [showBudgetDrawer, setShowBudgetDrawer] = useState<boolean>(false);
   const [selectedDayId, setSelectedDayId] = useState<string>('day-3');
@@ -267,6 +272,110 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
     setShowSuggestionsDrawer(true);
   };
 
+  // Add stop or open Add Activity modal
+  const handleAddStopToTrip = (dayId: string, placeName: string) => {
+    const targetDayId = dayId || selectedDayId || 'day-3';
+    if (!placeName || placeName.trim() === '') {
+      setAddActivityDayId(targetDayId);
+      setIsAddActivityModalOpen(true);
+      if (onOpenAddModal) onOpenAddModal(targetDayId);
+      return;
+    }
+
+    const isHotel =
+      placeName.includes('🏨') ||
+      placeName.toLowerCase().includes('hotel') ||
+      placeName.toLowerCase().includes('base:');
+
+    const newStop: ItineraryStop = {
+      id: `stop-${Date.now()}`,
+      dayId: targetDayId,
+      orderIndex: tripState.activeStops?.length || 0,
+      title: placeName,
+      description: isHotel
+        ? 'Base accommodation anchored for day hub, prayer rest, and luggage drop.'
+        : 'Recommended spot added to day schedule.',
+      address: isHotel ? 'Shimogyo Ward, Kyoto 600-8216' : 'Kyoto / Tokyo, Japan',
+      coordinate: isHotel ? { lat: 34.9858, lng: 135.7588 } : { lat: 35.0035, lng: 135.7765 },
+      timeWindow: isHotel ? { start: '08:30 PM', end: '10:00 PM' } : { start: '03:30 PM', end: '05:00 PM' },
+      durationMinutes: isHotel ? 90 : 75,
+      category: isHotel ? 'LODGING' : 'ATTRACTION',
+      status: 'CONFIRMED',
+      halalBadge: isHotel ? 'Muslim-Friendly · Verified Wudu/Musalla' : 'Halal Verified',
+      tags: isHotel ? ['Hotel', 'Base Hub', 'Halal Facilities'] : ['Custom', 'Activity'],
+    };
+
+    tripState.dispatch({ type: 'ADD_STOP', dayId: targetDayId, stop: newStop });
+
+    const newActivity: ActivityBlock = {
+      id: `act-${newStop.id}`,
+      dayId: targetDayId,
+      time: newStop.timeWindow?.start || '04:00 PM',
+      duration: `${newStop.durationMinutes || 60}m duration`,
+      title: placeName,
+      type: isHotel ? 'lodging' : 'sightseeing',
+      location: newStop.address || 'Kyoto, Japan',
+      description: newStop.description || '',
+      tags: newStop.tags || ['Custom'],
+      halalBadge: newStop.halalBadge,
+      votes: { count: 1, voters: [currentUser.name], userVoted: true },
+    };
+
+    onUpdateItinerary(
+      {
+        ...itinerary,
+        activityBlocks: [...itinerary.activityBlocks, newActivity],
+      },
+      `${currentUser.name} added "${placeName}" to Day schedule`
+    );
+
+    setNotificationToast(isHotel ? `🏨 "${placeName}" anchored to itinerary!` : `✓ Added "${placeName}" to schedule!`);
+    setTimeout(() => setNotificationToast(null), 3500);
+  };
+
+  // Add custom activity from AddActivityModal
+  const handleModalAddActivity = (act: Omit<ActivityBlock, 'id'>) => {
+    const targetDayId = addActivityDayId || selectedDayId || 'day-3';
+    const isDining = act.type === 'dining' || act.type === 'cafe';
+    const isHotel = act.type === 'lodging';
+
+    const newStop: ItineraryStop = {
+      id: `stop-${Date.now()}`,
+      dayId: targetDayId,
+      orderIndex: tripState.activeStops?.length || 0,
+      title: act.title,
+      description: act.description,
+      address: act.location,
+      coordinate: { lat: 35.0035, lng: 135.7765 },
+      timeWindow: { start: act.time, end: '06:00 PM' },
+      durationMinutes: 75,
+      category: isDining ? 'FOOD' : isHotel ? 'LODGING' : 'ATTRACTION',
+      status: 'CONFIRMED',
+      halalBadge: act.halalBadge || 'Halal Verified',
+      tags: act.tags || ['Custom'],
+      cost: act.cost,
+    };
+
+    tripState.dispatch({ type: 'ADD_STOP', dayId: targetDayId, stop: newStop });
+
+    const newActivity: ActivityBlock = {
+      ...act,
+      id: `act-${newStop.id}`,
+    };
+
+    onUpdateItinerary(
+      {
+        ...itinerary,
+        activityBlocks: [...itinerary.activityBlocks, newActivity],
+      },
+      `${currentUser.name} added "${act.title}"`
+    );
+
+    setIsAddActivityModalOpen(false);
+    setNotificationToast(`✓ Added "${act.title}" to Day schedule!`);
+    setTimeout(() => setNotificationToast(null), 3500);
+  };
+
   return (
     <div className="h-screen w-screen flex flex-col bg-[#FAF8F5] overflow-hidden select-none font-['Plus_Jakarta_Sans',sans-serif]">
       {/* ========================================================================= */}
@@ -300,6 +409,34 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
               Anime FX
             </span>
           </div>
+
+          {/* Suggest Spot */}
+          <button
+            type="button"
+            onClick={() => setIsSuggestModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EEF4FE] hover:bg-[#DDE9FD] text-[#0D6955] rounded-full text-xs font-bold transition-colors cursor-pointer"
+            title="Suggest a place or video link for Team Lead approval"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Suggest Spot</span>
+          </button>
+
+          {/* View Suggestions Toggle if any suggestions exist */}
+          {suggestions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowSuggestionsDrawer((prev) => !prev)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-bold transition-colors cursor-pointer ${
+                showSuggestionsDrawer
+                  ? 'bg-[#0D6955] text-white'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'
+              }`}
+              title="View Suggestions Drawer"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>{suggestions.length} Ideas</span>
+            </button>
+          )}
 
           {/* Conflict Radar */}
           <button
@@ -336,14 +473,92 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
             <span>Share</span>
           </button>
 
-          {/* Overflow Menu */}
-          <button
-            type="button"
-            className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-md transition-colors"
-            title="More Options"
-          >
-            <MoreVertical className="w-5 h-5" />
-          </button>
+          {/* Overflow Menu with Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowMoreMenu((prev) => !prev)}
+              className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-md transition-colors cursor-pointer"
+              title="More Options"
+            >
+              <MoreVertical className="w-5 h-5" />
+            </button>
+
+            {showMoreMenu && (
+              <div
+                className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-[#E7DFD5] py-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-150 font-medium"
+                onClick={() => setShowMoreMenu(false)}
+              >
+                <button
+                  type="button"
+                  onClick={() => setIsPrintModalOpen(true)}
+                  className="w-full px-4 py-2 text-left hover:bg-[#FAF8F5] flex items-center gap-2.5 text-[#161C23] cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-[#0D6955]" />
+                  <span>Export Itinerary (PDF & Budget)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onOpenVault}
+                  className="w-full px-4 py-2 text-left hover:bg-[#FAF8F5] flex items-center gap-2.5 text-[#161C23] cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4 text-teal-600" />
+                  <span>Document Vault & Passes</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsAddMateModalOpen(true)}
+                  className="w-full px-4 py-2 text-left hover:bg-[#FAF8F5] flex items-center gap-2.5 text-[#161C23] cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4 text-blue-600" />
+                  <span>Add / Manage Tripmates</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsSuggestModalOpen(true)}
+                  className="w-full px-4 py-2 text-left hover:bg-[#FAF8F5] flex items-center gap-2.5 text-[#161C23] cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <span>Suggest Spot or Video</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowSuggestionsDrawer((prev) => !prev)}
+                  className="w-full px-4 py-2 text-left hover:bg-[#FAF8F5] flex items-center gap-2.5 text-[#161C23] cursor-pointer"
+                >
+                  <MessageSquare className="w-4 h-4 text-purple-600" />
+                  <span>Tripmate Suggestions ({suggestions.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsHalalRadarOpen(true)}
+                  className="w-full px-4 py-2 text-left hover:bg-[#FAF8F5] flex items-center gap-2.5 text-[#161C23] cursor-pointer"
+                >
+                  <Compass className="w-4 h-4 text-emerald-600" />
+                  <span>Halal Radar & Scanner</span>
+                </button>
+
+                <div className="my-1 border-t border-[#E7DFD5]" />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenInspiration) onOpenInspiration();
+                    else window.location.reload();
+                  }}
+                  className="w-full px-4 py-2 text-left hover:bg-rose-50 flex items-center gap-2.5 text-rose-600 cursor-pointer"
+                >
+                  <ArrowRight className="w-4 h-4 rotate-180" />
+                  <span>Back to Safar Home</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* User Profile */}
           <img
@@ -368,10 +583,10 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
             setSelectedDayId(dayId);
           }}
           onToggleCollapse={tripState.toggleNavRail}
-          onOpenMultiplayer={() => setActiveSidebarTab('multiplayer')}
+          onOpenMultiplayer={() => setIsAddMateModalOpen(true)}
           onOpenConflict={() => setIsConflictModalOpen(true)}
           onOpenVault={onOpenVault}
-          onOpenBudget={() => setShowBudgetDrawer((b) => !b)}
+          onOpenBudget={() => setIsPrintModalOpen(true)}
           onToggleGroupTravel={() => tripState.dispatch({ type: 'TOGGLE_GROUP_TRAVEL_MODE' })}
           onOpenHalalRadar={() => setIsHalalRadarOpen(true)}
         />
@@ -387,10 +602,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
             tripState.setActiveDay(dayId);
             setSelectedDayId(dayId);
           }}
-          onAddStop={(dayId, placeName) => {
-            setNotificationToast(`"${placeName}" added to search queue!`);
-            setTimeout(() => setNotificationToast(null), 3000);
-          }}
+          onAddStop={handleAddStopToTrip}
           collaboratorsCount={collaborators.length}
           isLead={isTeamLead}
           onInsertPrayerBreak={(dayId, afterStopId, prayerStop) => {
@@ -417,6 +629,8 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
             tripState.setActiveDay(dayId);
             setSelectedDayId(dayId);
           }}
+          onOpenVault={onOpenVault}
+          onAddStop={handleAddStopToTrip}
         />
 
         {/* ── Suggestions Drawer (slides in over map pane when open) ── */}
@@ -545,6 +759,14 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
         currentUser={currentUser}
         activeDayId={selectedDayId}
         onSubmitSuggestion={handleAddSuggestion}
+      />
+
+      {/* Add New Activity Modal (With categories & prayer coordination) */}
+      <AddActivityModal
+        isOpen={isAddActivityModalOpen}
+        onClose={() => setIsAddActivityModalOpen(false)}
+        dayId={addActivityDayId}
+        onAddActivity={handleModalAddActivity}
       />
 
       {/* AI Mediator Conflict Resolution Modal */}
