@@ -120,10 +120,10 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
   >Instead of manually copying spots from social media, users drop TikTok or Instagram links to auto-generate itinerary blocks that are instantly pre-screened through the Halal Radar.
 
 * 🛡️ **5. AI Document Cross-Check Vault**  
-  >Moving beyond passive cloud storage, it proactively cross-checks uploaded passport metadata and visa validity rules against flight dates to prevent airport check-in rejections weeks in advance.
+  >Moving beyond passive cloud storage, it proactively cross-checks uploaded passport metadata against flight dates to prevent check-in rejections, while acting as the live, legal data feed that powers the AI's emergency rerouting.
 
 * 🔄 **6. Emergency Fallback Engine**  
-  >When a transit delay or cancellation hits, the app doesn't just display flight alerts; it runs a "self-healing" protocol that recalculates delay impact, auto-shifts downstream bookings, and updates prayer/dining checkpoints.
+  >When a transit delay hits, the app doesn't just display alerts; it uses the Vault's ticket data to trigger a "self-healing" protocol. It auto-shifts downstream bookings, ensures alternative routes are legally viable for all members, and instantly drops new Halal and prayer checkpoints.
 
 ---
 
