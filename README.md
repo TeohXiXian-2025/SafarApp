@@ -106,7 +106,7 @@ To view our complete and interactive ideation flow, please click the link below.
 <a id="3-design--prototype"></a>
 ## 3. Design & Prototype
 
-🔗 **Live UI Prototype:** [Public Link] *(Ensure it opens in incognito)*
+🔗 **Live UI Prototype:** **[Public Link](https://safar-oahgjkt92-cristal-teohs-projects.vercel.app/)**
 
 *[Embed 4–8 UI screenshots highlighting the core flow, with short captions]*
 
