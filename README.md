@@ -86,10 +86,10 @@ To view our complete and interactive ideation flow, please click the link below.
 ![Brainstorming Process](Brainstorming%20process.png)
 *This flowchart outlines our three-stage brainstorming methodology. It details how we moved from initial problem discovery to solution mapping, and finally through our mentor pivot iterations.*
 
-![Problem and Solution Tree](FinalIdea.jpg)
+![Problem and Solution Tree](FinalIdea.png)
 *This board visualizes our core logic tree mapping. It shows exactly how we extracted root causes from market research and connected them directly to our problem statement and AI features.*
 
-![Idea Evolution Sequence](IdeaFormation.jpg)
+![Idea Evolution Sequence](IdeaFormation.png)
 *This sequence tracks the evolution of the five major ideas we considered. It highlights the fatal flaws in our earlier concepts and the specific mentor advice that led us to our final chosen solution.*
 
 <a id="23-mentor-consultation"></a>
