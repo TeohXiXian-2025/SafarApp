@@ -1,32 +1,97 @@
-name: Deploy Safar App to Vercel
+name: Deploy Safar App to GitHub Pages
 
-env:
-  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
 
 on:
+
   push:
+
     branches: ['main']
+
   workflow_dispatch:
 
+
+
+permissions:
+
+  contents: read
+
+  pages: write
+
+  id-token: write
+
+
+
+concurrency:
+
+  group: 'pages'
+
+  cancel-in-progress: true
+
+
+
 jobs:
-  Deploy-Production:
+
+  deploy:
+
+    environment:
+
+      name: github-pages
+
+      url: ${{ steps.deployment.outputs.page_url }}
+
     runs-on: ubuntu-latest
+
     steps:
+
       - name: Checkout
+
         uses: actions/checkout@v4
 
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
 
-      - name: Pull Vercel Environment Information
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Pull Environment Variables for Vite
-        run: vercel env pull .env.production --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Setup Node
 
-      - name: Build Project Artifacts
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        uses: actions/setup-node@v4
 
-      - name: Deploy Project Artifacts to Vercel
-        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        with:
+
+          node-version: 20
+
+          cache: 'npm'
+
+
+
+      - name: Install dependencies
+
+        run: npm ci
+
+
+
+      - name: Build
+
+        run: npm run build
+
+
+
+      - name: Setup Pages
+
+        uses: actions/configure-pages@v5
+
+
+
+      - name: Upload artifact
+
+        uses: actions/upload-pages-artifact@v3
+
+        with:
+
+          path: './dist'
+
+
+
+      - name: Deploy to GitHub Pages
+
+        id: deployment
+
+        uses: actions/deploy-pages@v4
