@@ -43,10 +43,11 @@ import {
   AlertCircle,
   Shield,
   Eye,
+  MoreVertical,
 } from 'lucide-react';
 import { NavigationRail } from './NavigationRail';
-import { ItineraryFeed } from './ItineraryFeed';
-import { GoogleMapPane } from './GoogleMapPane';
+import { ItineraryFeed, TimelinePanel } from './ItineraryFeed';
+import { DiscoveryPanel } from './DiscoveryPanel';
 import { SplitSyncBlock } from './SplitSyncBlock';
 import { useTripState } from '../hooks/useTripState';
 import { ConflictResolutionModal } from './ConflictResolutionModal';
@@ -57,6 +58,9 @@ import { SuggestActivityModal } from './SuggestActivityModal';
 import { firestoreSync, ClashRecord } from '../firebase/firestoreService';
 import { detectGroupConflicts, getPlanningContext } from '../services/groupConflictEngine';
 import { AIPlannerWorkspace } from './AIPlannerWorkspace';
+import { AnimeWeatherOverlay } from './AnimeWeatherOverlay';
+import { WeatherData, fetchLiveWeather } from '../services/weatherService';
+import { ShareInviteModal } from './ShareInviteModal';
 
 interface CanvasScreenProps {
   itinerary: Itinerary;
@@ -92,15 +96,23 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [isAddMateModalOpen, setIsAddMateModalOpen] = useState<boolean>(false);
   const [isSuggestModalOpen, setIsSuggestModalOpen] = useState<boolean>(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [showSuggestionsDrawer, setShowSuggestionsDrawer] = useState<boolean>(false);
   const [showBudgetDrawer, setShowBudgetDrawer] = useState<boolean>(false);
   const [selectedDayId, setSelectedDayId] = useState<string>('day-3');
   const [clashData, setClashData] = useState<ClashRecord | null>(null);
   const [notificationToast, setNotificationToast] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'timeline' | 'map'>('timeline');
+  const [currentWeather, setCurrentWeather] = useState<WeatherData | null>(null);
 
   // Three-pane itinerary state (new Wanderlog-pattern)
   const tripState = useTripState();
+
+  const activeCity = tripState.activeDay?.city || 'Tokyo';
+
+  useEffect(() => {
+    fetchLiveWeather(activeCity).then(setCurrentWeather);
+  }, [activeCity]);
 
   // Check if current active user is Team Lead
   const isTeamLead =
@@ -256,179 +268,86 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
       {/* ========================================================================= */}
       {/* 1. TOP WORKSPACE NAVIGATION BAR                                           */}
       {/* ========================================================================= */}
-      <header className="h-16 bg-white border-b border-[#E7DFD5] px-3 sm:px-6 flex items-center justify-between gap-2 shrink-0 z-30">
-        {/* Left: Breadcrumbs & Quick Role Switcher */}
-        <div className="flex items-center gap-2 text-xs font-semibold">
-          <button
-            type="button"
-            onClick={onOpenInspiration}
-            className="text-[#6D7A77] hover:text-[#161C23] transition-colors cursor-pointer hidden sm:inline"
-          >
-            Inspiration
-          </button>
-          <span className="text-[#C4BCB3] hidden sm:inline">/</span>
-          <button
-            type="button"
-            onClick={onOpenVault}
-            className="text-[#6D7A77] hover:text-[#161C23] transition-colors cursor-pointer hidden sm:inline"
-          >
-            Document Vault
-          </button>
-          <span className="text-[#C4BCB3] hidden sm:inline">/</span>
-          <span className="text-[#00685F] font-extrabold flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00685F]"></span>
-            <span>Workspace</span>
-          </span>
-
-          {/* Quick Perspective Switcher (Pitch / Demo feature) */}
-          <div className="ml-2 pl-2 border-l border-[#E7DFD5] flex items-center gap-1">
-            <span className="text-[10px] font-bold uppercase text-[#8A9592] hidden md:inline">
-              Role:
-            </span>
-            <div className="flex items-center bg-[#FAF8F5] border border-[#E7DFD5] rounded-full p-0.5">
-              {collaborators.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => onSelectUser && onSelectUser(c)}
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold transition-all cursor-pointer flex items-center gap-1 ${
-                    c.id === currentUser.id
-                      ? c.isLead
-                        ? 'bg-[#00685F] text-white shadow-xs'
-                        : 'bg-[#161C23] text-white shadow-xs'
-                      : 'text-[#6D7A77] hover:text-[#161C23]'
-                  }`}
-                  title={`Switch view to ${c.name} (${c.role})`}
-                >
-                  <span>{c.isLead ? '👑' : '👤'}</span>
-                  <span>{c.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+      <header className="flex justify-between items-center h-16 px-4 bg-white border-b border-[#E7DFD5] shrink-0 z-30">
+        {/* LEFT ALIGN (Context) */}
+        <div className="flex items-center text-sm">
+          <span className="text-gray-600">Workspace / </span>
+          <span className="ml-1 font-bold text-[#161C23]">Tokyo & Kyoto</span>
         </div>
 
-        {/* Right: Actions (Add Mate, Suggestions, Budget, Export, Share, User Profile) */}
-        <div className="flex items-center gap-2 sm:gap-2.5">
-          {/* Active Mode Badge */}
-          {isTeamLead ? (
-            <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-[11px] font-extrabold text-amber-900 shadow-2xs">
-              <Crown className="w-3.5 h-3.5 text-amber-600" />
-              <span>Team Lead (Full Authority)</span>
-            </div>
-          ) : (
-            <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#EEF4FE] border border-[#00685F]/20 text-[11px] font-bold text-[#00685F] shadow-2xs">
-              <Users className="w-3.5 h-3.5" />
-              <span>Tripmate (Suggestion Role)</span>
-            </div>
-          )}
+        {/* CENTER (Breathing Room) */}
+        <div className="flex-1"></div>
 
-          {/* Add Mate Button (For Team Lead) */}
-          {isTeamLead && (
-            <button
-              type="button"
-              onClick={() => setIsAddMateModalOpen(true)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-2xl bg-[#EEF4FE] hover:bg-[#00685F]/15 border border-[#00685F]/30 text-[#00685F] text-xs font-bold transition-all cursor-pointer shadow-2xs"
-              title="Add Tripmate & configure preferences"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Add Mate</span>
-            </button>
-          )}
-
-          {/* Suggest Place or Drop Link Button (For Tripmate) */}
-          {!isTeamLead && (
-            <button
-              type="button"
-              onClick={() => setIsSuggestModalOpen(true)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-2xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-              title="Suggest attraction or drop TikTok/Reel link"
-            >
-              <Video className="w-3.5 h-3.5 text-[#62FAE3]" />
-              <span>Suggest / Drop Link</span>
-            </button>
-          )}
-
-          {/* Suggestions Drawer Toggle */}
-          <button
-            type="button"
-            onClick={() => setShowSuggestionsDrawer(!showSuggestionsDrawer)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border text-xs font-bold transition-all cursor-pointer relative ${
-              showSuggestionsDrawer
-                ? 'bg-[#00685F] text-white border-[#00685F]'
-                : 'bg-white border-[#E7DFD5] text-[#161C23] hover:bg-[#FAF8F5]'
-            }`}
-            title="View Tripmate recommendations & social media links"
+        {/* RIGHT ALIGN (Action Group) */}
+        <div className="flex items-center gap-3">
+          {/* Live Real Weather Badge */}
+          <div
+            className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#F0FDF4] border border-[#BBF7D0] rounded-full text-[#166534] shadow-2xs"
+            title="Real-time Weather (Open-Meteo) with Anime Simulation"
           >
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Suggestions</span>
-            {pendingSuggestions.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-[#dc2626] text-white animate-pulse">
-                {pendingSuggestions.length}
-              </span>
-            )}
-          </button>
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span className="text-xs font-black text-[#161C23]">
+              {currentWeather ? `${currentWeather.temperature}°C ${currentWeather.conditionEmoji}` : '🌤️ Weather'}
+            </span>
+            <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-emerald-200/70 text-emerald-900">
+              Anime FX
+            </span>
+          </div>
 
-          {/* Conflict Radar Button */}
+          {/* Conflict Radar */}
           <button
             type="button"
             onClick={() => setIsConflictModalOpen(true)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-2xl bg-[#FFF8EE] border border-[#E58A2B]/40 hover:bg-[#FFF2DF] text-[#C27803] text-xs font-bold transition-all cursor-pointer shadow-2xs"
-            title="Click to view AI Conflict Mediator"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FFF2DF] hover:bg-[#FFE8C7] rounded-full text-[#C27803] transition-colors"
+            title="Conflict Radar"
           >
-            <AlertTriangle className="w-3.5 h-3.5 text-[#E58A2B]" />
-            <span className="hidden lg:inline">Conflict Radar</span>
+            <AlertTriangle className="w-4 h-4" />
+            <span className="text-xs font-bold">Radar</span>
           </button>
 
-          {/* Budget Toggle */}
-          <button
-            type="button"
-            onClick={() => setShowBudgetDrawer(!showBudgetDrawer)}
-            className={`hidden xl:flex items-center gap-1 px-3 py-1.5 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${
-              showBudgetDrawer
-                ? 'bg-[#00685F]/10 border-[#00685F] text-[#00685F]'
-                : 'bg-white border-[#E7DFD5] text-[#526360] hover:bg-gray-50'
-            }`}
-          >
-            <DollarSign className="w-3.5 h-3.5" />
-            <span>Budget</span>
-          </button>
-
-          {/* Export PDF Button */}
-          <button
-            type="button"
-            onClick={() => setIsPrintModalOpen(true)}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-white border border-[#E7DFD5] hover:bg-gray-50 text-[#161C23] text-xs font-bold transition-all cursor-pointer shadow-2xs"
-          >
-            <FileDown className="w-3.5 h-3.5 text-[#00685F]" />
-            <span>Export</span>
-          </button>
+          {/* Avatar Cluster */}
+          <div className="flex -space-x-2">
+            {collaborators.slice(0, 3).map((c, i) => (
+              <img
+                key={c.id || i}
+                src={c.avatar}
+                alt={c.name}
+                className="w-8 h-8 rounded-full border-2 border-white object-cover"
+                title={c.name}
+              />
+            ))}
+          </div>
 
           {/* Share Button */}
           <button
             type="button"
-            onClick={handleCopyShareLink}
-            className="flex items-center gap-1 px-3.5 py-1.5 rounded-2xl bg-[#161C23] hover:bg-black text-white text-xs font-bold transition-all cursor-pointer"
+            onClick={() => setIsShareModalOpen(true)}
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-[#0D6955] hover:bg-[#095040] text-white rounded-md text-sm font-bold transition-colors shadow-sm cursor-pointer"
+            title="Invite tripmates via Gmail or copy share link"
           >
-            <Share2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Share</span>
+            <UserPlus className="w-4 h-4" />
+            <span>Share</span>
           </button>
 
-          {/* Active User Avatar */}
-          <div className="relative">
-            <img
-              src={currentUser.avatar}
-              alt={currentUser.name}
-              className={`w-8 h-8 rounded-full object-cover ring-2 ${
-                isTeamLead ? 'ring-amber-500' : 'ring-[#00685F]'
-              }`}
-            />
-            {isTeamLead && (
-              <span className="absolute -top-1 -right-1 text-xs" title="Team Lead">
-                👑
-              </span>
-            )}
-          </div>
+          {/* Overflow Menu */}
+          <button
+            type="button"
+            className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-md transition-colors"
+            title="More Options"
+          >
+            <MoreVertical className="w-5 h-5" />
+          </button>
+
+          {/* User Profile */}
+          <img
+            src={currentUser.avatar}
+            alt={currentUser.name}
+            className="w-8 h-8 rounded-full ml-1 object-cover cursor-pointer"
+            title={currentUser.name}
+          />
         </div>
       </header>
 
@@ -477,8 +396,8 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
           onOpenAiPlanner={(conflictId) => tripState.dispatch({ type: 'OPEN_AI_PLANNER', conflictId })}
         />
 
-        {/* ── Pane 3: Google Map ── */}
-        <GoogleMapPane
+        {/* ── Pane 3: Discovery Panel (Right Column) ── */}
+        <DiscoveryPanel
           days={tripState.state.days}
           activeDayId={tripState.state.activeDayId}
           stops={tripState.activeStops}
@@ -606,6 +525,14 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
         }}
       />
 
+      {/* Share & Invite Tripmates Modal (Gmail & Copy Link) */}
+      <ShareInviteModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        collaborators={collaborators}
+        tripTitle={itinerary.title || 'Japan Autumn Odyssey 2026'}
+      />
+
       {/* Suggest Activity / Drop Link Modal (For Mates) */}
       <SuggestActivityModal
         isOpen={isSuggestModalOpen}
@@ -641,6 +568,9 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
           <span>{notificationToast}</span>
         </div>
       )}
+
+      {/* Live Weather & Anime Simulation Overlay with Controls */}
+      <AnimeWeatherOverlay city={activeCity} />
     </div>
   );
 };

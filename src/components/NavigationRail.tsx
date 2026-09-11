@@ -394,12 +394,12 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
                   ? 'bg-[#161C23] text-white shadow-md'
                   : 'bg-[#FAF8F5] text-[#161C23] hover:bg-[#F3EFEA] border border-[#E7DFD5]'
               }`}
-              title="Overview of all days (总览)"
+              title="Overview of all days"
             >
               <span className="text-sm">📋</span>
               {!isCollapsed && (
                 <>
-                  <span className="flex-1">总览 Overview</span>
+                  <span className="flex-1">Overview</span>
                   <span
                     className={`text-[9px] font-black px-2 py-0.5 rounded-full ${
                       activeDayId === 'overview'

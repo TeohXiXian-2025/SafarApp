@@ -42,6 +42,10 @@ import {
   formatTo12Hour,
 } from '../services/prayerTimeService';
 import {
+  WeatherData,
+  fetchLiveWeather,
+} from '../services/weatherService';
+import {
   detectPrayerConflicts,
   getItineraryHealth,
   getNearbyPrayerPlaces,
@@ -376,7 +380,7 @@ function OverviewFeed({
       {/* Overview Title Banner */}
       <div className="flex items-center justify-between pb-2 border-b border-[#E7DFD5]">
         <div>
-          <h2 className="text-xl font-black text-[#161C23] tracking-tight">总览 (Overview)</h2>
+          <h2 className="text-xl font-black text-[#161C23] tracking-tight">Trip Overview</h2>
           <p className="text-xs font-semibold text-[#8A9592] mt-0.5">
             Full trip itinerary from Day 1 to Day 3 with prayer synchronization
           </p>
@@ -564,12 +568,32 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
   const feedRef = useRef<HTMLDivElement>(null);
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [prayerData, setPrayerData] = useState<PrayerData | null>(null);
+  const [dayWeather, setDayWeather] = useState<WeatherData | null>(null);
   const [dismissedConflicts, setDismissedConflicts] = useState<Set<string>>(new Set());
 
-  // Fetch prayer times based on active day's city (location-aware)
+  // Drag-and-Drop Blend Simulation State
+  const [isSyncingTransit, setIsSyncingTransit] = useState<boolean>(false);
+  const [hasDroppedKiyomizu, setHasDroppedKiyomizu] = useState<boolean>(false);
+  const [isDragOverDropZone, setIsDragOverDropZone] = useState<boolean>(false);
+
+  // AI Conflict Mediator flow state
+  const [timelineState, setTimelineState] = useState<'normal' | 'conflict' | 'resolved'>('conflict');
+  const [showAIModal, setShowAIModal] = useState<boolean>(false);
+
+  const handleDropKiyomizu = () => {
+    setIsDragOverDropZone(false);
+    setIsSyncingTransit(true);
+    setTimeout(() => {
+      setIsSyncingTransit(false);
+      setHasDroppedKiyomizu(true);
+    }, 1200);
+  };
+
+  // Fetch prayer times & real weather based on active day's city (location-aware)
   useEffect(() => {
     if (activeDay) {
       fetchPrayerTimesForCity(activeDay.city, activeDay.date).then(setPrayerData);
+      fetchLiveWeather(activeDay.city).then(setDayWeather);
     }
   }, [activeDay?.city, activeDay?.date]);
 
@@ -730,7 +754,7 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
                 : 'bg-white text-[#526360] hover:bg-[#FAF8F5] border border-[#E7DFD5]'
             }`}
           >
-            总览 Overview
+            Overview
           </button>
           {state.days.map((d) => (
             <button
@@ -808,6 +832,13 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
               <span className="text-xs font-bold text-white/90">
                 {activeDay.city} · {collaboratorsCount} tripmates
               </span>
+              {dayWeather && (
+                <span className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 transition-colors px-2.5 py-0.5 rounded-full text-xs font-black text-white shadow-xs backdrop-blur-xs">
+                  <span>{dayWeather.conditionEmoji}</span>
+                  <span>{dayWeather.temperature}°C</span>
+                  <span className="text-white/80 font-normal">({dayWeather.conditionLabel})</span>
+                </span>
+              )}
               <span className="ml-auto text-xs font-bold bg-white/20 px-2.5 py-0.5 rounded-full">
                 {activeStops.length} stops planned
               </span>
@@ -867,6 +898,61 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
           </div>
         </div>
 
+        {/* ── AI Conflict Mediator: Phase 1 — Conflict Warning ── */}
+        {timelineState === 'conflict' && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-xl my-4">
+            <h4 className="text-sm font-black text-[#161C23]">1:00 PM • Ichiran Ramen</h4>
+            <p className="text-xs font-medium text-[#526360] mt-1">
+              ⚠️ Contradiction Detected: This selection violates the Halal dietary requirements set for this group.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowAIModal(true)}
+              className="mt-3 bg-red-600 hover:bg-red-700 text-white font-medium px-4 py-2 rounded-lg shadow-sm flex items-center gap-2 cursor-pointer"
+            >
+              ✨ Ask AI Planner
+            </button>
+          </div>
+        )}
+
+        {/* ── AI Conflict Mediator: Phase 3 — Split & Sync ── */}
+        {timelineState === 'resolved' && (
+          <div className="my-4">
+            {/* Split Header */}
+            <div className="flex justify-center mb-3">
+              <span className="bg-gray-100 text-gray-600 text-xs font-bold px-3 py-1 rounded-full">
+                ⚡ AI SPLIT ROUTE
+              </span>
+            </div>
+
+            {/* Parallel Tracks */}
+            <div className="flex flex-row w-full gap-3 relative">
+              <div className="absolute left-1/2 top-0 bottom-0 border-l-2 border-dashed border-gray-300" />
+
+              {/* Left Track (Halal) */}
+              <div className="flex-1 bg-[#E6F0EE] border border-[#0D6955] rounded-xl p-3 z-10">
+                <div className="text-xs font-black text-[#0D6955]">1:15 PM • Narita-ya Halal Ramen</div>
+                <span className="inline-flex items-center gap-1 mt-2 bg-[#0D6955] text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                  100% Halal
+                </span>
+              </div>
+
+              {/* Right Track (Standard) */}
+              <div className="flex-1 bg-white border border-gray-200 rounded-xl p-3 z-10">
+                <div className="text-xs font-black text-[#161C23]">1:15 PM • Ichiran Ramen</div>
+                <span className="inline-flex items-center gap-1 mt-2 bg-gray-100 text-gray-600 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                  Non-Halal
+                </span>
+              </div>
+            </div>
+
+            {/* Merge/Sync Block */}
+            <div className="bg-[#0D6955] text-white rounded-xl p-3 mt-4 text-center shadow-md">
+              🤝 Group Sync: Senso-ji Temple @ 2:30 PM
+            </div>
+          </div>
+        )}
+
         {/* ── Stops List with Inline Prayer Markers ── */}
         <div className="space-y-1">
           {filteredStops.map((stop, i) => {
@@ -909,6 +995,131 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
                     if (conflict) onOpenAiPlanner(conflict.id);
                   } : undefined}
                 />
+
+                {/* ── Drag & Drop Blend Simulation: Drop Zone Between Two Existing Itinerary Items ── */}
+                {i === 0 && (
+                  <div className="my-2.5">
+                    {isSyncingTransit ? (
+                      <div className="p-4 bg-emerald-50 border-2 border-emerald-400 rounded-2xl flex items-center justify-center gap-3 shadow-md animate-pulse">
+                        <div className="w-5 h-5 border-2 border-[#0D6955] border-t-transparent rounded-full animate-spin" />
+                        <span className="text-xs font-black text-[#0D6955] tracking-wide">
+                          AI Syncing Transit & Solat...
+                        </span>
+                      </div>
+                    ) : hasDroppedKiyomizu ? (
+                      <div className="space-y-2 animate-in fade-in slide-in-from-top-3 duration-400">
+                        {/* Transit Block: 🚌 Bus 206 • 15 mins */}
+                        <div className="flex items-center gap-3 py-1 px-3 ml-8">
+                          <div className="flex flex-col items-center gap-0.5">
+                            <div className="w-px h-3 bg-[#0D6955]" />
+                            <div className="w-px h-3 bg-[#0D6955]" />
+                          </div>
+                          <div className="flex items-center gap-2 bg-emerald-50/90 border border-[#0D6955]/40 rounded-full px-3.5 py-1 text-[11px] font-bold text-[#0D6955] shadow-xs">
+                            <span className="text-sm">🚌</span>
+                            <span className="font-extrabold text-[#161C23]">Bus 206</span>
+                            <span className="text-[#8A9592]">·</span>
+                            <span>15 mins</span>
+                            <span className="text-[#8A9592]">·</span>
+                            <span className="text-[9px] font-black uppercase text-emerald-800 bg-emerald-200/80 px-1.5 py-0.2 rounded">
+                              AI Transit Synced
+                            </span>
+                          </div>
+                          <div className="flex flex-col items-center gap-0.5">
+                            <div className="w-px h-3 bg-[#0D6955]" />
+                            <div className="w-px h-3 bg-[#0D6955]" />
+                          </div>
+                        </div>
+
+                        {/* Itinerary Block: Kiyomizu-dera Temple */}
+                        <div
+                          id="blended-stop-kiyomizu"
+                          className="relative rounded-2xl border-2 border-[#0D6955] bg-gradient-to-r from-emerald-50/40 via-white to-white p-3.5 shadow-md transition-all group overflow-hidden"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-3">
+                              <div className="w-9 h-9 rounded-xl bg-[#0D6955] text-white flex items-center justify-center text-base font-black shadow-sm shrink-0">
+                                ⛩️
+                              </div>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="text-sm font-black text-[#161C23]">Kiyomizu-dera Temple</h4>
+                                  <span className="text-[10px] font-extrabold bg-[#0D6955] text-white px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3" />
+                                    AI Blended
+                                  </span>
+                                </div>
+                                <p className="text-xs text-[#526360]">
+                                  Historic temple with city views. UNESCO World Heritage wooden stage overlooking Kyoto.
+                                </p>
+                                <div className="flex items-center gap-2 pt-1 flex-wrap">
+                                  <span className="text-[11px] font-mono font-bold text-[#0D6955] bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                    🕐 10:15 AM - 11:30 AM
+                                  </span>
+                                  <span className="text-[11px] font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200">
+                                    🕌 Fits Before Dhuhr (11:54 AM)
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setHasDroppedKiyomizu(false)}
+                              className="text-[10px] font-bold text-[#8A9592] hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors shrink-0 cursor-pointer"
+                              title="Reset item"
+                            >
+                              ✕ Remove
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Transit continuation */}
+                        <div className="flex items-center gap-3 py-1 px-3 ml-8">
+                          <div className="flex flex-col items-center gap-0.5">
+                            <div className="w-px h-3 bg-[#C4BCB3]" />
+                            <div className="w-px h-3 bg-[#C4BCB3]" />
+                          </div>
+                          <div className="text-[10px] font-semibold text-[#8A9592]">
+                            Continuing Schedule
+                          </div>
+                          <div className="flex flex-col items-center gap-0.5">
+                            <div className="w-px h-3 bg-[#C4BCB3]" />
+                            <div className="w-px h-3 bg-[#C4BCB3]" />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        id="timeline-drop-zone"
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'copy';
+                          setIsDragOverDropZone(true);
+                        }}
+                        onDragLeave={() => setIsDragOverDropZone(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          handleDropKiyomizu();
+                        }}
+                        onClick={() => handleDropKiyomizu()}
+                        className={`my-2 p-3.5 rounded-2xl border-2 border-dashed transition-all duration-200 flex items-center justify-center gap-2 text-xs font-bold cursor-pointer select-none ${
+                          isDragOverDropZone
+                            ? 'border-[#0D6955] bg-emerald-50/90 text-[#0D6955] scale-[1.01] shadow-md ring-2 ring-[#0D6955]/20'
+                            : 'border-[#0D6955]/40 bg-[#FAF8F5]/80 hover:bg-white hover:border-[#0D6955] text-[#526360] hover:text-[#0D6955]'
+                        }`}
+                        title="Drag 'Kiyomizu-dera Temple' from Discovery Panel and drop here"
+                      >
+                        <Sparkles className={`w-4 h-4 text-[#0D6955] ${isDragOverDropZone ? 'animate-bounce' : ''}`} />
+                        <span>
+                          {isDragOverDropZone
+                            ? 'Release to drop & blend Kiyomizu-dera with transit!'
+                            : 'Drop Zone: Drag "Kiyomizu-dera Temple" here to blend with schedule'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {stop.transitToNext && i < filteredStops.length - 1 && (
                   <TransitSeparator transit={stop.transitToNext} />
                 )}
@@ -945,6 +1156,40 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
 
         <div className="h-8" />
       </div>
+
+      {/* ── AI Conflict Mediator: Phase 2 — Win-Win Modal ── */}
+      {showAIModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6">
+            <h2 className="text-lg font-black text-[#161C23]">🤖 AI Mediator</h2>
+            <div className="bg-[#E6F0EE] p-4 rounded-xl my-4 text-[#0D6955]">
+              I found a win-win compromise in Asakusa. We can split the group for 1 hour so everyone gets what they want, then sync up immediately after.
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAIModal(false)}
+                className="text-gray-500 hover:bg-gray-100 px-4 py-2 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAIModal(false);
+                  setTimelineState('resolved');
+                }}
+                className="bg-[#0D6955] hover:bg-[#095041] text-white px-4 py-2 rounded-lg font-medium cursor-pointer"
+              >
+                Accept AI Plan &amp; Split Route -&gt;
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+export { ItineraryFeed as TimelinePanel };
+

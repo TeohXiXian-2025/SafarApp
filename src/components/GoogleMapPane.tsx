@@ -39,7 +39,7 @@ export const DAY_COLORS: Record<number, { main: string; badge: string; border: s
   3: { main: '#8B5CF6', badge: '#8B5CF6', border: '#7C3AED' }, // Day 3: Purple
 };
 
-const CATEGORY_MARKER: Record<
+export const CATEGORY_MARKER: Record<
   StopCategory,
   { bg: string; glyph: string; border: string }
 > = {
@@ -59,7 +59,7 @@ interface DayStopsPolylineProps {
   isActive: boolean;
 }
 
-const DayStopsPolyline: React.FC<DayStopsPolylineProps> = ({
+export const DayStopsPolyline: React.FC<DayStopsPolylineProps> = ({
   stops,
   color,
   isActive,
@@ -110,7 +110,7 @@ interface StopMarkerProps {
   onHover: (id: string | null) => void;
 }
 
-const StopMarker: React.FC<StopMarkerProps> = ({
+export const StopMarker: React.FC<StopMarkerProps> = ({
   stop,
   index,
   dayNumber,
@@ -140,15 +140,28 @@ const StopMarker: React.FC<StopMarkerProps> = ({
       zIndex={isHighlighted ? 200 : stop.category === 'PRAYER' ? 50 : 100}
     >
       <div
-        className="relative flex flex-col items-center cursor-pointer transition-transform duration-200"
+        className="relative flex flex-col items-center cursor-pointer transition-transform duration-200 select-none"
         style={{
-          transform: isHighlighted ? 'scale(1.25)' : 'scale(1)',
+          transformOrigin: 'bottom center',
+          transform: isHighlighted ? 'scale(1.2)' : 'scale(1)',
         }}
       >
+        {/* Attraction Label (Floating ABOVE the pin so bottom anchor stays 100% locked to GPS) */}
+        {isAttraction && (
+          <div
+            className="mb-1 px-2 py-0.5 rounded-md text-[10px] font-black whitespace-nowrap shadow-md border border-white/90 bg-white text-[#161C23] pointer-events-none"
+            style={{
+              boxShadow: '0 2px 6px rgba(0,0,0,0.18)',
+            }}
+          >
+            {stop.title.split('—')[0].trim()}
+          </div>
+        )}
+
         {/* Pulsing ring when selected */}
         {isHighlighted && (
           <div
-            className="absolute -top-1 w-9 h-9 rounded-full animate-ping opacity-50"
+            className="absolute top-0 w-8 h-8 rounded-full animate-ping opacity-50 pointer-events-none"
             style={{ backgroundColor: markerBg }}
           />
         )}
@@ -161,17 +174,13 @@ const StopMarker: React.FC<StopMarkerProps> = ({
           {stop.category === 'PRAYER' ? '🕌' : index + 1}
         </div>
 
-        {/* Attraction Label (like 金阁寺, 鸭川 in reference screenshot) */}
-        {isAttraction && (
-          <div
-            className="mt-0.5 px-2 py-0.5 rounded-md text-[10px] font-black whitespace-nowrap shadow-md border border-white/80 select-none bg-white text-[#161C23]"
-            style={{
-              boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
-            }}
-          >
-            {stop.title.split('—')[0].trim()}
-          </div>
-        )}
+        {/* Sharp Needle Tip pointing directly to ground coordinates */}
+        <div
+          className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[6px] -mt-0.5"
+          style={{ borderTopColor: markerBg }}
+        />
+        {/* Sub-pixel ground anchor dot */}
+        <div className="w-1.5 h-1.5 rounded-full bg-[#161C23] border border-white -mt-0.5" />
       </div>
     </AdvancedMarker>
   );
@@ -211,7 +220,7 @@ const RouteBadgeMarker: React.FC<RouteBadgeMarkerProps> = ({ day }) => {
 // ─────────────────────────────────────────────────────
 // Info Window for selected stop
 // ─────────────────────────────────────────────────────
-function StopInfoWindow({
+export function StopInfoWindow({
   stop,
   dayNumber,
   onClose,
@@ -418,6 +427,39 @@ function RichFallbackMap({
 }
 
 // ─────────────────────────────────────────────────────
+function MapViewportSync({
+  center,
+  selectedStop,
+}: {
+  center: { lat: number; lng: number };
+  zoom?: number;
+  selectedStop: ItineraryStop | null;
+}) {
+  const map = useMap();
+  const lastCenterRef = React.useRef<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    if (map && selectedStop?.coordinate) {
+      map.panTo(selectedStop.coordinate);
+    }
+  }, [map, selectedStop?.id]);
+
+  useEffect(() => {
+    if (!map || !center) return;
+    if (
+      !lastCenterRef.current ||
+      Math.abs(lastCenterRef.current.lat - center.lat) > 0.0001 ||
+      Math.abs(lastCenterRef.current.lng - center.lng) > 0.0001
+    ) {
+      lastCenterRef.current = center;
+      map.panTo(center);
+    }
+  }, [map, center.lat, center.lng]);
+
+  return null;
+}
+
+// ─────────────────────────────────────────────────────
 // Map Content (Google Maps Instance)
 // ─────────────────────────────────────────────────────
 function MapContent({
@@ -467,9 +509,7 @@ function MapContent({
       {/* ── Real Google Map ── */}
       <Map
         defaultCenter={mapViewport.center}
-        center={mapViewport.center}
         defaultZoom={mapViewport.zoom}
-        zoom={mapViewport.zoom}
         mapId="safar-trip-planner-map"
         style={{ width: '100%', height: '100%' }}
         gestureHandling="greedy"
@@ -477,6 +517,10 @@ function MapContent({
         clickableIcons={false}
         reuseMaps
       >
+        <MapViewportSync
+          center={mapViewport.center}
+          selectedStop={selectedStop}
+        />
         {/* ── Route Polylines for each day ── */}
         {days.map((day) => {
           const isDayActive = day.id === activeDayId || activeDayId === 'overview';
@@ -636,32 +680,12 @@ interface GoogleMapPaneProps {
   onSelectStop: (id: string | null) => void;
   onHoverStop: (id: string | null) => void;
   onSetLayer: (layer: MapLayer) => void;
-  onSelectDay?: (dayId: string) => void;
 }
 
+import { DiscoveryPanel } from './DiscoveryPanel';
+
 export const GoogleMapPane: React.FC<GoogleMapPaneProps> = (props) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const apiKey: string | undefined = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey || apiKey === 'YOUR_KEY_HERE' || apiKey.length < 10) {
-    return (
-      <div className="flex-shrink-0 h-full" style={{ width: '45%', minWidth: '340px' }}>
-        <RichFallbackMap
-          days={props.days}
-          activeDayId={props.activeDayId}
-          stops={props.stops}
-          selectedStopId={props.selectedStopId}
-          onSelectStop={props.onSelectStop}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-shrink-0 h-full relative" style={{ width: '45%', minWidth: '340px' }}>
-      <APIProvider apiKey={apiKey} libraries={['places', 'marker']}>
-        <MapContent {...props} />
-      </APIProvider>
-    </div>
-  );
+  return <DiscoveryPanel {...props} />;
 };
+
+export default GoogleMapPane;
