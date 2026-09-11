@@ -12,6 +12,7 @@ import {
   Lock,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Star,
   DollarSign,
   Compass,
@@ -166,6 +167,8 @@ interface StopCardProps {
   dayColor?: string;
   onSelect: (id: string) => void;
   onHover: (id: string | null) => void;
+  activeConflict?: GroupConflict;
+  onOpenAiPlanner?: () => void;
 }
 
 function StopCard({
@@ -177,25 +180,40 @@ function StopCard({
   dayColor = '#0D6955',
   onSelect,
   onHover,
+  activeConflict,
+  onOpenAiPlanner,
 }: StopCardProps) {
   const catConfig = CATEGORY_CONFIG[stop.category];
   const statusConfig = STATUS_CONFIG[stop.status];
   const isPrayer = stop.category === 'PRAYER';
 
+  let cardBg = isPrayer ? 'bg-gradient-to-r from-teal-50/70 via-white to-white' : 'bg-white';
+  let indicatorColor = dayColor;
+  let customBorder = isSelected ? dayColor : isHovered ? `${dayColor}80` : '#E7DFD5';
+
+  if (stop.groupId === 'group-a') {
+    cardBg = 'bg-gradient-to-r from-green-50/50 to-white';
+    indicatorColor = '#22C55E';
+    customBorder = isSelected ? '#22C55E' : isHovered ? '#4ADE80' : '#bbf7d0';
+  } else if (stop.groupId === 'group-b') {
+    cardBg = 'bg-gradient-to-r from-purple-50/50 to-white';
+    indicatorColor = '#A855F7';
+    customBorder = isSelected ? '#A855F7' : isHovered ? '#C084FC' : '#e9d5ff';
+  }
+
   return (
     <div
       id={`stop-card-${stop.id}`}
-      className={`relative rounded-2xl border transition-all duration-200 cursor-pointer group overflow-hidden ${
-        isPrayer ? 'bg-gradient-to-r from-teal-50/70 via-white to-white' : 'bg-white'
-      } ${
+      className={`relative rounded-2xl border transition-all duration-200 cursor-pointer group overflow-hidden ${cardBg} ${
         isSelected
-          ? 'shadow-[0_0_0_2px_rgba(13,105,85,0.25)] shadow-lg'
+          ? 'shadow-lg'
           : isHovered
           ? 'shadow-md'
           : 'shadow-sm hover:shadow-md'
       }`}
       style={{
-        borderColor: isSelected ? dayColor : isHovered ? `${dayColor}80` : '#E7DFD5',
+        borderColor: customBorder,
+        boxShadow: isSelected ? `0 0 0 2px ${indicatorColor}40` : undefined,
       }}
       onClick={() => onSelect(stop.id)}
       onMouseEnter={() => onHover(stop.id)}
@@ -205,7 +223,7 @@ function StopCard({
       {isSelected && (
         <div
           className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl"
-          style={{ backgroundColor: dayColor }}
+          style={{ backgroundColor: indicatorColor }}
         />
       )}
 
@@ -309,6 +327,35 @@ function StopCard({
             </div>
           )}
         </div>
+        
+        {/* Conflict Banner */}
+        {activeConflict && (
+          <div className="mt-3 bg-amber-50 rounded-xl p-3 border border-amber-200">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-amber-900 leading-tight">
+                  {activeConflict.description}
+                </p>
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide">
+                    Group Preference Mismatch
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenAiPlanner?.();
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white text-xs font-black rounded-lg shadow-sm hover:from-amber-600 hover:to-amber-700 transition-colors"
+                  >
+                    <span>✨</span> AI PLANNER
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -498,6 +545,7 @@ interface ItineraryFeedProps {
   collaboratorsCount?: number;
   isLead?: boolean;
   onInsertPrayerBreak?: (dayId: string, afterStopId: string, prayerStop: ItineraryStop) => void;
+  onOpenAiPlanner?: (conflictId: string) => void;
 }
 
 export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
@@ -511,6 +559,7 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
   collaboratorsCount = 4,
   isLead = true,
   onInsertPrayerBreak,
+  onOpenAiPlanner,
 }) => {
   const feedRef = useRef<HTMLDivElement>(null);
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -854,6 +903,11 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
                   dayColor={dayColor}
                   onSelect={onSelectStop}
                   onHover={onHoverStop}
+                  activeConflict={state.activeConflicts.find(c => c.activityId === stop.id)}
+                  onOpenAiPlanner={onOpenAiPlanner ? () => {
+                    const conflict = state.activeConflicts.find(c => c.activityId === stop.id);
+                    if (conflict) onOpenAiPlanner(conflict.id);
+                  } : undefined}
                 />
                 {stop.transitToNext && i < filteredStops.length - 1 && (
                   <TransitSeparator transit={stop.transitToNext} />
@@ -875,6 +929,18 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
                   onIgnoreConflict={handleDismissConflict}
                 />
               ))}
+              
+          {/* Add Activity Button */}
+          <div className="mt-4 pt-4 border-t border-dashed border-[#C4BCB3]">
+            <button
+              type="button"
+              onClick={() => onAddStop?.(activeDay.id, '')}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#FAF8F5] hover:bg-[#F3EFEA] border-2 border-dashed border-[#C4BCB3] hover:border-[#8A9592] text-[#526360] hover:text-[#161C23] text-sm font-extrabold rounded-2xl transition-all cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Activity</span>
+            </button>
+          </div>
         </div>
 
         <div className="h-8" />

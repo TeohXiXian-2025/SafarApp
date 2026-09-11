@@ -55,6 +55,8 @@ import { BudgetTracker } from './BudgetTracker';
 import { AddMateModal } from './AddMateModal';
 import { SuggestActivityModal } from './SuggestActivityModal';
 import { firestoreSync, ClashRecord } from '../firebase/firestoreService';
+import { detectGroupConflicts, getPlanningContext } from '../services/groupConflictEngine';
+import { AIPlannerWorkspace } from './AIPlannerWorkspace';
 
 interface CanvasScreenProps {
   itinerary: Itinerary;
@@ -123,6 +125,18 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
       unsubscribeClash();
     };
   }, []);
+
+  // Detect Group Preferences Conflicts
+  useEffect(() => {
+    if (tripState.state.groupTravelMode) {
+      const context = getPlanningContext(tripState.state);
+      const conflicts = detectGroupConflicts(context);
+      tripState.dispatch({ type: 'SET_ACTIVE_CONFLICTS', conflicts });
+    } else {
+      tripState.dispatch({ type: 'SET_ACTIVE_CONFLICTS', conflicts: [] });
+    }
+  }, [tripState.state.groupTravelMode, tripState.state.activeDayId, tripState.activeStops]);
+
 
   const handleSimulateConflict = (track: 'spiritual' | 'secular') => {
     const editor = track === 'spiritual' ? 'Amina' : 'John';
@@ -435,6 +449,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
           onOpenConflict={() => setIsConflictModalOpen(true)}
           onOpenVault={onOpenVault}
           onOpenBudget={() => setShowBudgetDrawer((b) => !b)}
+          onToggleGroupTravel={() => tripState.dispatch({ type: 'TOGGLE_GROUP_TRAVEL_MODE' })}
         />
 
         {/* ── Pane 2: Itinerary Feed ── */}
@@ -459,6 +474,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
             setNotificationToast(`🕌 Prayer break added: ${prayerStop.title}`);
             setTimeout(() => setNotificationToast(null), 3500);
           }}
+          onOpenAiPlanner={(conflictId) => tripState.dispatch({ type: 'OPEN_AI_PLANNER', conflictId })}
         />
 
         {/* ── Pane 3: Google Map ── */}
@@ -566,6 +582,18 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
       {/* ========================================================================= */}
       {/* 4. MODALS & POPUPS                                                        */}
       {/* ========================================================================= */}
+      {/* AI Planner Workspace */}
+      <AIPlannerWorkspace
+        state={tripState.state}
+        dispatch={tripState.dispatch}
+        onApplyPlan={(dayId, conflictActivityId, proposedStops) => {
+          tripState.dispatch({ type: 'APPLY_AI_PLAN', dayId, conflictActivityId, proposedStops });
+          setNotificationToast('✅ AI Plan successfully applied to the itinerary!');
+          setTimeout(() => setNotificationToast(null), 3500);
+        }}
+        onClose={() => tripState.dispatch({ type: 'CLOSE_AI_PLANNER' })}
+      />
+
       {/* Add Tripmate Modal (Configures preferences) */}
       <AddMateModal
         isOpen={isAddMateModalOpen}

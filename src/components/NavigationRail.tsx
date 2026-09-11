@@ -29,6 +29,7 @@ interface NavigationRailProps {
   onOpenConflict?: () => void;
   onOpenVault?: () => void;
   onOpenBudget?: () => void;
+  onToggleGroupTravel?: () => void;
 }
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -290,6 +291,7 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
   onOpenConflict,
   onOpenVault,
   onOpenBudget,
+  onToggleGroupTravel,
 }) => {
   const { days, activeDayId, navRailCollapsed: isCollapsed } = state;
 
@@ -447,6 +449,33 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
                 </span>
               </div>
             )}
+            
+            {/* Group Travel Mode Toggle */}
+            <button
+              type="button"
+              onClick={onToggleGroupTravel}
+              className={`w-full flex items-center gap-2.5 rounded-xl transition-all cursor-pointer group ${
+                isCollapsed
+                  ? 'justify-center p-2 hover:bg-[#FAF8F5]'
+                  : 'px-3 py-1.5 hover:bg-[#FAF8F5]'
+              } ${state.groupTravelMode ? 'bg-[#EAF6F4] text-[#0D6955]' : 'text-[#526360] hover:text-[#161C23]'}`}
+              title="Group Travel Mode"
+            >
+              <span className="shrink-0 text-lg leading-none">👥</span>
+              {!isCollapsed && (
+                <>
+                  <span className="flex-1 text-left text-xs font-bold truncate">
+                    Group Travel {state.groupTravelMode ? '● ON' : '○ OFF'}
+                  </span>
+                  {state.groupTravelMode && state.activeConflicts.length > 0 && (
+                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full border shrink-0 bg-amber-50 text-amber-700 border-amber-200">
+                      ⚠ {state.activeConflicts.length}
+                    </span>
+                  )}
+                </>
+              )}
+            </button>
+
             {navItems.map((item) => (
               <button
                 key={item.id}

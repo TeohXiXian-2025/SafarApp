@@ -41,6 +41,8 @@ export interface ItineraryStop {
   assignedMemberIds?: string[];
   transitToNext?: TransitInfo;
   isCustomNode?: boolean; // For parallel split routes (e.g., 2A / 2B)
+  groupId?: string; // If part of a smart split, which group does this belong to?
+  isReunion?: boolean; // True if this stop is the reunion point after a split
   rating?: number;
   imageUrl?: string;
   tags?: string[];
@@ -97,6 +99,42 @@ export const DEFAULT_PRAYER_SETTINGS: PrayerSettings = {
   showMarkers: true,
   prayerDurationMinutes: 20,
 };
+// ─── Group Travel & AI Planner Types ─────────────────────────
+
+export interface TravelerGroup {
+  id: string;
+  name: string; // e.g., "Group A", "Group B"
+  color: string; // e.g., "#22C55E" (Green), "#A855F7" (Purple)
+  travelerCount: number;
+  preferences: string[]; // e.g., ["Halal", "Prayer"] or ["Japanese cuisine"]
+}
+
+export type ConflictSeverity = 'low' | 'medium' | 'high';
+
+export interface GroupConflict {
+  id: string;
+  type: 'FOOD_PREFERENCE' | 'ATTRACTION_PREFERENCE' | 'PRAYER' | 'BUDGET' | 'TIME';
+  severity: ConflictSeverity;
+  activityId: string;
+  groupsInvolved: string[]; // Group IDs
+  description: string; // e.g., "Different group preferences detected"
+  detectedAt: number;
+}
+
+export interface AIPlanSolution {
+  id: string;
+  type: 'STAY_TOGETHER' | 'SMART_SPLIT' | 'ALTERNATIVE_ACTIVITY';
+  title: string;
+  description: string;
+  score: number; // 0-100 Harmony score
+  tradeoffs: string[]; // e.g., ["✓ Both food preferences satisfied", "⚠ Some additional travel"]
+  reasoning: string;
+  reunionPointStopId?: string; // If split, where do they reunite?
+  splitDurationMinutes?: number;
+  additionalTravelMinutes?: number;
+  // The modified stops for this plan (to be merged/replaced into the itinerary)
+  proposedStops: ItineraryStop[];
+}
 
 // ─── Day & Trip State ──────────────────────────────────
 
@@ -160,6 +198,17 @@ export interface TripState {
   };
   navRailCollapsed: boolean;
   prayerSettings: PrayerSettings;
+  
+  // Group Travel Mode State
+  groupTravelMode: boolean;
+  travelerGroups: TravelerGroup[];
+  activeConflicts: GroupConflict[];
+  aiPlannerContext?: {
+    isOpen: boolean;
+    conflictId?: string;
+    solutions?: AIPlanSolution[];
+  };
+
 }
 
 // Action types for the useTripState hook dispatcher
@@ -177,4 +226,14 @@ export type TripAction =
   | { type: 'TOGGLE_AI_ASSISTANT' }
   | { type: 'INSERT_PRAYER_BREAK'; dayId: string; afterStopId: string; prayerStop: ItineraryStop }
   | { type: 'UPDATE_PRAYER_SETTINGS'; settings: Partial<PrayerSettings> }
-  | { type: 'DISMISS_PRAYER_CONFLICT'; stopId: string; prayerName: string };
+  | { type: 'DISMISS_PRAYER_CONFLICT'; stopId: string; prayerName: string }
+  
+  // Group Travel Mode Actions
+  | { type: 'TOGGLE_GROUP_TRAVEL_MODE' }
+  | { type: 'SET_GROUP_PREFERENCES'; groupId: string; preferences: string[] }
+  | { type: 'SET_ACTIVE_CONFLICTS'; conflicts: GroupConflict[] }
+  | { type: 'OPEN_AI_PLANNER'; conflictId: string }
+  | { type: 'CLOSE_AI_PLANNER' }
+  | { type: 'SET_AI_SOLUTIONS'; solutions: AIPlanSolution[] }
+  | { type: 'APPLY_AI_PLAN'; dayId: string; conflictActivityId: string; proposedStops: ItineraryStop[] };
+

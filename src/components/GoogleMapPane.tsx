@@ -17,9 +17,9 @@ import {
   ChevronRight,
   Moon,
   Compass,
-  Footprints,
   Car,
   Sparkles,
+  ZoomIn,
 } from 'lucide-react';
 import {
   ItineraryStop,
@@ -542,15 +542,33 @@ function MapContent({
         </div>
       </div>
 
-      {/* ── Expand/Collapse Button ── */}
-      <button
-        type="button"
-        onClick={() => setIsExpanded((e) => !e)}
-        className="absolute top-3 right-3 z-10 w-9 h-9 bg-white/95 backdrop-blur-sm border border-white/80 shadow-lg rounded-xl flex items-center justify-center text-[#526360] hover:text-[#161C23] transition-colors cursor-pointer"
-        title={isExpanded ? 'Shrink map' : 'Expand map'}
-      >
-        {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-      </button>
+      {/* ── Top Right Controls ── */}
+      <div className="absolute top-3 right-3 z-10 flex flex-col gap-2 pointer-events-none">
+        {/* Expand/Collapse Button */}
+        <button
+          type="button"
+          onClick={() => setIsExpanded((e) => !e)}
+          className="pointer-events-auto w-9 h-9 bg-white/95 backdrop-blur-sm border border-white/80 shadow-lg rounded-xl flex items-center justify-center text-[#526360] hover:text-[#161C23] transition-colors cursor-pointer"
+          title={isExpanded ? 'Shrink map' : 'Expand map'}
+        >
+          {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+        </button>
+
+        {/* Zoom Button */}
+        <button
+          type="button"
+          onClick={() => {
+            if (map) {
+              const currentZoom = map.getZoom() || 13;
+              map.setZoom(currentZoom + 1);
+            }
+          }}
+          className="pointer-events-auto w-9 h-9 bg-white/95 backdrop-blur-sm border border-white/80 shadow-lg rounded-xl flex items-center justify-center text-[#526360] hover:text-[#161C23] transition-colors cursor-pointer"
+          title="Zoom in"
+        >
+          <ZoomIn className="w-4 h-4" />
+        </button>
+      </div>
 
       {/* ── Bottom Controls & Filters matching reference screenshot ── */}
       <div className="absolute bottom-4 left-3 right-3 z-10 flex flex-col gap-2 pointer-events-none">

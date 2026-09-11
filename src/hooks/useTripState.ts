@@ -971,6 +971,15 @@ export const INITIAL_TRIP_STATE: TripState = {
       ],
     },
   ],
+  groupTravelMode: false,
+  travelerGroups: [
+    { id: 'group-a', name: 'Group A', color: '#22C55E', travelerCount: 3, preferences: ['Halal', 'Prayer'] },
+    { id: 'group-b', name: 'Group B', color: '#A855F7', travelerCount: 3, preferences: ['Japanese cuisine'] },
+  ],
+  activeConflicts: [],
+  aiPlannerContext: {
+    isOpen: false,
+  },
 };
 
 // Reducer function for TripState
@@ -1067,6 +1076,43 @@ export function tripReducer(state: TripState, action: TripAction): TripState {
     case 'DISMISS_PRAYER_CONFLICT':
       // Handled at component level via local state
       return state;
+    
+    // ─── Group Travel Mode Actions ───────────────────────
+    case 'TOGGLE_GROUP_TRAVEL_MODE':
+      return { ...state, groupTravelMode: !state.groupTravelMode };
+    case 'SET_GROUP_PREFERENCES':
+      return {
+        ...state,
+        travelerGroups: state.travelerGroups.map(g => 
+          g.id === action.groupId ? { ...g, preferences: action.preferences } : g
+        )
+      };
+    case 'SET_ACTIVE_CONFLICTS':
+      return { ...state, activeConflicts: action.conflicts };
+    case 'OPEN_AI_PLANNER':
+      return { ...state, aiPlannerContext: { ...state.aiPlannerContext, isOpen: true, conflictId: action.conflictId } };
+    case 'CLOSE_AI_PLANNER':
+      return { ...state, aiPlannerContext: { ...state.aiPlannerContext, isOpen: false, conflictId: undefined, solutions: undefined } };
+    case 'SET_AI_SOLUTIONS':
+      return { ...state, aiPlannerContext: { ...state.aiPlannerContext, isOpen: true, solutions: action.solutions } };
+    case 'APPLY_AI_PLAN': {
+      const days = state.days.map((d) => {
+        if (d.id !== action.dayId) return d;
+        // Find the conflicting activity and replace it with the proposed stops
+        const conflictIndex = d.stops.findIndex(s => s.id === action.conflictActivityId);
+        if (conflictIndex === -1) return d;
+        
+        const newStops = [...d.stops];
+        // Remove the conflicting activity
+        newStops.splice(conflictIndex, 1);
+        // Insert proposed stops
+        newStops.splice(conflictIndex, 0, ...action.proposedStops);
+        // Re-index
+        return { ...d, stops: newStops.map((s, i) => ({ ...s, orderIndex: i })) };
+      });
+      return { ...state, days, aiPlannerContext: { isOpen: false }, activeConflicts: state.activeConflicts.filter(c => c.activityId !== action.conflictActivityId) };
+    }
+    
     default:
       return state;
   }
