@@ -44,9 +44,11 @@ import {
   Shield,
   Eye,
 } from 'lucide-react';
-import { LeftSidebar } from './LeftSidebar';
-import { WorkspaceMapPlaceholder } from './WorkspaceMapPlaceholder';
+import { NavigationRail } from './NavigationRail';
+import { ItineraryFeed } from './ItineraryFeed';
+import { GoogleMapPane } from './GoogleMapPane';
 import { SplitSyncBlock } from './SplitSyncBlock';
+import { useTripState } from '../hooks/useTripState';
 import { ConflictResolutionModal } from './ConflictResolutionModal';
 import { PrintItineraryModal } from './PrintItineraryModal';
 import { BudgetTracker } from './BudgetTracker';
@@ -94,6 +96,9 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [clashData, setClashData] = useState<ClashRecord | null>(null);
   const [notificationToast, setNotificationToast] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'timeline' | 'map'>('timeline');
+
+  // Three-pane itinerary state (new Wanderlog-pattern)
+  const tripState = useTripState();
 
   // Check if current active user is Team Lead
   const isTeamLead =
@@ -414,569 +419,127 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
       </header>
 
       {/* ========================================================================= */}
-      {/* 2. MAIN WORKSPACE BODY (Left Sidebar + Split Canvas + Suggestions Drawer)   */}
+      {/* 2. MAIN WORKSPACE BODY — Three-Pane Wanderlog Layout                      */}
+      {/*    [NavigationRail] | [ItineraryFeed] | [GoogleMapPane]                   */}
       {/* ========================================================================= */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Left Persistent Vertical Sidebar */}
-        <LeftSidebar
-          activeTab={activeSidebarTab}
-          onSelectTab={(tab) => {
-            setActiveSidebarTab(tab);
-            if (tab === 'conflict') setIsConflictModalOpen(true);
-            if (tab === 'vault' && onOpenVault) onOpenVault();
-            if (tab === 'inspiration' && onOpenInspiration) onOpenInspiration();
+        {/* ── Pane 1: Collapsible Navigation Rail ── */}
+        <NavigationRail
+          state={tripState.state}
+          onSelectDay={(dayId) => {
+            tripState.setActiveDay(dayId);
+            setSelectedDayId(dayId);
           }}
-          onOpenConflictModal={() => setIsConflictModalOpen(true)}
+          onToggleCollapse={tripState.toggleNavRail}
+          onOpenMultiplayer={() => setActiveSidebarTab('multiplayer')}
+          onOpenConflict={() => setIsConflictModalOpen(true)}
           onOpenVault={onOpenVault}
-          onOpenInspiration={onOpenInspiration}
+          onOpenBudget={() => setShowBudgetDrawer((b) => !b)}
         />
 
-        {/* Workspace Canvas Container */}
-        <main className="flex-1 flex flex-col overflow-hidden p-3 sm:p-5">
-          {/* Mobile Tab Switcher */}
-          <div className="lg:hidden flex items-center justify-center mb-3">
-            <div className="bg-white border border-[#E7DFD5] rounded-full p-1 flex items-center gap-1 shadow-xs text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => setMobileView('timeline')}
-                className={`px-4 py-1.5 rounded-full transition-all cursor-pointer ${
-                  mobileView === 'timeline'
-                    ? 'bg-[#00685F] text-white shadow-xs'
-                    : 'text-[#6D7A77] hover:text-[#161C23]'
-                }`}
-              >
-                Timeline
-              </button>
-              <button
-                type="button"
-                onClick={() => setMobileView('map')}
-                className={`px-4 py-1.5 rounded-full transition-all cursor-pointer ${
-                  mobileView === 'map'
-                    ? 'bg-[#00685F] text-white shadow-xs'
-                    : 'text-[#6D7A77] hover:text-[#161C23]'
-                }`}
-              >
-                Geo-Track Map
-              </button>
-            </div>
-          </div>
+        {/* ── Pane 2: Itinerary Feed ── */}
+        <ItineraryFeed
+          state={tripState.state}
+          activeDay={tripState.activeDay}
+          activeStops={tripState.activeStops}
+          onSelectStop={(id) => tripState.setSelectedStop(id)}
+          onHoverStop={(id) => tripState.setHoveredStop(id)}
+          onSelectDay={(dayId) => {
+            tripState.setActiveDay(dayId);
+            setSelectedDayId(dayId);
+          }}
+          onAddStop={(dayId, placeName) => {
+            setNotificationToast(`"${placeName}" added to search queue!`);
+            setTimeout(() => setNotificationToast(null), 3000);
+          }}
+          collaboratorsCount={collaborators.length}
+          isLead={isTeamLead}
+        />
 
-          {/* Split-Screen 2-Column Grid */}
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 overflow-hidden">
-            {/* LEFT COLUMN: Map Placeholder */}
-            <div
-              className={`lg:col-span-5 h-full overflow-hidden ${
-                mobileView === 'map' ? 'block' : 'hidden lg:block'
-              }`}
-            >
-              <WorkspaceMapPlaceholder />
-            </div>
+        {/* ── Pane 3: Google Map ── */}
+        <GoogleMapPane
+          days={tripState.state.days}
+          activeDayId={tripState.state.activeDayId}
+          stops={tripState.activeStops}
+          selectedStopId={tripState.state.selectedStopId}
+          hoveredStopId={tripState.state.hoveredStopId}
+          activeMapLayer={tripState.state.activeMapLayer}
+          mapViewport={tripState.state.mapViewport}
+          onSelectStop={(id) => tripState.setSelectedStop(id)}
+          onHoverStop={(id) => tripState.setHoveredStop(id)}
+          onSetLayer={(layer) => tripState.setMapLayer(layer)}
+          onSelectDay={(dayId) => {
+            tripState.setActiveDay(dayId);
+            setSelectedDayId(dayId);
+          }}
+        />
 
-            {/* RIGHT COLUMN: Vertical Timeline */}
-            <div
-              className={`lg:col-span-7 h-full overflow-y-auto pr-1 sm:pr-3 space-y-4 ${
-                mobileView === 'timeline' ? 'block' : 'hidden lg:block'
-              }`}
-            >
-              {/* Timeline Header */}
-              <div className="bg-white rounded-3xl border border-[#E7DFD5] p-5 sm:p-6 shadow-xs space-y-3">
-                {/* Day Badge & Breadcrumb */}
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-extrabold uppercase tracking-wider bg-[#00685F]/10 text-[#00685F] px-3 py-1 rounded-full">
-                      Day 3 of 7
-                    </span>
-                    <span className="text-xs font-semibold text-[#8A9592]">
-                      {itinerary.destinationCity || 'Kyoto'} Historical Basin · Wednesday, Oct 16
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-bold text-[#00685F] flex items-center gap-1 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#00685F]"></span>
-                      <span>{collaborators.length} Tripmates Connected</span>
-                    </span>
-                  </div>
-                </div>
-
-                {/* Day Title & Lead Status Notice */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                  <div>
-                    <h2 className="text-xl sm:text-2xl font-black text-[#161C23] tracking-tight">
-                      Heritage, Prayer &amp; Harmony
-                    </h2>
-                    <p className="text-xs text-[#6D7A77] font-medium mt-0.5">
-                      {isTeamLead
-                        ? '👑 You are the Team Lead. You have prior authority to edit, swap, and finalize the official itinerary.'
-                        : '👤 You are viewing as Tripmate. Official activities are locked; use "+ Suggest" or "Drop Link" to submit ideas to the Team Lead.'}
-                    </p>
-                  </div>
-
-                  {/* Actions: Add Stop / Suggest */}
-                  <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
-                    {isTeamLead ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenAddModal(selectedDayId)}
-                        className="px-4 py-2 rounded-2xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Add Stop (Lead)</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setIsSuggestModalOpen(true)}
-                        className="px-4 py-2 rounded-2xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-[#62FAE3]" />
-                        <span>Suggest Stop</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Group Roster Strip with Preferences Badges */}
-                <div className="pt-2 border-t border-[#E7DFD5]/60 flex items-center justify-between text-xs text-[#6D7A77] flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-[11px]">Party Members:</span>
-                    <div className="flex items-center gap-1.5">
-                      {collaborators.map((c) => (
-                        <div
-                          key={c.id}
-                          className="flex items-center gap-1 bg-[#FAF8F5] border border-[#E7DFD5] px-2 py-0.5 rounded-full text-[10px] font-bold"
-                          title={`${c.name} (${c.role}) - Dietary: ${c.preferences?.faithDietary || 'Configured'}`}
-                        >
-                          <img src={c.avatar} alt={c.name} className="w-4 h-4 rounded-full object-cover" />
-                          <span>{c.name}</span>
-                          {c.isLead && <span className="text-amber-600">👑</span>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <span className="text-[11px] font-extrabold text-[#00685F] bg-[#EAF6F4] px-2.5 py-0.5 rounded-full border border-[#00685F]/20 flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-[#00685F]" />
-                    <span>⚡ Prayer &amp; Halal Sync Active</span>
-                  </span>
-                </div>
-              </div>
-
-              {/* Collapsible Budget Drawer */}
-              {showBudgetDrawer && (
-                <div className="animate-in fade-in slide-in-from-top-2 duration-200">
-                  <BudgetTracker
-                    itinerary={itinerary}
-                    currentDayId={selectedDayId}
-                    currentUser={currentUser}
-                    onUpdateItinerary={onUpdateItinerary}
-                    onOpenAddModal={onOpenAddModal}
-                    onOpenPrintModal={() => setIsPrintModalOpen(true)}
-                  />
-                </div>
-              )}
-
-              {/* ========================================================= */}
-              {/* TIMELINE ACTIVITIES LIST                                  */}
-              {/* ========================================================= */}
-              <div className="space-y-4">
-                {/* ------------------------------------------------------- */}
-                {/* BLOCK 1: Kyoto National Museum & Garden Walk            */}
-                {/* ------------------------------------------------------- */}
-                <div className="bg-white rounded-3xl border border-[#E7DFD5] p-5 sm:p-6 shadow-xs hover:shadow-md transition-all space-y-3">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-extrabold text-white bg-[#00685F] px-3 py-1 rounded-full font-mono">
-                        09:30 AM – 12:00 PM
-                      </span>
-                      <span className="text-xs font-semibold text-[#8A9592]">(2h 30m)</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {isTeamLead ? (
-                        <span className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                          <Crown className="w-3 h-3 text-amber-700" />
-                          <span>Lead Authorized</span>
-                        </span>
-                      ) : (
-                        <span className="text-[11px] font-bold text-neutral-600 bg-neutral-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                          <Lock className="w-3 h-3" />
-                          <span>Official Anchor</span>
-                        </span>
-                      )}
-                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                        <Ticket className="w-3 h-3 text-emerald-700" />
-                        <span>Tickets Confirmed</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 className="text-base sm:text-lg font-black text-[#161C23]">
-                      Kyoto National Museum &amp; Garden Walk
-                    </h3>
-                    <p className="text-xs sm:text-sm text-[#6D7A77] font-medium leading-relaxed mt-1">
-                      Exploring the Heian period imperial calligraphy &amp; tranquil stone courtyards before midday Dhuhr prayer.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#E7DFD5]/50 flex-wrap">
-                    <div className="flex items-center gap-2 flex-wrap text-xs text-[#526360]">
-                      <span className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#FAF8F5] border border-[#E7DFD5] font-medium">
-                        <MapPin className="w-3.5 h-3.5 text-[#00685F]" />
-                        <span>Higashiyama Ward · Step-free path</span>
-                      </span>
-                    </div>
-
-                    {/* Team Lead Edit Actions / Tripmate view */}
-                    {isTeamLead && (
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const sampleAct: ActivityBlock = {
-                              id: 'act-1',
-                              dayId: 'day-3',
-                              time: '09:30 AM',
-                              duration: '2h 30m',
-                              title: 'Kyoto National Museum & Garden Walk',
-                              type: 'sightseeing',
-                              location: 'Higashiyama Ward',
-                              description: 'Heian calligraphy & stone gardens',
-                              tags: ['Sightseeing', 'Step-Free'],
-                            };
-                            onOpenRefinementModal(sampleAct);
-                          }}
-                          className="px-2.5 py-1 rounded-xl text-xs font-bold text-[#00685F] bg-[#EEF4FE] hover:bg-[#00685F]/20 transition-colors cursor-pointer"
-                        >
-                          Modify Activity (Lead)
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* TRANSIT CONNECTOR */}
-                <div className="flex items-center gap-2 px-6 py-1 text-xs text-[#8A9592] font-semibold">
-                  <Footprints className="w-3.5 h-3.5 text-[#00685F]" />
-                  <span>8 min walk (650m) along Takase River Canal</span>
-                </div>
-
-                {/* ------------------------------------------------------- */}
-                {/* BLOCK 2: SPLIT & SYNC BLOCK (AI Mediator)               */}
-                {/* ------------------------------------------------------- */}
-                <SplitSyncBlock onSimulateEdit={handleSimulateConflict} />
-
-                {/* TRANSIT CONNECTOR */}
-                <div className="flex items-center gap-2 px-6 py-1 text-xs text-[#8A9592] font-semibold">
-                  <Footprints className="w-3.5 h-3.5 text-[#00685F]" />
-                  <span>6 min walk to East Torii Gate</span>
-                </div>
-
-                {/* ------------------------------------------------------- */}
-                {/* BLOCK 3: GROUP SYNC POINT                               */}
-                {/* ------------------------------------------------------- */}
-                <div className="bg-white rounded-3xl border-2 border-[#00685F]/30 p-5 sm:p-6 shadow-xs hover:shadow-md transition-all space-y-3 relative overflow-hidden">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-black uppercase tracking-wider bg-[#00685F] text-white px-3 py-1 rounded-full flex items-center gap-1">
-                        <span>★ Group Sync Point</span>
-                      </span>
-                      <span className="text-xs font-bold text-[#161C23] font-mono">
-                        02:00 PM – 04:30 PM (2h 30m)
-                      </span>
-                    </div>
-
-                    <span className="text-xs font-extrabold text-[#00685F] bg-[#EAF6F4] px-2.5 py-0.5 rounded-full border border-[#00685F]/20 animate-pulse">
-                      Rendezvous in 25 mins
-                    </span>
-                  </div>
-
-                  <div>
-                    <h3 className="text-base sm:text-lg font-black text-[#161C23]">
-                      Botanical Gardens &amp; Bamboo Pavilion
-                    </h3>
-                    <p className="text-xs sm:text-sm text-[#6D7A77] font-medium leading-relaxed mt-1">
-                      Full group reunites at the East Torii Gate. Afternoon guided stroll through medicinal plants, autumn maple foliage, and shaded teahouse lawns.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#E7DFD5]/50 flex-wrap">
-                    <div className="flex items-center gap-2 flex-wrap text-xs">
-                      <span className="px-2.5 py-1 rounded-xl bg-[#FAF8F5] border border-[#E7DFD5] text-[#526360] font-medium">
-                        Scenic Photo Spot #4
-                      </span>
-                      <span className="px-2.5 py-1 rounded-xl bg-emerald-50 text-[#00685F] font-bold border border-emerald-200">
-                        Meet at East Torii Gate
-                      </span>
-                    </div>
-
-                    {isTeamLead && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const sampleAct: ActivityBlock = {
-                            id: 'act-3',
-                            dayId: 'day-3',
-                            time: '02:00 PM',
-                            duration: '2h 30m',
-                            title: 'Botanical Gardens & Bamboo Pavilion',
-                            type: 'sightseeing',
-                            location: 'East Torii Gate',
-                            description: 'Group sync point and stroll',
-                            tags: ['Sync Point', 'Scenic'],
-                          };
-                          onOpenRefinementModal(sampleAct);
-                        }}
-                        className="px-2.5 py-1 rounded-xl text-xs font-bold text-[#00685F] bg-[#EEF4FE] hover:bg-[#00685F]/20 transition-colors cursor-pointer"
-                      >
-                        Adjust Sync Slot
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* TRANSIT CONNECTOR */}
-                <div className="flex items-center gap-2 px-6 py-1 text-xs text-[#8A9592] font-semibold">
-                  <Route className="w-3.5 h-3.5 text-[#00685F]" />
-                  <span>12 min taxi to Gion Quarter</span>
-                </div>
-
-                {/* ------------------------------------------------------- */}
-                {/* BLOCK 4: Halal Wagyu Dining Experience                  */}
-                {/* ------------------------------------------------------- */}
-                <div className="bg-white rounded-3xl border border-[#E7DFD5] p-5 sm:p-6 shadow-xs hover:shadow-md transition-all space-y-3">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-extrabold text-white bg-[#00685F] px-3 py-1 rounded-full font-mono">
-                        05:00 PM – 07:00 PM
-                      </span>
-                      <span className="text-xs font-semibold text-[#8A9592]">(2h)</span>
-                    </div>
-
-                    <span className="text-[11px] font-bold text-[#00685F] bg-[#EAF6F4] border border-[#00685F]/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                      <UtensilsCrossed className="w-3 h-3 text-[#00685F]" />
-                      <span>100% Halal Verified · Table #4 Reserved</span>
-                    </span>
-                  </div>
-
-                  <div>
-                    <h3 className="text-base sm:text-lg font-black text-[#161C23]">
-                      Halal Wagyu Dining Experience (Gion Quarter)
-                    </h3>
-                    <p className="text-xs sm:text-sm text-[#6D7A77] font-medium leading-relaxed mt-1">
-                      Private tatami room reserved with dedicated halal certified kitchen utensils and prayer room on 2nd floor.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#E7DFD5]/50 flex-wrap">
-                    <div className="flex items-center gap-2 flex-wrap text-xs text-[#526360]">
-                      <span className="px-2.5 py-1 rounded-xl bg-[#FAF8F5] border border-[#E7DFD5] font-medium">
-                        Prayer Room on 2nd Floor
-                      </span>
-                      <span className="px-2.5 py-1 rounded-xl bg-[#FAF8F5] border border-[#E7DFD5] font-medium">
-                        Pre-booked Halal Menu
-                      </span>
-                    </div>
-
-                    {isTeamLead ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const sampleAct: ActivityBlock = {
-                            id: 'act-4',
-                            dayId: 'day-3',
-                            time: '05:00 PM',
-                            duration: '2h',
-                            title: 'Halal Wagyu Dining Experience',
-                            type: 'dining',
-                            location: 'Gion Quarter',
-                            description: 'Halal certified wagyu with prayer room',
-                            tags: ['Halal Dining', 'Prayer Room'],
-                          };
-                          onOpenRefinementModal(sampleAct);
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-[#00685F] text-white text-xs font-bold hover:bg-[#008378] transition-colors cursor-pointer"
-                      >
-                        Swap Halal Option (Lead)
-                      </button>
-                    ) : (
-                      <span className="text-[11px] text-[#6D7A77] flex items-center gap-1">
-                        <Lock className="w-3 h-3 text-[#00685F]" />
-                        <span>Locked by Team Lead</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Approved Custom / Suggested Activities */}
-                {itinerary.activityBlocks
-                  .filter((act) => act.id.startsWith('act-approved-') || act.id.startsWith('act-custom-'))
-                  .map((act) => (
-                    <div
-                      key={act.id}
-                      className="bg-emerald-50/40 rounded-3xl border-2 border-emerald-500/30 p-5 sm:p-6 shadow-xs space-y-3"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-extrabold text-white bg-[#00685F] px-3 py-1 rounded-full font-mono">
-                          {act.time}
-                        </span>
-                        <span className="text-[11px] font-extrabold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Approved by Team Lead 👑</span>
-                        </span>
-                      </div>
-                      <h3 className="text-base sm:text-lg font-black text-[#161C23]">{act.title}</h3>
-                      <p className="text-xs text-[#6D7A77] font-medium leading-relaxed">
-                        {act.description}
-                      </p>
-                      <div className="text-xs text-[#526360] flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5 text-[#00685F]" />
-                        <span>{act.location}</span>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          </div>
-        </main>
-
-        {/* ========================================================================= */}
-        {/* 3. SUGGESTIONS & SOCIAL MEDIA REVIEW DRAWER                               */}
-        {/* ========================================================================= */}
+        {/* ── Suggestions Drawer (slides in over map pane when open) ── */}
         {showSuggestionsDrawer && (
-          <aside className="w-80 sm:w-96 bg-white border-l border-[#E7DFD5] h-full flex flex-col shadow-2xl z-40 animate-in slide-in-from-right duration-200">
-            {/* Drawer Header */}
-            <div className="p-4 border-b border-[#E7DFD5] flex items-center justify-between bg-[#FAF8F5]">
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <MessageSquare className="w-4 h-4 text-[#00685F]" />
-                  <h3 className="text-sm font-black text-[#161C23]">Tripmate Suggestions</h3>
-                </div>
-                <p className="text-[11px] text-[#6D7A77]">
-                  {isTeamLead
-                    ? 'Review & approve suggestions into the itinerary'
-                    : 'Your submitted proposals and social links'}
-                </p>
-              </div>
+          <aside className="w-80 bg-white border-l border-[#E7DFD5] flex flex-col h-full overflow-hidden shrink-0 shadow-xl z-20">
+            <div className="flex items-center justify-between p-4 border-b border-[#E7DFD5]">
+              <span className="text-sm font-black text-[#161C23]">
+                Suggestions ({suggestions.length})
+              </span>
               <button
                 type="button"
                 onClick={() => setShowSuggestionsDrawer(false)}
-                className="p-1 rounded-full hover:bg-neutral-200 text-[#6D7A77]"
+                className="text-[#8A9592] hover:text-[#161C23] text-xs font-bold cursor-pointer px-2 py-1 rounded-lg hover:bg-[#FAF8F5]"
               >
-                <X className="w-4 h-4" />
+                ✕ Close
               </button>
             </div>
-
-            {/* Quick action button inside drawer for Mates */}
-            {!isTeamLead && (
-              <div className="p-3 bg-[#EEF4FE] border-b border-[#00685F]/20">
-                <button
-                  type="button"
-                  onClick={() => setIsSuggestModalOpen(true)}
-                  className="w-full py-2.5 px-3 rounded-xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Suggest New Place / Reel Link</span>
-                </button>
-              </div>
-            )}
-
-            {/* Suggestions List */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {suggestions.length === 0 ? (
-                <div className="text-center py-12 space-y-2 text-[#6D7A77]">
-                  <MessageSquare className="w-8 h-8 mx-auto text-[#C4BCB3]" />
-                  <p className="text-xs font-bold">No suggestions yet</p>
-                  <p className="text-[11px]">
-                    Tripmates can submit TikTok reels, food spots, and scenic locations here.
-                  </p>
-                </div>
+                <p className="text-xs text-[#8A9592] text-center py-8 font-medium">
+                  No suggestions yet. Tripmates can submit ideas via the "Suggest" button.
+                </p>
               ) : (
                 suggestions.map((sug) => (
                   <div
                     key={sug.id}
-                    className={`p-3.5 rounded-2xl border transition-all space-y-2.5 ${
+                    className={`p-3.5 rounded-2xl border space-y-2 text-xs ${
                       sug.status === 'approved'
-                        ? 'bg-emerald-50/40 border-emerald-200'
+                        ? 'border-emerald-200 bg-emerald-50/60'
                         : sug.status === 'rejected'
-                        ? 'bg-neutral-100 border-neutral-200 opacity-60'
-                        : 'bg-white border-[#E7DFD5] shadow-xs'
+                        ? 'border-neutral-200 bg-neutral-50 opacity-60'
+                        : 'border-[#E7DFD5] bg-white'
                     }`}
                   >
-                    {/* Proposer Info & Status */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={sug.proposedBy.avatar}
-                          alt={sug.proposedBy.name}
-                          className="w-6 h-6 rounded-full object-cover"
-                        />
-                        <div className="leading-tight">
-                          <span className="text-xs font-bold text-[#161C23]">
-                            {sug.proposedBy.name}
-                          </span>
-                          <span className="text-[10px] text-[#6D7A77] block">
-                            {sug.submittedAt}
-                          </span>
-                        </div>
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={sug.proposedBy.avatar}
+                        alt={sug.proposedBy.name}
+                        className="w-6 h-6 rounded-full object-cover"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-black text-[#161C23] truncate">{sug.title}</p>
+                        <p className="text-[10px] text-[#8A9592]">
+                          by {sug.proposedBy.name} · {sug.submittedAt}
+                        </p>
                       </div>
-
-                      {sug.status === 'approved' && (
-                        <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <Check className="w-3 h-3" />
-                          <span>Approved</span>
-                        </span>
-                      )}
-                      {sug.status === 'rejected' && (
-                        <span className="text-[10px] font-bold text-neutral-500 bg-neutral-200 px-2 py-0.5 rounded-full">
-                          Declined
-                        </span>
-                      )}
-                      {sug.status === 'pending' && (
-                        <span className="text-[10px] font-extrabold text-amber-900 bg-amber-100 px-2 py-0.5 rounded-full">
-                          Pending Review
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Title & Description */}
-                    <div>
-                      <h4 className="text-xs font-black text-[#161C23]">{sug.title}</h4>
-                      <p className="text-[11px] text-[#6D7A77] mt-0.5 leading-relaxed">
-                        {sug.description}
-                      </p>
-                    </div>
-
-                    {/* Halal Badge & Source Link */}
-                    <div className="flex items-center justify-between gap-1 text-[10px] pt-1 border-t border-[#E7DFD5]/50 flex-wrap">
-                      <span className="font-bold text-[#00685F] bg-[#EEF4FE] px-2 py-0.5 rounded">
-                        {sug.halalBadge || 'Community Halal Checked'}
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          sug.status === 'approved'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : sug.status === 'rejected'
+                            ? 'bg-neutral-100 text-neutral-500 border-neutral-200'
+                            : 'bg-amber-50 text-amber-700 border-amber-200'
+                        }`}
+                      >
+                        {sug.status}
                       </span>
-
-                      {sug.sourceUrl && (
-                        <a
-                          href={sug.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[#00685F] font-bold flex items-center gap-1 hover:underline"
-                        >
-                          <Video className="w-3 h-3" />
-                          <span>View Social Link</span>
-                        </a>
-                      )}
                     </div>
-
-                    {/* Team Lead Actions: Approve or Reject */}
+                    <p className="text-[#526360] leading-relaxed">{sug.description}</p>
                     {isTeamLead && sug.status === 'pending' && (
                       <div className="flex items-center gap-2 pt-1 border-t border-[#E7DFD5]">
                         <button
                           type="button"
                           onClick={() => handleApproveSuggestion(sug)}
-                          className="flex-1 py-1.5 rounded-xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                          className="flex-1 py-1.5 rounded-xl bg-[#00685F] hover:bg-[#008378] text-white text-xs font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer"
                         >
                           <Check className="w-3.5 h-3.5" />
-                          <span>Approve into Day</span>
+                          <span>Approve</span>
                         </button>
                         <button
                           type="button"
