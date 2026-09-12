@@ -21,6 +21,9 @@ import {
   Layers,
   Filter,
   Settings2,
+  ImageOff,
+  Droplets,
+  CloudRain,
 } from 'lucide-react';
 import {
   ItineraryStop,
@@ -118,6 +121,91 @@ const STATUS_CONFIG: Record<
 };
 
 // ─────────────────────────────────────────────────────
+// Curated photorealistic travel media (verified Unsplash assets)
+// ─────────────────────────────────────────────────────
+const PHOTO_TOKYO_HERO =
+  'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?auto=format&fit=crop&w=1200&q=80';
+const PHOTO_TEAMLAB =
+  'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=800&q=80';
+const PHOTO_TSUKIJI =
+  'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=800&q=80';
+const PHOTO_SKYTREE_DISNEY =
+  'https://images.unsplash.com/photo-1536098561742-ca998e48cbcc?auto=format&fit=crop&w=800&q=80';
+const PHOTO_AIRPORT_LOUNGE =
+  'https://images.unsplash.com/photo-1583037189850-1921ae7c6c22?auto=format&fit=crop&w=800&q=80';
+const PHOTO_NARITA_EXPRESS =
+  'https://images.unsplash.com/photo-1542051841857-5f90071e7989?auto=format&fit=crop&w=800&q=80';
+
+// Destination hero photography (falls back to the Tokyo skyline).
+const DESTINATION_HERO_PHOTOS: Record<string, string> = {
+  Tokyo: PHOTO_TOKYO_HERO,
+  Kyoto:
+    'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?auto=format&fit=crop&w=1200&q=80',
+};
+
+// Keyword → verified travel photo. Keeps attraction cards media-rich even when
+// the upstream itinerary ships a missing or placeholder image.
+const STOP_PHOTO_OVERRIDES: { match: RegExp; url: string }[] = [
+  { match: /teamlab/i, url: PHOTO_TEAMLAB },
+  { match: /tsukiji/i, url: PHOTO_TSUKIJI },
+  { match: /disney|skytree|solamachi/i, url: PHOTO_SKYTREE_DISNEY },
+  { match: /narita express|skyliner|airport express|shinkansen/i, url: PHOTO_NARITA_EXPRESS },
+  { match: /airport lounge|plaza premium|premium lounge/i, url: PHOTO_AIRPORT_LOUNGE },
+];
+
+function getHeroPhoto(city?: string): string {
+  return (city && DESTINATION_HERO_PHOTOS[city]) || PHOTO_TOKYO_HERO;
+}
+
+function resolveStopPhoto(stop: ItineraryStop): string | undefined {
+  const override = STOP_PHOTO_OVERRIDES.find((o) => o.match.test(stop.title));
+  return override?.url ?? stop.imageUrl;
+}
+
+// ─────────────────────────────────────────────────────
+// FallbackImage — graceful neutral placeholder if a photo 404s
+// ─────────────────────────────────────────────────────
+function FallbackImage({
+  src,
+  alt,
+  className,
+  iconClassName = 'h-6 w-6',
+  title,
+}: {
+  src?: string;
+  alt: string;
+  className: string;
+  iconClassName?: string;
+  title?: string;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  if (hasError || !src) {
+    return (
+      <div
+        role="img"
+        aria-label={alt}
+        title={title}
+        className={`flex items-center justify-center bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 ${className}`}
+      >
+        <ImageOff className={iconClassName} />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      title={title}
+      loading="lazy"
+      onError={() => setHasError(true)}
+      className={className}
+    />
+  );
+}
+
+// ─────────────────────────────────────────────────────
 // Transit Separator
 // ─────────────────────────────────────────────────────
 function TransitSeparator({ transit }: { transit: TransitInfo }) {
@@ -195,16 +283,32 @@ function StopCard({
   const catConfig = CATEGORY_CONFIG[stop.category];
   const statusConfig = STATUS_CONFIG[stop.status];
   const isPrayer = stop.category === 'PRAYER';
+  const isMediaStop = stop.category === 'ATTRACTION' || stop.category === 'FOOD';
+  const stopPhoto = resolveStopPhoto(stop);
+  const prayerBadge = stop.halalBadge ?? '';
+  const qiblaTag = stop.tags?.find((t) => /qibla/i.test(t));
 
-  let cardBg = isPrayer ? 'bg-gradient-to-r from-teal-50/70 via-white to-white' : 'bg-white';
-  let indicatorColor = dayColor;
-  let customBorder = isSelected ? dayColor : isHovered ? `${dayColor}80` : '#E7DFD5';
+  let cardBg = isPrayer
+    ? 'bg-gradient-to-r from-emerald-50/70 via-white to-white'
+    : 'bg-white';
+  let indicatorColor = isPrayer ? '#0D9488' : dayColor;
+  let customBorder = isPrayer
+    ? isSelected
+      ? '#0D9488'
+      : isHovered
+      ? '#5EEAD4'
+      : '#A7F3D0'
+    : isSelected
+    ? dayColor
+    : isHovered
+    ? `${dayColor}80`
+    : '#E7DFD5';
 
-  if (stop.groupId === 'group-a') {
+  if (!isPrayer && stop.groupId === 'group-a') {
     cardBg = 'bg-gradient-to-r from-green-50/50 to-white';
     indicatorColor = '#22C55E';
     customBorder = isSelected ? '#22C55E' : isHovered ? '#4ADE80' : '#bbf7d0';
-  } else if (stop.groupId === 'group-b') {
+  } else if (!isPrayer && stop.groupId === 'group-b') {
     cardBg = 'bg-gradient-to-r from-purple-50/50 to-white';
     indicatorColor = '#A855F7';
     customBorder = isSelected ? '#A855F7' : isHovered ? '#C084FC' : '#e9d5ff';
@@ -228,10 +332,12 @@ function StopCard({
       onMouseEnter={() => onHover(stop.id)}
       onMouseLeave={() => onHover(null)}
     >
-      {/* Left indicator bar */}
-      {isSelected && (
+      {/* Left indicator bar (always visible for serene Solat slots) */}
+      {(isSelected || isPrayer) && (
         <div
-          className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl"
+          className={`absolute left-0 top-0 bottom-0 rounded-l-2xl ${
+            isPrayer ? 'w-1' : 'w-1.5'
+          }`}
           style={{ backgroundColor: indicatorColor }}
         />
       )}
@@ -270,7 +376,7 @@ function StopCard({
             <h4 className="text-sm font-extrabold text-[#161C23] leading-tight flex items-center gap-2">
               <span>{stop.title}</span>
               {isPrayer && (
-                <span className="text-[10px] font-black text-teal-700 bg-teal-100/80 px-2 py-0.5 rounded-full">
+                <span className="inline-flex items-center gap-1 rounded-full border border-teal-300 bg-white px-2 py-0.5 text-[10px] font-black text-teal-700">
                   🕌 Solat Slot
                 </span>
               )}
@@ -292,46 +398,71 @@ function StopCard({
             )}
 
             {/* Badges */}
-            <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
-              <span
-                className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusConfig.color}`}
-              >
-                {statusConfig.icon}
-                {statusConfig.label}
-              </span>
-
-              {stop.halalBadge && (
-                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-teal-50 text-teal-700 border-teal-200">
-                  ✅ {stop.halalBadge}
-                </span>
-              )}
-
-              {stop.tags?.map((t) => (
+            {isPrayer ? (
+              /* Solat slot — minimal, serene outline badges only */
+              <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                {prayerBadge && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                    <Droplets className="h-3 w-3" />
+                    {prayerBadge}
+                  </span>
+                )}
+                {qiblaTag && !/qibla/i.test(prayerBadge) && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-teal-300 bg-white px-2 py-0.5 text-[10px] font-bold text-teal-700">
+                    <Compass className="h-3 w-3" />
+                    {qiblaTag}
+                  </span>
+                )}
+                {stop.halalTier === 'certified' && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-white px-2 py-0.5 text-[10px] font-bold text-teal-700">
+                    <CheckCircle2 className="h-3 w-3 text-teal-600" />
+                    Verified Prayer Space
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
                 <span
-                  key={t}
-                  className="text-[9px] font-semibold text-[#526360] bg-[#FAF8F5] border border-[#E7DFD5] px-1.5 py-0.5 rounded-md"
+                  className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusConfig.color}`}
                 >
-                  {t}
+                  {statusConfig.icon}
+                  {statusConfig.label}
                 </span>
-              ))}
 
-              {stop.rating && (
-                <span className="flex items-center gap-0.5 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
-                  <Star className="w-2.5 h-2.5 fill-amber-400 stroke-amber-400" />
-                  {stop.rating}
-                </span>
-              )}
-            </div>
+                {stop.halalBadge && (
+                  <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-teal-50 text-teal-700 border-teal-200">
+                    ✅ {stop.halalBadge}
+                  </span>
+                )}
+
+                {stop.tags?.map((t) => (
+                  <span
+                    key={t}
+                    className="text-[9px] font-semibold text-[#526360] bg-[#FAF8F5] border border-[#E7DFD5] px-1.5 py-0.5 rounded-md"
+                  >
+                    {t}
+                  </span>
+                ))}
+
+                {stop.rating && (
+                  <span className="flex items-center gap-0.5 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
+                    <Star className="w-2.5 h-2.5 fill-amber-400 stroke-amber-400" />
+                    {stop.rating}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Image */}
-          {stop.imageUrl && (
+          {/* Media thumbnail — widescreen for attractions & dining */}
+          {!isPrayer && stopPhoto && (
             <div className="shrink-0">
-              <img
-                src={stop.imageUrl}
+              <FallbackImage
+                src={stopPhoto}
                 alt={stop.title}
-                className="w-20 h-20 rounded-xl object-cover border border-[#E7DFD5] shadow-sm"
-                loading="lazy"
+                className={`rounded-xl border border-[#E7DFD5] object-cover shadow-sm ${
+                  isMediaStop ? 'w-28 h-20 sm:w-36 sm:h-24' : 'w-24 h-16 sm:w-28 sm:h-20'
+                }`}
               />
             </div>
           )}
@@ -404,7 +535,7 @@ function OverviewFeed({
             <div
               key={day.id}
               onClick={() => onSelectDay(day.id)}
-              className="p-4 rounded-2xl border bg-white shadow-sm hover:shadow-md transition-all cursor-pointer group hover:border-[#0D6955]/50 relative overflow-hidden"
+              className="p-4 rounded-2xl border border-white/50 bg-white/70 shadow-lg backdrop-blur-md hover:shadow-xl transition-all cursor-pointer group hover:border-[#0D6955]/50 relative overflow-hidden dark:border-slate-700/50 dark:bg-slate-900/60"
             >
               {/* Day Color Accent Line */}
               <div
@@ -742,6 +873,10 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
     return timeToMinutes(stop.timeWindow?.start || '00:00');
   }
 
+  const nextSalah = prayerData?.fiveDailySalah.find((s) => s.isNext);
+  const heroPhoto = getHeroPhoto(activeDay.city);
+  const isRainy = dayWeather?.condition === 'RAINY';
+
   return (
     <div
       ref={feedRef}
@@ -781,95 +916,159 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
           ))}
         </div>
 
-        {/* ── Day Header Banner with Signature Color ── */}
-        <div className="bg-white rounded-3xl border border-[#E7DFD5] overflow-hidden shadow-sm">
-          <div
-            className="px-5 py-4 text-white"
-            style={{
-              background: `linear-gradient(135deg, ${dayColor}, #0D6955)`,
-            }}
-          >
+        {/* ── Wanderlog-Style Hero Photo (text floats on top of the photograph) ── */}
+        <div className="relative h-72 sm:h-80 w-full rounded-2xl overflow-hidden shadow-sm">
+            <FallbackImage
+              src={heroPhoto}
+              alt={`${activeDay.city} cityscape`}
+              iconClassName="h-8 w-8"
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+            {/* Subtle weather particles — strictly confined to the hero */}
+            {isRainy && (
+              <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+                {Array.from({ length: 14 }).map((_, i) => (
+                  <span
+                    key={i}
+                    className="absolute top-0 block w-px rounded-full bg-sky-100/60"
+                    style={{
+                      left: `${(i * 7.3) % 100}%`,
+                      height: `${36 + (i % 4) * 14}px`,
+                      animation: `safar-rain-fall ${0.7 + (i % 5) * 0.18}s linear ${
+                        (i % 7) * 0.16
+                      }s infinite`,
+                    }}
+                  />
+                ))}
+                <style>{`
+                  @keyframes safar-rain-fall {
+                    from { transform: translateY(-60px) rotate(14deg); opacity: 0; }
+                    20%  { opacity: 0.75; }
+                    to   { transform: translateY(300px) rotate(14deg); opacity: 0; }
+                  }
+                `}</style>
+              </div>
+            )}
+
+            {/* Day + weather badges floating over the photograph */}
+            <div className="absolute left-4 top-4 flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-white/40 bg-black/35 px-2.5 py-1 text-[11px] font-black text-white backdrop-blur-md">
+                Day {activeDay.dayNumber} · {activeDay.date}
+              </span>
+              {dayWeather && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/40 bg-black/35 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur-md">
+                  {dayWeather.condition === 'RAINY' ? (
+                    <CloudRain className="h-3.5 w-3.5" />
+                  ) : (
+                    <span>{dayWeather.conditionEmoji}</span>
+                  )}
+                  <span>{dayWeather.temperature}°C</span>
+                  <span className="font-semibold text-white/80">{dayWeather.conditionLabel}</span>
+                </span>
+              )}
+            </div>
+
+          {/* ── Text block floating ON TOP of the photograph (glass card) ── */}
+          <div className="absolute inset-x-3 bottom-3 rounded-2xl border border-white/50 bg-white/70 p-4 shadow-xl backdrop-blur-md dark:border-slate-700/50 dark:bg-slate-900/60 sm:inset-x-4 sm:bottom-4 sm:p-5">
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-black uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-full">
-                    Day {activeDay.dayNumber} · {activeDay.date}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-sky-700">
+                    Day {activeDay.dayNumber}
                   </span>
-                  {activeDay.distanceMiles && (
-                    <span className="text-xs font-bold text-white/90">
-                      🚗 {activeDay.distanceMiles}
-                      {activeDay.durationSummary ? ` (${activeDay.durationSummary})` : ''}
+                  {activeDay.subtitle && (
+                    <span className="truncate text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      {activeDay.subtitle}
                     </span>
                   )}
                 </div>
-                <h2 className="text-lg font-black tracking-tight">
+                <h2 className="mt-1 text-xl font-black tracking-tight text-slate-900 dark:text-white">
                   {activeDay.themeTitle}
                 </h2>
-                {activeDay.subtitle && (
-                  <p className="text-xs font-semibold text-white/80">
-                    {activeDay.subtitle}
-                  </p>
-                )}
                 {activeDay.routeSummary && (
-                  <p className="text-xs font-bold text-white/90 mt-1 flex items-center gap-1">
+                  <p className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
                     <span>🛤️</span>
-                    <span>{activeDay.routeSummary}</span>
+                    <span className="truncate">{activeDay.routeSummary}</span>
                   </p>
                 )}
               </div>
-              <div className="text-3xl select-none">
+              <div className="shrink-0 select-none text-3xl">
                 {activeDay.dayNumber === 1 ? '🗼' : activeDay.dayNumber === 2 ? '⛩️' : '🍁'}
               </div>
             </div>
 
-            {/* Members + City info + Health */}
-            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/20">
-              <div className="flex -space-x-2">
-                {state.members.slice(0, 4).map((m) => (
-                  <img
-                    key={m.id}
-                    src={m.avatar}
-                    alt={m.name}
-                    title={m.name}
-                    className="w-6 h-6 rounded-full object-cover ring-2 ring-white"
-                  />
-                ))}
+            {/* Stats, trip mates & Solat summary as clean pills */}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {/* Trip mates */}
+              <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-2.5">
+                <div className="flex -space-x-2">
+                  {state.members.slice(0, 4).map((m) => (
+                    <React.Fragment key={m.id}>
+                      <FallbackImage
+                        src={m.avatar}
+                        alt={m.name}
+                        title={m.name}
+                        iconClassName="h-3.5 w-3.5"
+                        className="h-6 w-6 rounded-full object-cover ring-2 ring-white"
+                      />
+                    </React.Fragment>
+                  ))}
+                </div>
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                  {collaboratorsCount} tripmates
+                </span>
               </div>
-              <span className="text-xs font-bold text-white/90">
-                {activeDay.city} · {collaboratorsCount} tripmates
-              </span>
-              {dayWeather && (
-                <span className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 transition-colors px-2.5 py-0.5 rounded-full text-xs font-black text-white shadow-xs backdrop-blur-xs">
-                  <span>{dayWeather.conditionEmoji}</span>
-                  <span>{dayWeather.temperature}°C</span>
-                  <span className="text-white/80 font-normal">({dayWeather.conditionLabel})</span>
+
+              {/* Distance */}
+              {activeDay.distanceMiles && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                  🚗 {activeDay.distanceMiles}
+                  {activeDay.durationSummary ? ` · ${activeDay.durationSummary}` : ''}
                 </span>
               )}
-              <span className="ml-auto text-xs font-bold bg-white/20 px-2.5 py-0.5 rounded-full">
-                {activeStops.length} stops planned
+
+              {/* Stops planned */}
+              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                📍 {activeStops.length} stops planned
               </span>
-              {/* Itinerary Health Pill */}
+
+              {/* Solat summary */}
+              {prayerData && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-700">
+                  🕌 {prayerData.fiveDailySalah.length} Solat synced
+                  {nextSalah
+                    ? ` · Next ${nextSalah.name} ${nextSalah.formattedTime12 || nextSalah.time}`
+                    : ''}
+                </span>
+              )}
+
+              {/* Prayer-conflict pill */}
               <span
-                className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black ${
                   health.prayerConflicts === 0
-                    ? 'bg-emerald-400/30 text-emerald-100'
-                    : 'bg-amber-400/30 text-amber-100'
+                    ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border border-amber-200 bg-amber-50 text-amber-700'
                 }`}
               >
-                {health.prayerConflicts === 0 ? '✓' : '⚠'} {health.label}
+                {health.prayerConflicts === 0 ? '✓' : '⚠'} {health.prayerConflicts} prayer conflict
+                {health.prayerConflicts === 1 ? '' : 's'} · {health.label}
               </span>
             </div>
           </div>
+        </div>
 
-          {/* ── Compact Prayer Strip (replaces large solat card) ── */}
+        {/* ── Compact Prayer Strip (replaces large solat card) ── */}
+        <div className="rounded-2xl border border-[#E7DFD5] bg-white overflow-hidden">
           <PrayerStrip
             prayerData={prayerData}
             conflicts={conflicts}
             city={activeDay.city}
           />
+        </div>
 
-          {/* Quick Filters */}
-          <div className="px-4 py-2 flex items-center gap-2 overflow-x-auto text-xs border-t border-[#E7DFD5]">
+        {/* ── Quick Filters ── */}
+        <div className="rounded-2xl border border-[#E7DFD5] bg-white overflow-hidden">
+          <div className="px-3 py-2 flex items-center gap-2 overflow-x-auto text-xs">
             <span className="text-[#8A9592] font-semibold flex items-center gap-1 shrink-0">
               <Filter className="w-3 h-3" /> Filter:
             </span>
@@ -904,51 +1103,57 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
           </div>
         </div>
 
-        {/* ── AI Conflict Mediator: Phase 1 — Contradiction Warning Banner ── */}
+        {/* ── AI Conflict Mediator: Phase 1 — Dietary Contradiction Alert ── */}
         {aiSplitPhase === 'conflict' && (
-          <div className="my-4 overflow-hidden rounded-2xl border border-red-200 bg-red-50 shadow-sm">
-            {/* Top accent bar */}
-            <div className="h-1 w-full bg-gradient-to-r from-red-500 to-orange-400" />
-            <div className="p-4">
-              <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wide text-red-600">
-                <AlertTriangle className="h-3.5 w-3.5" />
-                <span>Dietary Contradiction Detected</span>
-                <span className="ml-auto rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-black text-red-700 border border-red-200">
-                  {activeSplitPlan.timeSlot}
-                </span>
-              </div>
-              <h4 className="mt-2 text-sm font-black text-[#161C23]">
-                🍜 {activeSplitPlan.optionB.name} — Pork Tonkotsu
-              </h4>
-              <p className="mt-1 text-xs font-medium leading-relaxed text-[#526360]">
-                This restaurant's pork-based broth violates <span className="font-bold text-[#161C23]">Halal</span> requirements for the following group members:
-              </p>
-              {/* Affected member chips */}
-              <div className="mt-2.5 flex flex-wrap gap-1.5">
-                {activeSplitPlan.optionA.assignedMembers
-                  .filter(m => m.dietaryRestriction === 'Halal')
-                  .map(m => (
-                    <div key={m.id} className="flex items-center gap-1.5 rounded-full bg-white border border-red-200 px-2.5 py-1 shadow-sm">
-                      <img src={m.avatarUrl} alt={m.name} className="h-5 w-5 rounded-full object-cover" />
-                      <span className="text-[11px] font-bold text-[#161C23]">{m.name}</span>
-                      <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-black text-emerald-800 border border-emerald-200">Halal</span>
-                    </div>
-                  ))
-                }
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsMediatorOpen(true)}
-                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:from-red-700 hover:to-rose-700 transition-all cursor-pointer"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  Ask AI Planner
-                </button>
-                <span className="text-[11px] font-medium text-[#8A9592]">
-                  AI proposes a win-win split · You decide
-                </span>
-              </div>
+          <div className="my-4 rounded-2xl border border-rose-100 border-l-4 border-l-rose-500 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wide text-rose-600">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              <span>Dietary Contradiction Detected</span>
+              <span className="ml-auto rounded-full border border-rose-100 bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700">
+                {activeSplitPlan.timeSlot}
+              </span>
+            </div>
+            <h4 className="mt-2 text-sm font-black text-slate-900">
+              🍜 {activeSplitPlan.optionB.name} — Pork Tonkotsu
+            </h4>
+            <p className="mt-1 text-xs font-medium leading-relaxed text-slate-600">
+              This restaurant's pork-based broth violates{' '}
+              <span className="font-bold text-slate-900">Halal</span> requirements for the following group members:
+            </p>
+            {/* Affected member chips */}
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {activeSplitPlan.optionA.assignedMembers
+                .filter((m) => m.dietaryRestriction === 'Halal')
+                .map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 shadow-sm"
+                  >
+                    <FallbackImage
+                      src={m.avatarUrl}
+                      alt={m.name}
+                      iconClassName="h-3 w-3"
+                      className="h-5 w-5 rounded-full object-cover"
+                    />
+                    <span className="text-[11px] font-bold text-slate-900">{m.name}</span>
+                    <span className="rounded-full border border-emerald-200 bg-emerald-100 px-1.5 py-0.5 text-[9px] font-black text-emerald-800">
+                      Halal
+                    </span>
+                  </div>
+                ))}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsMediatorOpen(true)}
+                className="flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition-colors hover:bg-rose-700 cursor-pointer"
+              >
+                <Sparkles className="h-4 w-4" />
+                Ask AI Planner
+              </button>
+              <span className="text-[11px] font-medium text-slate-400">
+                AI proposes a win-win split · You decide
+              </span>
             </div>
           </div>
         )}

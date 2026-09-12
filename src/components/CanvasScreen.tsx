@@ -58,7 +58,6 @@ import { SuggestActivityModal } from './SuggestActivityModal';
 import { firestoreSync, ClashRecord } from '../firebase/firestoreService';
 import { detectGroupConflicts, getPlanningContext } from '../services/groupConflictEngine';
 import { AIPlannerWorkspace } from './AIPlannerWorkspace';
-import { AnimeWeatherOverlay } from './AnimeWeatherOverlay';
 import { WeatherData, fetchLiveWeather } from '../services/weatherService';
 import { ShareInviteModal } from './ShareInviteModal';
 import { HalalRadarScreen } from './HalalRadarScreen';
@@ -414,7 +413,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
           {/* Live Real Weather Badge */}
           <div
             className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#F0FDF4] border border-[#BBF7D0] rounded-full text-[#166534] shadow-2xs"
-            title="Real-time Weather (Open-Meteo) with Anime Simulation"
+            title="Real-time weather (Open-Meteo)"
           >
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -424,7 +423,7 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
               {currentWeather ? `${currentWeather.temperature}°C ${currentWeather.conditionEmoji}` : '🌤️ Weather'}
             </span>
             <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-emerald-200/70 text-emerald-900">
-              Anime FX
+              Live
             </span>
           </div>
 
@@ -814,8 +813,8 @@ export const CanvasScreen: React.FC<CanvasScreenProps> = ({
         </div>
       )}
 
-      {/* Live Weather & Anime Simulation Overlay with Controls */}
-      <AnimeWeatherOverlay city={activeCity} />
+      {/* NOTE: the global full-screen weather animation overlay was removed in favour
+          of the clean, confined weather pill inside the itinerary hero header. */}
 
       {/* Halal Radar Screen Overlay */}
       {isHalalRadarOpen && (
