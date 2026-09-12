@@ -106,7 +106,9 @@ To view our complete and interactive ideation flow, please click the link below.
 <a id="3-design--prototype"></a>
 ## 3. Design & Prototype
 
-🔗 **Live UI Prototype:** **[Public Link](https://safar-oahgjkt92-cristal-teohs-projects.vercel.app/)**
+🔗 **Live UI Prototype:** **[Production](https://safar-app-cristal-teohs-projects.vercel.app/)**
+
+> ⚠️ **Always share the production alias above.** It rebuilds on every push to `main`, so it always reflects the latest code. Pinned deployment URLs such as `safar-oahgjkt92-…vercel.app` are **immutable snapshots** and will keep serving an outdated build forever.
 
 *[Embed 4–8 UI screenshots highlighting the core flow, with short captions]*
 

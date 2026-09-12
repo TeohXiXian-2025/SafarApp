@@ -1,12 +1,38 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import {defineConfig, type Plugin} from 'vite';
+
+// ---------------------------------------------------------------------------
+// Build stamp
+// Identifies exactly which commit a deployment was built from, so a live site
+// can always be compared against `git rev-parse HEAD` locally.
+// Vercel sets VERCEL_GIT_COMMIT_SHA, GitHub Actions sets GITHUB_SHA.
+// ---------------------------------------------------------------------------
+const commitSha =
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.GITHUB_SHA ||
+  'local-dev';
+
+function buildStamp(): Plugin {
+  return {
+    name: 'safar-build-stamp',
+    transformIndexHtml(html) {
+      return html.replace(
+        '</head>',
+        `  <meta name="build-commit" content="${commitSha}" />\n  </head>`,
+      );
+    },
+  };
+}
 
 export default defineConfig(() => {
   return {
     base: './',
-    plugins: [react(), tailwindcss()],
+    define: {
+      __COMMIT_SHA__: JSON.stringify(commitSha),
+    },
+    plugins: [react(), tailwindcss(), buildStamp()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

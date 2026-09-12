@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
+  AlertCircle,
   Sparkles,
   MapPin,
   Compass,
@@ -958,10 +959,11 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
     }
   }, [activeDayId, activeDay?.city]);
 
-  // API Key from .env
-  const apiKey: string =
-    (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY ||
-    'AIzaSyB36khc7_OyfIet5Ke7LG0oXLN5JA-0ZUI';
+  // Google Maps key is injected at build time (see .env / .env.example).
+  // Never hard-code a key here: it would be shipped in the public bundle.
+  // When absent, the panel falls back to the OpenStreetMap layer below.
+  const apiKey: string = ((import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || '').trim();
+  const hasGoogleMapsKey = apiKey.length > 0;
 
   // Sub-Filters State
   const [activeSubFilter, setActiveSubFilter] = useState<string>('All Areas');
@@ -1331,7 +1333,7 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
       {/*    Sub-pixel Accurate GPS Pinpointing that Stays Anchored      */}
       {/* ───────────────────────────────────────────────────────────── */}
       <div className="relative w-full h-full overflow-hidden bg-slate-100">
-        {mapMode === 'google' ? (
+        {mapMode === 'google' && hasGoogleMapsKey ? (
           <APIProvider apiKey={apiKey} libraries={['places', 'marker']}>
             <Map
               defaultCenter={defaultCenter}
@@ -1494,13 +1496,26 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
           </div>
         </div>
 
+        {/* Google Maps key missing → panel automatically renders the OSM layer */}
+        {mapMode === 'google' && !hasGoogleMapsKey && (
+          <div
+            className="absolute left-3 z-20 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 shadow-sm max-w-[280px]"
+            style={{ top: 64 }}
+          >
+            <p className="text-[10px] text-amber-700 font-medium flex items-center gap-1">
+              <AlertCircle size={11} />
+              Google Map needs VITE_GOOGLE_MAPS_API_KEY · showing OSM fallback
+            </p>
+          </div>
+        )}
+
         {/* Transparent touch/drag overlay when dragging to prevent map stealing pointer */}
         {isDragging && (
           <div className="absolute inset-0 z-30 pointer-events-auto cursor-ns-resize" />
         )}
 
         {/* Floating Zoom & Layer Controls directly on Right Edge of Map */}
-        {mapMode === 'google' && (
+        {mapMode === 'google' && hasGoogleMapsKey && (
           <div
             className="absolute right-3 z-10 flex flex-col items-end gap-2 pointer-events-none"
             style={{
