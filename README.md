@@ -6,17 +6,22 @@
 
 ## 📑 Table of Contents
 * [1. Project Overview](#1-project-overview)
-  * [The Problem](#the-problem)
-  * [Current Market Solution](#current-market-solution)
-  * [Our Solution](#our-solution)
-  * [Extra Features](#extra-features)
+  * [1.1 The Problem](#the-problem)
+  * [1.2 Current Market Solution](#current-market-solution)
+  * [1.3 Our Solution](#our-solution)
+  * [1.4 Extra Features](#extra-features)
 * [2. Ideation & Process](#2-ideation--process)
   * [2.1 Ideas We Considered](#21-ideas-we-considered)
   * [2.2 Ideation Boards](#22-ideation-boards)
   * [2.3 Mentor Consultation](#23-mentor-consultation)
 * [3. Design & Prototype](#3-design--prototype)
 * [4. Competitive Edge (What Makes It Different)](#4-competitive-edge-what-makes-it-different)
+  * [4.1 Distinctive Twists](#41-distinctive-twists)
+  * [4.2 Competitor Comparison Matrix](#42-competitor-comparison-matrix)
 * [5. Technical Architecture & Feasibility](#5-technical-architecture--feasibility)
+  * [5.1 Tech Stack](#51-tech-stack)
+  * [5.2 System Architecture Diagram](#52-system-architecture-diagram)
+  * [5.3 Build Plan & Scope](#53-build-plan--scope)
 
 ---
 
@@ -119,7 +124,8 @@ To view our complete and interactive ideation flow, please click the link below.
 
 While standard apps like Wanderlog handle basic collaborative planning, they treat religious and dietary requirements as optional preferences rather than strict constraints. **Safar App** introduces a culturally aware AI that actively resolves group conflicts instead of just logging them.
 
-### 🌟 Distinctive Twists
+<a id="41-distinctive-twists"></a>
+### 🌟 4.1 Distinctive Twists
 
 * ⏱️ **1. Dynamic Prayer-Anchored Timeline**  
   >Instead of just giving static prayer notifications, it uses live GPS to automatically insert prayer and wudu-friendly facility blocks into the schedule while simultaneously assigning nearby activities for non-Muslim companions so group travel never stalls.
@@ -141,7 +147,8 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 
 ---
 
-### 📊 Competitor Comparison Matrix
+<a id="42-competitor-comparison-matrix"></a>
+### 📊 4.2 Competitor Comparison Matrix
 
 | Feature | Safar App (Ours) | Wanderlog | HalalTrip | Lambus | TripAdvisor (Trips) | Excel & WhatsApp |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -158,6 +165,7 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 <a id="5-technical-architecture--feasibility"></a>
 ## 5. Technical Architecture & Feasibility
 
+<a id="51-tech-stack"></a>
 ### 🛠️ 5.1 Tech Stack
 
 #### 1. Frontend
@@ -200,6 +208,7 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 
 ---
 
+<a id="52-system-architecture-diagram"></a>
 ### 🏛️ 5.2 System Architecture Diagram
 
 ![System Architecture](SystemArchitecture.png)
@@ -207,6 +216,7 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 
 ---
 
+<a id="53-build-plan--scope"></a>
 ### 📦 5.3 Build Plan & Scope (Engineering Deliverables & Real-World Feasibility)
 
 > **💡 Production-Grade Feasibility:**  
