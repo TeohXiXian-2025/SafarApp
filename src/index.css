@@ -1,5 +1,82 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Safar — Design Tokens
+   Extracted 1:1 from the existing palette (teal / cream / ink).
+   No colours were changed; they are only *named* so new UI stays
+   visually consistent. Utility names: bg-brand, text-ink, border-line,
+   shadow-float, font-sans, etc.
+   ============================================================ */
+@theme {
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Brand */
+  --color-brand: #0d6955;
+  --color-brand-deep: #00685f;
+  --color-brand-dark: #004d46;
+  --color-mint: #62fae3;
+
+  /* Text */
+  --color-ink: #161c23;
+  --color-ink-soft: #526360;
+  --color-muted: #6d7a77;
+  --color-muted-faint: #8a9592;
+
+  /* Surfaces */
+  --color-canvas: #faf8f5;
+  --color-canvas-soft: #fbf9f5;
+  --color-surface: #eef4fe;
+
+  /* Lines */
+  --color-line: #e7dfd5;
+  --color-line-strong: #c4bcb3;
+
+  /* Secondary accent */
+  --color-gold: #d97706;
+
+  /* Elevation hierarchy (small → medium → large) */
+  --shadow-card: 0 1px 2px rgba(22, 28, 35, 0.04), 0 1px 3px rgba(22, 28, 35, 0.06);
+  --shadow-float: 0 4px 12px rgba(22, 28, 35, 0.06), 0 8px 24px rgba(22, 28, 35, 0.07);
+  --shadow-overlay: 0 12px 32px rgba(22, 28, 35, 0.12), 0 24px 60px rgba(22, 28, 35, 0.1);
+}
+
+@layer base {
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+}
+
+/* Accessible, brand-consistent focus ring */
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(13, 105, 85, 0.16);
+  color: var(--color-ink);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Respect the user's motion preference (accessibility) */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
 @media print {
   body {
     background-color: #ffffff !important;

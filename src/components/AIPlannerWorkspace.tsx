@@ -11,10 +11,23 @@ interface AIPlannerWorkspaceProps {
   onClose: () => void;
 }
 
+/**
+ * The visible "reasoning" pipeline shown while the planner works.
+ * Makes the AI feel like an optimisation engine rather than a chatbot.
+ */
+const AI_PIPELINE_STEPS: { label: string; detail: string }[] = [
+  { label: 'Analyzing group preferences', detail: 'Food · Temples · Less walking' },
+  { label: 'Scanning travel distances', detail: 'Walking, metro & taxi times' },
+  { label: 'Checking prayer windows', detail: 'Solat anchors preserved' },
+  { label: 'Optimising route order', detail: 'Minimising backtracking' },
+  { label: 'Generating recommendations', detail: 'Scoring win-win options' },
+];
+
 export const AIPlannerWorkspace: React.FC<AIPlannerWorkspaceProps> = ({ state, dispatch, onApplyPlan, onClose }) => {
   const [solutions, setSolutions] = useState<AIPlanSolution[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null);
+  const [pipelineStep, setPipelineStep] = useState(0);
 
   const conflict = state.activeConflicts.find(c => c.id === state.aiPlannerContext?.conflictId);
   const context = getPlanningContext(state);
@@ -22,12 +35,21 @@ export const AIPlannerWorkspace: React.FC<AIPlannerWorkspaceProps> = ({ state, d
   useEffect(() => {
     if (conflict && state.aiPlannerContext?.isOpen && !state.aiPlannerContext.solutions) {
       setLoading(true);
-      // Simulate AI generation delay
-      setTimeout(() => {
+      setPipelineStep(0);
+
+      const stepTimer = setInterval(() => {
+        setPipelineStep((s) => (s < AI_PIPELINE_STEPS.length ? s + 1 : s));
+      }, 300);
+      const doneTimer = setTimeout(() => {
         const generated = generateWinWinPlans(conflict, context);
         setSolutions(generated);
         setLoading(false);
-      }, 1500);
+      }, 1600);
+
+      return () => {
+        clearInterval(stepTimer);
+        clearTimeout(doneTimer);
+      };
     } else if (state.aiPlannerContext?.solutions) {
       setSolutions(state.aiPlannerContext.solutions);
       setLoading(false);
@@ -122,11 +144,62 @@ export const AIPlannerWorkspace: React.FC<AIPlannerWorkspaceProps> = ({ state, d
           {/* Right Column - Solutions */}
           <div className="flex-1 p-5 overflow-y-auto bg-white">
             {loading ? (
-              <div className="h-full flex flex-col items-center justify-center space-y-4">
-                <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
-                <div className="text-center">
-                  <h3 className="text-sm font-bold text-[#161C23]">Analyzing combinations...</h3>
-                  <p className="text-xs text-[#8A9592] mt-1">Generating win-win solutions based on group preferences</p>
+              <div className="h-full flex flex-col items-center justify-center px-6">
+                <div className="w-full max-w-sm">
+                  <div className="flex items-center gap-2.5 mb-4">
+                    <div className="w-9 h-9 rounded-xl bg-purple-100 flex items-center justify-center">
+                      <Sparkles className="w-4 h-4 text-purple-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-black text-[#161C23] tracking-tight">AI Planner</h3>
+                      <p className="text-[11px] font-semibold text-[#8A9592]">
+                        Resolving {conflict.type.replace('_', ' ').toLowerCase()} conflict…
+                      </p>
+                    </div>
+                  </div>
+
+                  <ul className="space-y-2">
+                    {AI_PIPELINE_STEPS.map((step, i) => {
+                      const isDone = i < pipelineStep;
+                      const isActive = i === pipelineStep;
+                      return (
+                        <li
+                          key={step.label}
+                          className={`flex items-start gap-2.5 rounded-xl px-3 py-2 border transition-colors ${
+                            isDone
+                              ? 'bg-emerald-50/60 border-emerald-100'
+                              : isActive
+                              ? 'bg-purple-50/70 border-purple-100'
+                              : 'bg-white border-[#E7DFD5] opacity-60'
+                          }`}
+                        >
+                          <span className="mt-0.5 shrink-0">
+                            {isDone ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            ) : isActive ? (
+                              <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
+                            ) : (
+                              <span className="block w-4 h-4 rounded-full border-2 border-[#E7DFD5]" />
+                            )}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-xs font-bold text-[#161C23]">{step.label}</span>
+                            <span className="block text-[10px] font-medium text-[#8A9592]">{step.detail}</span>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                  <div className="mt-4 h-1.5 rounded-full bg-[#EDE7DF] overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-indigo-600 to-purple-600 transition-all duration-300"
+                      style={{ width: `${(pipelineStep / AI_PIPELINE_STEPS.length) * 100}%` }}
+                    />
+                  </div>
+                  <p className="mt-3 text-center text-[10px] font-black uppercase tracking-widest text-purple-600">
+                    Generating recommendation…
+                  </p>
                 </div>
               </div>
             ) : (

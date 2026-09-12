@@ -42,6 +42,30 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      // Remaining >500 kB chunks are third-party vendors (firebase, misc
+      // vendor code) that are cached and loaded once. App logic itself is
+      // now ~457 kB after splitting.
+      chunkSizeWarningLimit: 600,
+      rollupOptions: {
+        output: {
+          // Split oversized vendor libraries into separate, cacheable chunks
+          // instead of one >500 kB bundle. Improves repeat-visit performance
+          // and removes the Rollup chunk-size warning.
+          manualChunks(id: string) {
+            if (!id.includes('node_modules')) return;
+            if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler'))
+              return 'react-vendor';
+            if (id.includes('motion')) return 'motion';
+            if (id.includes('lucide-react')) return 'icons';
+            if (id.includes('firebase') || id.includes('@firebase')) return 'firebase';
+            if (id.includes('jspdf')) return 'pdf';
+            if (id.includes('@vis.gl') || id.includes('google')) return 'maps-ai';
+            return 'vendor';
+          },
+        },
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.

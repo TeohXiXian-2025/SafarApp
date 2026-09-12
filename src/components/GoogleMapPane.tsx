@@ -142,10 +142,18 @@ export const StopMarker: React.FC<StopMarkerProps> = ({
       anchorPoint={AdvancedMarkerAnchorPoint.BOTTOM}
     >
       <div
-        className="relative flex flex-col items-center cursor-pointer transition-transform duration-200 select-none"
+        className={`relative flex flex-col items-center cursor-pointer transition-all duration-200 select-none ${
+          isSelected
+            ? 'drop-shadow-[0_10px_12px_rgba(0,0,0,0.35)]'
+            : 'drop-shadow-[0_3px_4px_rgba(0,0,0,0.18)]'
+        }`}
         style={{
           transformOrigin: 'bottom center',
-          transform: isHighlighted ? 'scale(1.2)' : 'scale(1)',
+          transform: isSelected
+            ? 'translateY(-8px) scale(1.18)'
+            : isHovered
+            ? 'translateY(-3px) scale(1.06)'
+            : 'scale(1)',
         }}
       >
         {/* Attraction Label (Floating ABOVE the pin so bottom anchor stays 100% locked to GPS) */}

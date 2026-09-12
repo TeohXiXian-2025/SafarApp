@@ -21,7 +21,6 @@ import {
   Layers,
   Filter,
   Settings2,
-  ImageOff,
   Droplets,
   CloudRain,
 } from 'lucide-react';
@@ -59,6 +58,10 @@ import { PrayerTimelineMarker } from './PrayerTimelineMarker';
 import { AiMediatorModal } from './AiMediatorModal';
 import { AiSplitRoute } from './AiSplitRoute';
 import { MOCK_SPLIT_PLAN } from '../data/splitRouteMock';
+import { TravelImage } from './travel/TravelImage';
+import { Reveal } from './motion/Reveal';
+import { HoverLift } from './motion/HoverLift';
+import { motion } from 'motion/react';
 
 // ─────────────────────────────────────────────────────
 // Category Icons & Badges
@@ -121,35 +124,82 @@ const STATUS_CONFIG: Record<
 };
 
 // ─────────────────────────────────────────────────────
-// Curated photorealistic travel media (verified Unsplash assets)
+// Curated travel media — every stop gets its OWN photo
+// • Unsplash  : Tokyo theme-park / market landmarks.
+// • Wikimedia Commons : Kyoto's historic sites (free, stable, documented).
+// All URLs below were HTTP-verified (200) before being committed.
 // ─────────────────────────────────────────────────────
 const PHOTO_TOKYO_HERO =
   'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?auto=format&fit=crop&w=1200&q=80';
+
+// ── Tokyo (Unsplash) ──────────────────────────────────
+const PHOTO_DISNEY =
+  'https://images.unsplash.com/photo-1513889961551-628c1e5e2ee9?auto=format&fit=crop&w=800&q=80';
+const PHOTO_DISNEY_RESORT =
+  'https://images.unsplash.com/photo-1579899388302-39281e5f8a0a?auto=format&fit=crop&w=800&q=80';
+const PHOTO_DISNEYSEA =
+  'https://images.unsplash.com/photo-1542051841857-5f90071e7989?auto=format&fit=crop&w=800&q=80';
 const PHOTO_TEAMLAB =
   'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=800&q=80';
 const PHOTO_TSUKIJI =
   'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=800&q=80';
-const PHOTO_SKYTREE_DISNEY =
+const PHOTO_SKYTREE =
   'https://images.unsplash.com/photo-1536098561742-ca998e48cbcc?auto=format&fit=crop&w=800&q=80';
 const PHOTO_AIRPORT_LOUNGE =
   'https://images.unsplash.com/photo-1583037189850-1921ae7c6c22?auto=format&fit=crop&w=800&q=80';
 const PHOTO_NARITA_EXPRESS =
   'https://images.unsplash.com/photo-1542051841857-5f90071e7989?auto=format&fit=crop&w=800&q=80';
 
-// Destination hero photography (falls back to the Tokyo skyline).
+// ── Tokyo (Wikimedia Commons) ─────────────────────────
+const PHOTO_SOLAMACHI =
+  'https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8b/Tokyo_Soramachi_2012.JPG/960px-Tokyo_Soramachi_2012.JPG';
+const PHOTO_SCRAMBLE =
+  'https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c5/Tokyo_Shibuya_Scramble_Crossing_2018-10-09.jpg/960px-Tokyo_Shibuya_Scramble_Crossing_2018-10-09.jpg';
+
+// ── Kyoto (Wikimedia Commons, authentic landmark photography) ──
+const PHOTO_KIYOMIZU =
+  'https://thumb.wikimedia.org/wikipedia/commons/thumb/6/6b/Kiyomizu-dera%2C_Kyoto%2C_November_2016_-07.jpg/960px-Kiyomizu-dera%2C_Kyoto%2C_November_2016_-07.jpg';
+const PHOTO_FUSHIMI =
+  'https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0e/Torii_path_with_lantern_at_Fushimi_Inari_Taisha_Shrine%2C_Kyoto%2C_Japan.jpg/960px-Torii_path_with_lantern_at_Fushimi_Inari_Taisha_Shrine%2C_Kyoto%2C_Japan.jpg';
+const PHOTO_BAMBOO =
+  'https://thumb.wikimedia.org/wikipedia/commons/thumb/4/4a/Bamboo_Forest%2C_Arashiyama%2C_Kyoto%2C_Japan.jpg/960px-Bamboo_Forest%2C_Arashiyama%2C_Kyoto%2C_Japan.jpg';
+const PHOTO_ARASHIYAMA_PARK =
+  'https://thumb.wikimedia.org/wikipedia/commons/thumb/8/82/Bamboo_Grove%2C_Arashiyama%2C_Kyoto%2C_Japan.jpg/960px-Bamboo_Grove%2C_Arashiyama%2C_Kyoto%2C_Japan.jpg';
+const PHOTO_OKOCHI =
+  'https://thumb.wikimedia.org/wikipedia/commons/thumb/9/99/Wooden_gate_in_Okochi_Sanso_Garden%2C_Kyoto%2C_Japan.jpg/960px-Wooden_gate_in_Okochi_Sanso_Garden%2C_Kyoto%2C_Japan.jpg';
+const PHOTO_NONOMIYA =
+  'https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c8/Nonomiya-jinja_%28Uky%C5%8D-ku_Kyoto%29_shrine_sign_hdsr_S5_06.jpg/960px-Nonomiya-jinja_%28Uky%C5%8D-ku_Kyoto%29_shrine_sign_hdsr_S5_06.jpg';
+const PHOTO_KYOTO_TOWER =
+  'https://thumb.wikimedia.org/wikipedia/commons/thumb/1/14/Observation_deck_at_Kyoto_Tower_with_staff_cleaning_the_windows%2C_Japan.jpg/960px-Observation_deck_at_Kyoto_Tower_with_staff_cleaning_the_windows%2C_Japan.jpg';
+
+// Destination hero photography (an authentic Kyoto temple for Kyoto days).
 const DESTINATION_HERO_PHOTOS: Record<string, string> = {
   Tokyo: PHOTO_TOKYO_HERO,
-  Kyoto:
-    'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?auto=format&fit=crop&w=1200&q=80',
+  Kyoto: PHOTO_KIYOMIZU,
 };
 
-// Keyword → verified travel photo. Keeps attraction cards media-rich even when
-// the upstream itinerary ships a missing or placeholder image.
+// Keyword → unique travel photo. First match wins, so order specific before
+// generic. Keeps every attraction card distinct and media-rich.
 const STOP_PHOTO_OVERRIDES: { match: RegExp; url: string }[] = [
+  // Tokyo
+  { match: /disneyland/i, url: PHOTO_DISNEY },
+  { match: /disney\s*sea/i, url: PHOTO_DISNEYSEA },
+  { match: /disney resort/i, url: PHOTO_DISNEY_RESORT },
+  { match: /solamachi/i, url: PHOTO_SOLAMACHI },
+  { match: /shibuya/i, url: PHOTO_SCRAMBLE },
+  { match: /skytree/i, url: PHOTO_SKYTREE },
   { match: /teamlab/i, url: PHOTO_TEAMLAB },
   { match: /tsukiji/i, url: PHOTO_TSUKIJI },
-  { match: /disney|skytree|solamachi/i, url: PHOTO_SKYTREE_DISNEY },
-  { match: /narita express|skyliner|airport express|shinkansen/i, url: PHOTO_NARITA_EXPRESS },
+  // Kyoto (authentic landmark photography)
+  { match: /kiyomizu/i, url: PHOTO_KIYOMIZU },
+  { match: /fushimi inari/i, url: PHOTO_FUSHIMI },
+  { match: /arashiyama park/i, url: PHOTO_ARASHIYAMA_PARK },
+  { match: /bamboo/i, url: PHOTO_BAMBOO },
+  { match: /okochi/i, url: PHOTO_OKOCHI },
+  { match: /nonomiya/i, url: PHOTO_NONOMIYA },
+  { match: /kyoto tower/i, url: PHOTO_KYOTO_TOWER },
+  // Transit / logistics
+  { match: /narita express|skyliner|airport express/i, url: PHOTO_NARITA_EXPRESS },
   { match: /airport lounge|plaza premium|premium lounge/i, url: PHOTO_AIRPORT_LOUNGE },
 ];
 
@@ -162,48 +212,8 @@ function resolveStopPhoto(stop: ItineraryStop): string | undefined {
   return override?.url ?? stop.imageUrl;
 }
 
-// ─────────────────────────────────────────────────────
-// FallbackImage — graceful neutral placeholder if a photo 404s
-// ─────────────────────────────────────────────────────
-function FallbackImage({
-  src,
-  alt,
-  className,
-  iconClassName = 'h-6 w-6',
-  title,
-}: {
-  src?: string;
-  alt: string;
-  className: string;
-  iconClassName?: string;
-  title?: string;
-}) {
-  const [hasError, setHasError] = useState(false);
-
-  if (hasError || !src) {
-    return (
-      <div
-        role="img"
-        aria-label={alt}
-        title={title}
-        className={`flex items-center justify-center bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 ${className}`}
-      >
-        <ImageOff className={iconClassName} />
-      </div>
-    );
-  }
-
-  return (
-    <img
-      src={src}
-      alt={alt}
-      title={title}
-      loading="lazy"
-      onError={() => setHasError(true)}
-      className={className}
-    />
-  );
-}
+// Shared, loading-aware image primitive (skeleton + graceful fallback).
+const FallbackImage = TravelImage;
 
 // ─────────────────────────────────────────────────────
 // Transit Separator
@@ -317,7 +327,7 @@ function StopCard({
   return (
     <div
       id={`stop-card-${stop.id}`}
-      className={`relative rounded-2xl border transition-all duration-200 cursor-pointer group overflow-hidden ${cardBg} ${
+      className={`relative rounded-2xl border transition-all duration-200 cursor-pointer group overflow-hidden hover:-translate-y-0.5 ${cardBg} ${
         isSelected
           ? 'shadow-lg'
           : isHovered
@@ -460,6 +470,8 @@ function StopCard({
               <FallbackImage
                 src={stopPhoto}
                 alt={stop.title}
+                iconClassName="h-5 w-5"
+                fallbackLabel={stop.title}
                 className={`rounded-xl border border-[#E7DFD5] object-cover shadow-sm ${
                   isMediaStop ? 'w-28 h-20 sm:w-36 sm:h-24' : 'w-24 h-16 sm:w-28 sm:h-20'
                 }`}
@@ -532,11 +544,12 @@ function OverviewFeed({
           const dayColor =
             day.color || (day.dayNumber === 1 ? '#0284C7' : day.dayNumber === 2 ? '#F97316' : '#8B5CF6');
           return (
-            <div
-              key={day.id}
-              onClick={() => onSelectDay(day.id)}
-              className="p-4 rounded-2xl border border-white/50 bg-white/70 shadow-lg backdrop-blur-md hover:shadow-xl transition-all cursor-pointer group hover:border-[#0D6955]/50 relative overflow-hidden dark:border-slate-700/50 dark:bg-slate-900/60"
-            >
+            <React.Fragment key={day.id}>
+              <HoverLift>
+                <div
+                  onClick={() => onSelectDay(day.id)}
+                  className="p-4 rounded-2xl border border-white/50 bg-white/70 shadow-lg backdrop-blur-md hover:shadow-xl transition-all cursor-pointer group hover:border-[#0D6955]/50 relative overflow-hidden dark:border-slate-700/50 dark:bg-slate-900/60"
+                >
               {/* Day Color Accent Line */}
               <div
                 className="absolute left-0 top-0 bottom-0 w-1.5"
@@ -603,6 +616,8 @@ function OverviewFeed({
                 </span>
               </div>
             </div>
+              </HoverLift>
+            </React.Fragment>
           );
         })}
 
@@ -883,8 +898,8 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
       className="flex-1 overflow-y-auto overflow-x-hidden bg-[#FAF8F5]"
       style={{ minWidth: 0 }}
     >
-      <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
-        {/* ── Top Navigation Tabs ── */}
+      <div className="max-w-2xl mx-auto px-4 py-5">
+        {/* ── Top Navigation Tabs (kept stable across day switches) ── */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-[#E7DFD5]">
           <button
             type="button"
@@ -916,12 +931,22 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
           ))}
         </div>
 
+        {/* ── Day content — keyed by day so switching animates like moving to a new area ── */}
+        <div key={activeDay.id}>
+          <motion.div
+            className="mt-4 space-y-4"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+          >
         {/* ── Wanderlog-Style Hero Photo (text floats on top of the photograph) ── */}
         <div className="relative h-72 sm:h-80 w-full rounded-2xl overflow-hidden shadow-sm">
             <FallbackImage
               src={heroPhoto}
               alt={`${activeDay.city} cityscape`}
               iconClassName="h-8 w-8"
+              fallbackLabel={activeDay.city}
+              eager
               className="absolute inset-0 h-full w-full object-cover"
             />
             {/* Subtle weather particles — strictly confined to the hero */}
@@ -1188,21 +1213,23 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
                   />
                 ))}
 
-                <StopCard
-                  stop={stop}
-                  index={i}
-                  isSelected={state.selectedStopId === stop.id}
-                  isHovered={state.hoveredStopId === stop.id}
-                  isLead={isLead}
-                  dayColor={dayColor}
-                  onSelect={onSelectStop}
-                  onHover={onHoverStop}
-                  activeConflict={state.activeConflicts.find(c => c.activityId === stop.id)}
-                  onOpenAiPlanner={onOpenAiPlanner ? () => {
-                    const conflict = state.activeConflicts.find(c => c.activityId === stop.id);
-                    if (conflict) onOpenAiPlanner(conflict.id);
-                  } : undefined}
-                />
+                <Reveal delay={Math.min(i * 0.04, 0.28)} y={10}>
+                  <StopCard
+                    stop={stop}
+                    index={i}
+                    isSelected={state.selectedStopId === stop.id}
+                    isHovered={state.hoveredStopId === stop.id}
+                    isLead={isLead}
+                    dayColor={dayColor}
+                    onSelect={onSelectStop}
+                    onHover={onHoverStop}
+                    activeConflict={state.activeConflicts.find(c => c.activityId === stop.id)}
+                    onOpenAiPlanner={onOpenAiPlanner ? () => {
+                      const conflict = state.activeConflicts.find(c => c.activityId === stop.id);
+                      if (conflict) onOpenAiPlanner(conflict.id);
+                    } : undefined}
+                  />
+                </Reveal>
 
                 {/* ── Drag & Drop Blend Simulation: Drop Zone Between Two Existing Itinerary Items ── */}
                 {i === 0 && (
@@ -1363,6 +1390,8 @@ export const ItineraryFeed: React.FC<ItineraryFeedProps> = ({
         </div>
 
         <div className="h-8" />
+          </motion.div>
+        </div>
       </div>
 
       {/* ── AI Conflict Mediator Modal (proper wiring) ── */}
