@@ -1,6 +1,6 @@
 # 🌍 Safar App
 > *By Ds gang (Chong Pohyi, Teoh Xi Xian, Tan Wei Feng)*  
-> **Problem Statement:** Travel Planner | 🎥 **[Video Presentation]** | 📊 **[Presentation Slides](https://safar-app-cristal-teohs-projects.vercel.app/pitch)
+> **Problem Statement:** Travel Planner | 🎥 **[Video Presentation](https://youtu.be/gcn_F3Ni2fs)** | 📊 **[Presentation Slides](https://safar-app-cristal-teohs-projects.vercel.app/pitch)
 **
 ---
 
