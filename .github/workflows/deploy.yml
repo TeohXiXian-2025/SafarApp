@@ -16,8 +16,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Fail loudly and specifically if the Vercel credentials are missing.
+      # A missing/expired token is the #1 reason a production deploy silently
+      # stops updating (Vercel keeps serving the last successful build forever).
+      - name: Preflight - verify Vercel credentials
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -e
+          [ -n "$VERCEL_TOKEN" ]      || { echo "::error::VERCEL_TOKEN is missing from Actions secrets"; exit 1; }
+          [ -n "$VERCEL_ORG_ID" ]     || { echo "::error::VERCEL_ORG_ID is missing from Actions secrets"; exit 1; }
+          [ -n "$VERCEL_PROJECT_ID" ] || { echo "::error::VERCEL_PROJECT_ID is missing from Actions secrets"; exit 1; }
+
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
+
+      - name: Verify Vercel token is valid
+        run: vercel whoami --token="${{ secrets.VERCEL_TOKEN }}"
 
       - name: Pull Vercel Environment Information
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
@@ -29,4 +44,17 @@ jobs:
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy Project Artifacts to Vercel
-        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        id: deploy
+        run: |
+          url="$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})"
+          echo "deployed_url=$url" >> "$GITHUB_OUTPUT"
+          echo "Production deploy: $url"
+
+      - name: Verify deployed build stamp
+        run: |
+          sleep 5
+          if curl -fsSL "${{ steps.deploy.outputs.deployed_url }}" | grep -q 'name="build-commit"'; then
+            echo "Deployed page contains the build-commit stamp."
+          else
+            echo "::warning::Deployed page is missing the build-commit stamp - possible stale build."
+          fi
