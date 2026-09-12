@@ -40,7 +40,7 @@ const DIETARY_BADGE: Record<string, { label: string; cls: string }> = {
   None:       { label: 'Any',   cls: 'bg-slate-100 text-slate-500 border border-slate-200' },
 };
 
-function MemberPill({ member }: { member: GroupMember }) {
+function MemberPill({ member }: { member: GroupMember; key?: React.Key }) {
   const badge = member.dietaryRestriction ? DIETARY_BADGE[member.dietaryRestriction] : DIETARY_BADGE['None'];
   return (
     <div className="flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 border border-[#E7DFD5] shadow-sm">

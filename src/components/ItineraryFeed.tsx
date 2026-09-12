@@ -35,6 +35,7 @@ import {
   PrayerSettings,
   DEFAULT_PRAYER_SETTINGS,
   SplitPlan,
+  GroupConflict,
 } from '../types/itinerary';
 import {
   fetchPrayerTimesForCity,

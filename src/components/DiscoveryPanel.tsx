@@ -504,6 +504,7 @@ function DiscoverySpotMarker({
   item: DiscoveryCardItem;
   isSelected: boolean;
   onClick: (item: DiscoveryCardItem) => void;
+  key?: React.Key;
 }) {
   const markerColor =
     item.category === 'Attractions'

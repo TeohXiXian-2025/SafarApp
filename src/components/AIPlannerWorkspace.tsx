@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Sparkles, AlertTriangle, ChevronRight, CheckCircle2, Users, MapPin, Loader2, ArrowRight } from 'lucide-react';
+import { Sparkles, AlertTriangle, ChevronRight, CheckCircle2, Users, MapPin, Loader2, ArrowRight, Clock } from 'lucide-react';
 import { AIPlanSolution, GroupConflict, TripState } from '../types/itinerary';
 import { getPlanningContext } from '../services/groupConflictEngine';
 import { generateWinWinPlans } from '../services/aiPlannerService';

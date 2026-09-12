@@ -1,4 +1,4 @@
-export type ActivityType = 'sightseeing' | 'dining' | 'cafe' | 'transit' | 'shopping' | 'cultural';
+export type ActivityType = 'sightseeing' | 'dining' | 'cafe' | 'transit' | 'shopping' | 'cultural' | 'lodging';
 
 export type FaithDietaryTier = 'strictly_halal' | 'muslim_owned' | 'pork_free' | 'non_muslim';
 export type TravelPace = 'fast' | 'moderate' | 'relaxed';

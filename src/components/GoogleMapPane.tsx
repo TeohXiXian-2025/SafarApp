@@ -492,6 +492,7 @@ function MapContent({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [prayerData, setPrayerData] = useState<KyotoPrayerData | null>(null);
+  const map = useMap('safar-trip-planner-map');
 
   useEffect(() => {
     fetchKyotoPrayerTimes().then(setPrayerData);
