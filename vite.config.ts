@@ -28,7 +28,11 @@ function buildStamp(): Plugin {
 
 export default defineConfig(() => {
   return {
-    base: './',
+    // Absolute base: the app is served from the domain root on Vercel.
+    // './' (relative) was only needed for the retired GitHub Pages project-site
+    // build, and it breaks asset URLs on deep links when combined with
+    // vercel.json's catch-all rewrite.
+    base: '/',
     define: {
       __COMMIT_SHA__: JSON.stringify(commitSha),
     },
