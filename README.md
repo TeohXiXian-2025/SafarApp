@@ -202,40 +202,8 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 
 ### 🏛️ 5.2 System Architecture Diagram
 
-```mermaid
-flowchart TB
-    subgraph Client ["🖥️ Client Application (React 19 + Vite 6)"]
-        UI["Interactive UI\n(Tailwind v4 + Framer Motion)"]
-        State["App State & Cache\n(Trip Context + BroadcastChannel)"]
-        PDF["jsPDF Engine\n(Client-Side PDF Export)"]
-        OfflineEngine["Offline Astronomical Engine\n(Local Mathematical Solar Models)"]
-        UI <--> State
-        State --> PDF
-        State <--> OfflineEngine
-    end
-
-    subgraph Hosting ["☁️ Delivery & Hosting (Vercel)"]
-        Edge["Vercel Global Edge Network\n(SPA Rewrites via vercel.json)"]
-        Client <--> Edge
-    end
-
-    subgraph Database ["🔥 Database (Firebase)"]
-        Firestore[("Cloud Firestore\n(Real-Time Trips & Shared Itineraries)")]
-        State <-->|onSnapshot Listeners| Firestore
-    end
-
-    subgraph ExternalAPIs ["🌐 External Intelligence Services"]
-        Gemini["Google Gemini 2.0 Flash\n(Reel Parser & Auto-Split Logic)"]
-        GMaps["Google Maps & Places API\n(With OSM Fallback)"]
-        Aladhan["Aladhan Prayer API\n(GPS-Anchored Solat Times)"]
-        Weather["Open-Meteo API\n(Hourly Weather Overlays)"]
-    end
-
-    State -->|Structured JSON Prompts| Gemini
-    State -->|Geocoding & Markers| GMaps
-    State -->|Timings Lookup| Aladhan
-    State -->|Forecast Overlays| Weather
-```
+![System Architecture](SystemArchitecture.png)
+*Figure 5.1: High-level System Architecture of Safar App illustrating the Client Tier, Delivery & Edge Hosting, Real-Time Cloud Database, and External Intelligence Services.*
 
 ---
 
