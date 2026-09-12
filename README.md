@@ -15,9 +15,17 @@
   * [2.2 Ideation Boards](#22-ideation-boards)
   * [2.3 Mentor Consultation](#23-mentor-consultation)
 * [3. Design & Prototype](#3-design--prototype)
+  * [3.1 Web App Architecture & Hero Onboarding](#31-web-app-architecture--hero-onboarding)
+  * [3.2 Dynamic Prayer-Anchored Timeline & Live Map](#32-dynamic-prayer-anchored-timeline--live-map)
+  * [3.3 AI Mediator & Auto-Split Conflict Resolver](#33-ai-mediator--auto-split-conflict-resolver)
+  * [3.4 Live Geo-Fenced Halal Radar](#34-live-geo-fenced-halal-radar)
+  * [3.5 Social-to-Itinerary Video Extractor](#35-social-to-itinerary-video-extractor)
+  * [3.6 AI Document Vault & Offline Travel Dossier](#36-ai-document-vault--offline-travel-dossier)
+  * [3.7 Live Transit Status & Emergency Fallback Engine](#37-live-transit-status--emergency-fallback-engine)
 * [4. Competitive Edge (What Makes It Different)](#4-competitive-edge-what-makes-it-different)
-  * [4.1 Distinctive Twists](#41-distinctive-twists)
-  * [4.2 Competitor Comparison Matrix](#42-competitor-comparison-matrix)
+  * [4.1 User Journey Transformation (Before vs. After)](#41-user-journey-transformation)
+  * [4.2 Distinctive Twists](#42-distinctive-twists)
+  * [4.3 Competitor Comparison Matrix](#43-competitor-comparison-matrix)
 * [5. Technical Architecture & Feasibility](#5-technical-architecture--feasibility)
   * [5.1 Tech Stack](#51-tech-stack)
   * [5.2 System Architecture Diagram](#52-system-architecture-diagram)
@@ -88,13 +96,13 @@ To view our complete and interactive ideation flow, please click the link below.
 
 🔗 **[Full Ideation Board Link](https://miro.com/app/board/uXjVJxp-TU8=/?share_link_id=677056059932)**
 
-![Brainstorming Process](Brainstorming%20process.png)
+![Brainstorming Process](images/Brainstorming%20process.png)
 *This flowchart outlines our three-stage brainstorming methodology. It details how we moved from initial problem discovery to solution mapping, and finally through our mentor pivot iterations.*
 
-![Problem and Solution Tree](FinalIdea.png)
+![Problem and Solution Tree](images/FinalIdea.png)
 *This board visualizes our core logic tree mapping. It shows exactly how we extracted root causes from market research and connected them directly to our problem statement and AI features.*
 
-![Idea Evolution Sequence](IdeaFormation.png)
+![Idea Evolution Sequence](images/IdeaFormation.png)
 *This sequence tracks the evolution of the five major ideas we considered. It highlights the fatal flaws in our earlier concepts and the specific mentor advice that led us to our final chosen solution.*
 
 <a id="23-mentor-consultation"></a>
@@ -109,13 +117,80 @@ To view our complete and interactive ideation flow, please click the link below.
 ---
 
 <a id="3-design--prototype"></a>
-## 3. Design & Prototype
+## 🎨 3. Design & Prototype
 
-🔗 **Live UI Prototype:** **[Production](https://safar-app-cristal-teohs-projects.vercel.app/)**
+🔗 **Live Production Deployment:** **[Safar Web App (Live on Vercel)](https://safar-app-cristal-teohs-projects.vercel.app/)**  
+*The web app is engineered with a bespoke Islamic-contemporary aesthetic (Warm Cream `#FAF8F5`, Deep Emerald `#00685F`, and Obsidian Slate `#161C23`) designed for high-density group collaboration, zero cognitive clutter, and responsive mobile/desktop coordination.*
 
-> ⚠️ **Always share the production alias above.** It rebuilds on every push to `main`, so it always reflects the latest code. Pinned deployment URLs such as `safar-oahgjkt92-…vercel.app` are **immutable snapshots** and will keep serving an outdated build forever.
+---
 
-*[Embed 4–8 UI screenshots highlighting the core flow, with short captions]*
+<a id="31-web-app-architecture--hero-onboarding"></a>
+### 🌟 3.1 Web App Architecture & Hero Onboarding
+
+> **The Flow:** The landing interface establishes the dual-focus value proposition ("Faith-Anchored Trips. Weather-Smart & Group-Synced"). Groups can start planning immediately as a Team Lead or launch quick itineraries directly from viral social links.
+
+![Landing Page & Hero Onboarding](images/1_Hero_Landing.png)
+*Figure 3.1: Modern hero screen featuring live city weather cards (Kyoto, Tokyo, Makkah, Istanbul), destination router, and one-click onboarding wizard.*
+
+---
+
+<a id="32-dynamic-prayer-anchored-timeline--live-map"></a>
+### ⏱️ 3.2 Dynamic Prayer-Anchored Timeline & Live Map
+
+> **The Flow:** The core Workspace canvas brings together the full itinerary schedule, real-time Kyoto/Tokyo Solat API prayer times, and interactive Google/OSM map. Prayer blocks (*Fajr, Dhuhr, Asr, Maghrib, Isha*) are automatically woven into the route based on live GPS coordinates without manual time-budgeting.
+
+![Dynamic Prayer-Anchored Timeline Workspace](images/2_Prayer_Timeline_Workspace.png)
+*Figure 3.2: Multi-day workspace canvas displaying live Solat API synchronization, weather windows, itinerary cards, and GPS polyline route tracking.*
+
+---
+
+<a id="33-ai-mediator--auto-split-conflict-resolver"></a>
+### 🤝 3.3 AI Mediator & Auto-Split Conflict Resolver
+
+> **The Flow:** When an unavoidable dietary contradiction is detected (e.g. *Ichiran Ramen's pork-based tonkotsu broth* clashing with Muslim group members Amina, Tariq, and Fatima), the AI Mediator steps in. Instead of forcing a "majority-rules" compromise, it calculates two parallel walking tracks (*Track A: Narita-ya 100% Halal Ramen* vs. *Track B: Ichiran Original Tonkotsu*) with synchronized walking times and an auto-generated regroup meetup pin at Senso-ji.
+
+![AI Mediator & Auto-Split Resolution](images/3_AI_Mediator_Split_Engine.png)
+*Figure 3.3: AI Mediator modal presenting a 98% Harmony Score win-win split plan with walking distances and shared meetup synchronizer.*
+
+---
+
+<a id="34-live-geo-fenced-halal-radar"></a>
+### 📡 3.4 Live Geo-Fenced Halal Radar
+
+> **The Flow:** The dedicated Halal Radar provides instant, real-time discovery within walking or driving radius. Venues feature verified 3-tier safety badges (*Certified Halal, Muslim-Owned, Pork-Free*), walking transit times, live estimated wait times, and direct access to verified menu breakdowns.
+
+![Live Geo-Fenced Halal Radar](images/4_Halal_Radar_Finder.png)
+*Figure 3.4: Geo-fenced radar display with live map overlay, walking radii, verified menus, and one-tap turn-by-turn navigation.*
+
+---
+
+<a id="35-social-to-itinerary-video-extractor"></a>
+### 📱 3.5 Social-to-Itinerary Video Extractor
+
+> **The Flow:** Travelers can paste links from Xiaohongshu (RedNote), TikTok, or Instagram Reels directly into the discovery drawer. The multimodal AI parser extracts POI names, descriptions, and coordinates, allowing users to save spots directly to their itinerary or preview them on the map.
+
+![Social-to-Itinerary Video Extractor](images/5_Social_Video_Extractor.png)
+*Figure 3.5: Multimodal video extractor turning viral social reels into verified map pins and discoverable attraction cards.*
+
+---
+
+<a id="36-ai-document-vault--offline-travel-dossier"></a>
+### 🔒 3.6 AI Document Vault & Offline Travel Dossier
+
+> **The Flow:** The group Document Vault securely stores passports, flight e-tickets, and hotel vouchers. The client-side parser checks the international 6-month passport expiry rule, verifies accommodation date consistency, and compiles all tickets into a printable, emergency offline PDF dossier via `jsPDF`.
+
+![AI Document Cross-Check Vault](images/6_Document_Vault_Cross_Check.png)
+*Figure 3.6: AI Document Vault tracking passport biometric validity, flight bookings, and hotel reservations with client-side privacy protection.*
+
+---
+
+<a id="37-live-transit-status--emergency-fallback-engine"></a>
+### 🚨 3.7 Live Transit Status & Emergency Fallback Engine
+
+> **The Flow:** Powered by live transit status synchronization (`Aviationstack` & `Navitime` APIs), the system detects real-time flight disruptions (e.g. flight MH70 delayed by 4 hours). Rather than stranding travelers, the AI quantifies schedule impact and prepares an automated rescue plan ("AI Reroute") that shifts downstream hotel check-ins and re-anchors prayer windows.
+
+![Live Transit Status & Emergency Fallback](images/7_Emergency_Fallback_Reroute.png)
+*Figure 3.7: Live flight delay detection triggering automated schedule impact analysis and one-click AI itinerary rerouting.*
 
 ---
 
@@ -124,8 +199,16 @@ To view our complete and interactive ideation flow, please click the link below.
 
 While standard apps like Wanderlog handle basic collaborative planning, they treat religious and dietary requirements as optional preferences rather than strict constraints. **Safar App** introduces a culturally aware AI that actively resolves group conflicts instead of just logging them.
 
-<a id="41-distinctive-twists"></a>
-### 🌟 4.1 Distinctive Twists
+<a id="41-user-journey-transformation"></a>
+### 🔄 4.1 User Journey Transformation (Before vs. After Safar App)
+
+![User Journey Transformation: Before vs. After Safar App](images/BeforeAfterUserJourney.png)
+*Figure 4.1: Multi-persona user journey comparison highlighting the transformation across Planning, Daily Travel, Dining, and Group Conflicts for both Muslim travelers and Non-Muslim companions.*
+
+---
+
+<a id="42-distinctive-twists"></a>
+### 🌟 4.2 Distinctive Twists
 
 * ⏱️ **1. Dynamic Prayer-Anchored Timeline**  
   >Instead of just giving static prayer notifications, it uses live GPS to automatically insert prayer and wudu-friendly facility blocks into the schedule while simultaneously assigning nearby activities for non-Muslim companions so group travel never stalls.
@@ -147,8 +230,8 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 
 ---
 
-<a id="42-competitor-comparison-matrix"></a>
-### 📊 4.2 Competitor Comparison Matrix
+<a id="43-competitor-comparison-matrix"></a>
+### 📊 4.3 Competitor Comparison Matrix
 
 | Feature | Safar App (Ours) | Wanderlog | HalalTrip | Lambus | TripAdvisor (Trips) | Excel & WhatsApp |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -211,7 +294,7 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 <a id="52-system-architecture-diagram"></a>
 ### 🏛️ 5.2 System Architecture Diagram
 
-![System Architecture](SystemArchitecture.png)
+![System Architecture](images/SystemArchitecture.png)
 *Figure 5.1: High-level System Architecture of Safar App illustrating the Client Tier, Delivery & Edge Hosting, Real-Time Cloud Database, and External Intelligence Services.*
 
 ---
