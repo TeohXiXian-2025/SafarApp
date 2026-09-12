@@ -48,6 +48,10 @@ export default defineConfig(() => {
       // now ~457 kB after splitting.
       chunkSizeWarningLimit: 600,
       rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+          pitch: path.resolve(__dirname, 'pitch.html'),
+        },
         output: {
           // Split oversized vendor libraries into separate, cacheable chunks
           // instead of one >500 kB bundle. Improves repeat-visit performance
