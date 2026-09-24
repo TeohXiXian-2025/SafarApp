@@ -1,7 +1,7 @@
 import { collection, limit, orderBy, query } from 'firebase/firestore';
-import { Clock, MapPin, UserPlus } from 'lucide-react';
+import { Clock, MapPin, SlidersHorizontal, Ticket, UserPlus } from 'lucide-react';
 import { Link } from 'react-router';
-import { ActivityEvent, paths } from '../domain';
+import { ActivityEvent, Booking, paths } from '../domain';
 import { db } from '../firebase/config';
 import { useQuery } from '../lib/firestore';
 import { daysUntil, localTimeIn, timeAgo, tripLengthDays } from '../lib/format';
@@ -9,7 +9,8 @@ import { Avatar, Badge, Button, Card } from '../ui';
 import { useTrip } from './TripLayout';
 
 export function OverviewPage() {
-  const { trip, members, isAdmin } = useTrip();
+  const { trip, members, me, isAdmin } = useTrip();
+  const bookings = useQuery(`bookings:${trip.id}`, () => paths.bookings(trip.id), Booking);
   const activity = useQuery(
     `activity:${trip.id}`,
     () => query(collection(db, paths.activity(trip.id)), orderBy('at', 'desc'), limit(30)),
@@ -21,6 +22,12 @@ export function OverviewPage() {
   return (
     <div className="grid gap-4 md:grid-cols-[1fr_320px]">
       <div className="space-y-4">
+        {!me.prefs && (
+          <Nudge to="preferences" icon={<SlidersHorizontal className="w-5 h-5" />} title="Set your travel preferences" text="Budget, halal needs, prayer breaks and pace — the plan balances everyone's." />
+        )}
+        {!bookings.loading && !bookings.data.some((b) => b.travellerUids.includes(me.uid)) && (
+          <Nudge to="bookings" icon={<Ticket className="w-5 h-5" />} title="Add your flight or train" text="Upload your e-ticket and AI puts it on the group timeline." />
+        )}
         <Card className="p-5 space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <Badge>{tripLengthDays(trip)} days</Badge>
@@ -101,5 +108,19 @@ export function OverviewPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function Nudge({ to, icon, title, text }: { to: string; icon: React.ReactNode; title: string; text: string }) {
+  return (
+    <Link to={to} className="block">
+      <Card className="p-4 flex items-center gap-3 border-[#00685F]/30 bg-[#00685F]/5 hover:border-[#00685F]/60 transition-colors">
+        <span className="w-10 h-10 rounded-xl bg-[#00685F] text-white flex items-center justify-center shrink-0">{icon}</span>
+        <span>
+          <span className="block font-bold text-[#161C23]">{title}</span>
+          <span className="block text-sm text-[#6D7A77]">{text}</span>
+        </span>
+      </Card>
+    </Link>
   );
 }

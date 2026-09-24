@@ -345,11 +345,16 @@ Estimates assume 3 people working part-time. Each phase ends with something usab
 - [ ] Test install on a real iPhone and a real Android phone (manual).
 
 ### Phase 3 — Bookings + preferences (week 4)
-- [ ] Storage rules + upload component (camera/file on mobile).
-- [ ] `/api/bookings/parse` (Gemini multimodal → Zod-validated `Booking[]`).
-- [ ] Confirm/edit form. Confirmed bookings become locked schedule items.
-- [ ] Manual booking entry form (fallback).
-- [ ] Preference form per member + group summary (merged budget, strictest halal tier, warnings).
+- [x] Storage rules (private per-user trip folder, PDF/photos ≤ 10 MB) + upload with progress (camera/file picker on mobile).
+- [x] `bookings/parse`: Gemini reads an uploaded PDF/photo or pasted email → structured legs; server resolves every airport/station/hotel via Places and matches printed passenger names to trip members. Retries + fallback model when Gemini is overloaded (503).
+- [x] Review/edit every AI draft before saving (warnings for unclear fields). Nothing is saved without a human confirming.
+- [x] Manual booking entry (same editor); edit + delete (creator or admin).
+- [x] Times: stored as the ticket's local wall-clock + real UTC offset from the Time Zone API for that date (DST-aware), e.g. `23:30+08:00 → 07:40+09:00`.
+- [x] Confirmed bookings become **locked timeline anchors** (`schedule/`): same-day span, or depart/arrive and check-in/check-out moments.
+- [x] Preferences page (hotel budget range, daily spend, halal toggle + tier, prayer breaks, pace, interests, hotel priorities) — saved directly by the member (rules allow only their own `prefs`).
+- [x] Group summary on the Group tab: overlapping hotel budget (or conflict), tightest daily budget, strictest halal tier for shared meals, prayer count, slowest pace, top interests + warnings. Pure `mergePrefs()` with unit tests.
+- [x] Overview nudges: "Set your preferences", "Add your flight or train".
+- [x] Verified: `npm run e2e:phase3` (17 checks, real Gemini/Maps/Firebase) + browser flow on a phone viewport.
 
 ### Phase 4 — Idea Board + voting (weeks 5–6) ⭐ core loop
 - [ ] Manual add via Places Autocomplete / map pin → `ideas/`.

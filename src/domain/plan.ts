@@ -4,22 +4,49 @@ import { GeoPoint, Id, IsoDateTime, LocalDate, LocalTime, Millis, PlaceRef, Pray
 
 // ─── Bookings (flights, trains, hotels) → locked timeline anchors ───────────
 
-export const Booking = z.object({
-  id: Id,
-  kind: z.enum(['flight', 'train', 'bus', 'ferry', 'hotel']),
-  carrier: z.string().max(100).optional(), // airline / rail operator / hotel name
+export const BookingKind = z.enum(['flight', 'train', 'bus', 'ferry', 'hotel']);
+export type BookingKind = z.infer<typeof BookingKind>;
+
+/** Wall-clock date+time at a place, as printed on a ticket: "2026-12-01T08:15". */
+export const LocalDateTime = z.string().regex(/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/);
+
+/** A place on a booking, with the timezone the server looked up for it. */
+export const BookingPlace = PlaceRef.extend({ timezone: z.string().max(64) });
+export type BookingPlace = z.infer<typeof BookingPlace>;
+
+/**
+ * What the client edits/sends: local times + places without timezones.
+ * Transport: from → to, start = departure, end = arrival.
+ * Hotel: `to` is the hotel, start = check-in, end = check-out.
+ */
+export const BookingDraft = z.object({
+  kind: BookingKind,
+  carrier: z.string().max(100).optional(), // airline / operator / hotel name
   number: z.string().max(30).optional(), // flight/train number
-  pnr: z.string().max(20).optional(),
-  from: PlaceRef.optional(), // departure station/airport (transport)
-  to: PlaceRef.optional(), // arrival station/airport, or the hotel itself
-  departAt: IsoDateTime.optional(), // or hotel check-in
-  arriveAt: IsoDateTime.optional(), // or hotel check-out
-  travellerUids: z.array(Id).max(50),
+  pnr: z.string().max(20).optional(), // booking reference
+  from: PlaceRef.optional(),
+  to: PlaceRef,
+  startLocal: LocalDateTime,
+  endLocal: LocalDateTime,
+  passengerNames: z.array(z.string().max(100)).max(20).default([]),
+  travellerUids: z.array(Id).min(1).max(50),
+  notes: z.string().max(500).optional(),
+});
+export type BookingDraft = z.infer<typeof BookingDraft>;
+
+export const Booking = BookingDraft.omit({ from: true, to: true }).extend({
+  id: Id,
+  from: BookingPlace.optional(),
+  to: BookingPlace,
+  /** Absolute instants (with the local UTC offset), e.g. "2026-12-01T08:15:00+08:00". */
+  startAt: IsoDateTime,
+  endAt: IsoDateTime,
+  source: z.enum(['upload', 'text', 'manual']),
   fileRef: z.string().max(300).optional(),
   parseConfidence: z.number().min(0).max(1).optional(),
-  confirmedBy: Id.optional(), // unset until a human confirms the AI parse
   createdBy: Id,
   createdAt: Millis,
+  updatedAt: Millis,
 });
 export type Booking = z.infer<typeof Booking>;
 
@@ -77,7 +104,12 @@ export const ScheduleItem = z.object({
   end: LocalTime,
   ref: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('idea'), ideaId: Id }),
-    z.object({ kind: z.literal('booking'), bookingId: Id }),
+    z.object({
+      kind: z.literal('booking'),
+      bookingId: Id,
+      /** span = whole same-day journey; otherwise a single moment of it. */
+      event: z.enum(['span', 'depart', 'arrive', 'checkin', 'checkout']),
+    }),
     z.object({ kind: z.literal('custom'), title: z.string().max(200), place: PlaceRef.optional() }),
   ]),
   /** "all", or "{splitId}:A" / "{splitId}:B" for split tracks. */
@@ -91,3 +123,32 @@ export const ScheduleItem = z.object({
   updatedAt: Millis,
 });
 export type ScheduleItem = z.infer<typeof ScheduleItem>;
+
+// ─── Booking → locked timeline anchors ──────────────────────────────────────
+
+export type BookingAnchor = Pick<ScheduleItem, 'day' | 'start' | 'end'> & {
+  event: 'span' | 'depart' | 'arrive' | 'checkin' | 'checkout';
+};
+
+/**
+ * Where a booking pins the timeline. Times are each place's local wall clock,
+ * exactly as printed on the ticket.
+ * - Transport on one local day (arrival after departure): one "span" block.
+ * - Overnight / timezone-crossing journeys: separate depart + arrive moments.
+ * - Hotels: check-in and check-out moments.
+ */
+export function bookingAnchors(b: Pick<BookingDraft, 'kind' | 'startLocal' | 'endLocal'>): BookingAnchor[] {
+  const [sDay, sTime] = b.startLocal.split('T');
+  const [eDay, eTime] = b.endLocal.split('T');
+  if (b.kind === 'hotel') {
+    return [
+      { event: 'checkin', day: sDay, start: sTime, end: sTime },
+      { event: 'checkout', day: eDay, start: eTime, end: eTime },
+    ];
+  }
+  if (sDay === eDay && eTime > sTime) return [{ event: 'span', day: sDay, start: sTime, end: eTime }];
+  return [
+    { event: 'depart', day: sDay, start: sTime, end: sTime },
+    { event: 'arrive', day: eDay, start: eTime, end: eTime },
+  ];
+}

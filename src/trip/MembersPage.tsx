@@ -5,6 +5,7 @@ import type { Invite, Member } from '../domain';
 import { api, ApiError } from '../lib/api';
 import { timeAgo } from '../lib/format';
 import { Avatar, Badge, Button, Card, ErrorBanner } from '../ui';
+import { GroupPrefsCard } from './GroupPrefsCard';
 import { useTrip } from './TripLayout';
 
 const inviteUrl = (token: string) => `${window.location.origin}/join/${token}`;
@@ -61,7 +62,9 @@ export function MembersPage() {
                 <p className="font-semibold text-[#161C23] truncate">
                   {m.displayName} {m.uid === me.uid && <span className="text-[#6D7A77] font-normal">(you)</span>}
                 </p>
-                <p className="text-xs text-[#6D7A77]">Joined {timeAgo(m.joinedAt)}</p>
+                <p className="text-xs text-[#6D7A77]">
+                  Joined {timeAgo(m.joinedAt)} · {m.prefs ? 'preferences set' : <span className="text-[#96590B]">no preferences yet</span>}
+                </p>
               </div>
               {m.role === 'admin' && (
                 <Badge tone="amber">
@@ -89,9 +92,14 @@ export function MembersPage() {
         )}
       </div>
 
-      {isAdmin ? <InvitePanel tripId={trip.id} tripName={trip.name} /> : (
-        <Card className="p-5 text-sm text-[#6D7A77]">Only the trip admin can invite people. Ask them for a link.</Card>
-      )}
+      <div className="space-y-4">
+        <GroupPrefsCard />
+        {isAdmin ? (
+          <InvitePanel tripId={trip.id} tripName={trip.name} />
+        ) : (
+          <Card className="p-5 text-sm text-[#6D7A77]">Only the trip admin can invite people. Ask them for a link.</Card>
+        )}
+      </div>
     </div>
   );
 }

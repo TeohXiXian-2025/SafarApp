@@ -49,7 +49,7 @@ export function TripForm({ initial, submitLabel, onSubmit, onCancel }: Props) {
 
   return (
     <form onSubmit={submit} className="space-y-5">
-      <Field label="Destinations" hint="Add every city or country you'll visit, in order.">
+      <Field label="Destinations" hint="Add every city or country you'll visit, in order." group>
         <div className="space-y-2">
           {destinations.length > 0 && (
             <ol className="flex flex-wrap gap-2">

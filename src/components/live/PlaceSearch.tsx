@@ -11,6 +11,9 @@ const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '';
 interface Props {
   onPick: (d: DestinationInput) => void;
   placeholder?: string;
+  /** 'regions' = cities/countries (trip destinations); 'any' = airports, stations, hotels… */
+  scope?: 'regions' | 'any';
+  autoFocus?: boolean;
 }
 
 export function PlaceSearch(props: Props) {
@@ -22,7 +25,7 @@ export function PlaceSearch(props: Props) {
   );
 }
 
-function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…' }: Props) {
+function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…', scope = 'regions', autoFocus }: Props) {
   const places = useMapsLibrary('places');
   const [text, setText] = useState('');
   const [suggestions, setSuggestions] = useState<google.maps.places.AutocompleteSuggestion[]>([]);
@@ -41,7 +44,7 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…' 
         const res = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
           input: text,
           sessionToken: session.current!,
-          includedPrimaryTypes: ['(regions)'],
+          ...(scope === 'regions' ? { includedPrimaryTypes: ['(regions)'] } : {}),
         });
         if (!cancelled) {
           setSuggestions(res.suggestions.filter((s) => s.placePrediction));
@@ -55,7 +58,7 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…' 
       cancelled = true;
       clearTimeout(t);
     };
-  }, [places, text]);
+  }, [places, text, scope]);
 
   const pick = async (s: google.maps.places.AutocompleteSuggestion) => {
     const place = s.placePrediction!.toPlace();
@@ -88,6 +91,7 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…' 
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder={places ? placeholder : 'Loading place search…'}
         disabled={!places}
+        autoFocus={autoFocus}
         className="pl-10"
         aria-label="Search destinations"
       />
@@ -116,5 +120,43 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…' 
         </ul>
       )}
     </div>
+  );
+}
+
+/** Shows a chosen place with a "Change" button; switches to search when empty or changing. */
+export function PlacePicker({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value?: DestinationInput;
+  onChange: (d: DestinationInput) => void;
+  placeholder?: string;
+}) {
+  const [editing, setEditing] = useState(!value);
+  if (value && !editing) {
+    return (
+      <div className="flex items-center gap-2.5 min-h-11 px-3.5 py-2 rounded-xl border border-[#E7DFD5] bg-white">
+        <MapPin className="w-4 h-4 text-[#00685F] shrink-0" />
+        <span className="flex-1 min-w-0">
+          <span className="block text-sm font-semibold text-[#161C23] truncate">{value.name}</span>
+          {value.address && <span className="block text-xs text-[#6D7A77] truncate">{value.address}</span>}
+        </span>
+        <button type="button" onClick={() => setEditing(true)} className="text-sm font-semibold text-[#00685F] px-1">
+          Change
+        </button>
+      </div>
+    );
+  }
+  return (
+    <PlaceSearch
+      scope="any"
+      autoFocus={!!value}
+      placeholder={placeholder}
+      onPick={(d) => {
+        onChange(d);
+        setEditing(false);
+      }}
+    />
   );
 }
