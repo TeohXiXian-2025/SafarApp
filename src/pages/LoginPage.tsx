@@ -10,6 +10,8 @@ import {
   signUpWithEmail,
   useAuth,
 } from '../auth/auth';
+import { detectInAppBrowser } from '../auth/inAppBrowser';
+import { InAppBrowserNotice } from '../auth/InAppBrowserNotice';
 import { Button, Card, ErrorBanner, Field, Input, Spinner } from '../ui';
 
 type Mode = 'signIn' | 'signUp' | 'reset';
@@ -24,13 +26,14 @@ export function LoginPage() {
   const [params] = useSearchParams();
   const next = safeNext(params.get('next'));
 
-  const [mode, setMode] = useState<Mode>('signIn');
+  const [mode, setMode] = useState<Mode>(() => (next.startsWith('/join/') ? 'signUp' : 'signIn'));
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState<'google' | 'email' | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [inApp] = useState(detectInAppBrowser);
 
   useEffect(() => {
     checkRedirectResult().catch((err) => setError(authErrorMessage(err)));
@@ -78,8 +81,13 @@ export function LoginPage() {
 
         <Card className="p-5 space-y-4">
           <h2 className="text-lg font-bold text-[#161C23]">{title}</h2>
+          {next.startsWith('/join/') && (
+            <p className="-mt-2 text-sm text-[#00685F] font-semibold">You've been invited to a trip — sign in or create an account to join.</p>
+          )}
 
-          {mode !== 'reset' && (
+          {inApp && mode !== 'reset' && <InAppBrowserNotice browser={inApp} />}
+
+          {mode !== 'reset' && !inApp && (
             <>
               <Button variant="secondary" className="w-full" loading={busy === 'google'} onClick={() => run('google', signInWithGoogle)}>
                 <GoogleIcon /> Continue with Google

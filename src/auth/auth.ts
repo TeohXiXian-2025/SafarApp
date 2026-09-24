@@ -15,7 +15,7 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { create } from 'zustand';
 import { paths, type UserProfile } from '../domain';
-import { auth, db, useSameOriginAuth } from '../firebase/config';
+import { auth, db, isStandaloneApp } from '../firebase/config';
 
 interface AuthState {
   status: 'loading' | 'signedOut' | 'signedIn';
@@ -52,7 +52,7 @@ onAuthStateChanged(auth, (user) => {
 export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  if (useSameOriginAuth) {
+  if (isStandaloneApp) {
     // Installed app: full-page redirect; the result is picked up by onAuthStateChanged.
     await signInWithRedirect(auth, provider);
     return;

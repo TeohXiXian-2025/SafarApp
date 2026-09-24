@@ -15,15 +15,20 @@ import {
   getDocFromServer,
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { SAME_ORIGIN_AUTH_HOSTS } from '../config';
 
 // Web config is public by design (security comes from Firestore/Storage rules).
 // Values live in .env.local locally and in Vercel env vars when deployed.
-// Installed app (Add to Home Screen): sign-in popups can't report back on iOS
-// and Safari blocks cross-site redirect storage, so Google sign-in redirects
-// through our OWN domain — Vercel proxies /__/auth/* to Firebase (vercel.json).
+// Google sign-in through our OWN domain (Vercel proxies /__/auth/* to Firebase):
+// Google then shows our address instead of <project>.firebaseapp.com, and
+// sign-in works inside the installed iPhone app (Safari blocks the cross-site
+// flow). Only for hosts whose redirect URI is registered — see src/config.ts.
 // https://firebase.google.com/docs/auth/web/redirect-best-practices (option 3)
 export const useSameOriginAuth =
-  import.meta.env.PROD &&
+  import.meta.env.PROD && typeof window !== 'undefined' && SAME_ORIGIN_AUTH_HOSTS.includes(window.location.host);
+
+/** Installed app (Add to Home Screen) — popups can't report back there, so use a redirect. */
+export const isStandaloneApp =
   typeof window !== 'undefined' &&
   (window.matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true);
 

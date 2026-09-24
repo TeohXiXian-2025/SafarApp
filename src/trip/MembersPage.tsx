@@ -3,12 +3,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import type { Invite, Member } from '../domain';
 import { api, ApiError } from '../lib/api';
+import { shareUrl } from '../config';
 import { timeAgo } from '../lib/format';
 import { Avatar, Badge, Button, Card, ErrorBanner } from '../ui';
 import { GroupPrefsCard } from './GroupPrefsCard';
 import { useTrip } from './TripLayout';
 
-const inviteUrl = (token: string) => `${window.location.origin}/join/${token}`;
+const inviteUrl = (token: string) => shareUrl(`/join/${token}`);
 
 export function MembersPage() {
   const { trip, members, me, isAdmin } = useTrip();
