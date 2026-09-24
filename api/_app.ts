@@ -5,12 +5,14 @@ import { systemRoutes } from './_routes/system.js';
 import { tripRoutes } from './_routes/trips.js';
 import { inviteRoutes } from './_routes/invites.js';
 import { memberRoutes } from './_routes/members.js';
+import { bookingRoutes } from './_routes/bookings.js';
 
 const table: RouteTable = {
   ...systemRoutes,
   ...tripRoutes,
   ...inviteRoutes,
   ...memberRoutes,
+  ...bookingRoutes,
 };
 
 export async function dispatch(req: Request): Promise<Response> {

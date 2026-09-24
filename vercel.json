@@ -1,20 +1,53 @@
 {
   "rewrites": [
-    { "source": "/pitch", "destination": "/pitch.html" },
-    { "source": "/pitch/", "destination": "/pitch.html" },
-    { "source": "/__/auth/:path*", "destination": "https://safarapp-460b1.firebaseapp.com/__/auth/:path*" },
-    { "source": "/__/firebase/:path*", "destination": "https://safarapp-460b1.firebaseapp.com/__/firebase/:path*" },
-    { "source": "/api/:path((?!router$).*)", "destination": "/api/router?__path=:path" },
-    { "source": "/((?!api/|__/).*)", "destination": "/index.html" }
+    {
+      "source": "/pitch",
+      "destination": "/pitch.html"
+    },
+    {
+      "source": "/pitch/",
+      "destination": "/pitch.html"
+    },
+    {
+      "source": "/__/auth/:path*",
+      "destination": "https://safarapp-460b1.firebaseapp.com/__/auth/:path*"
+    },
+    {
+      "source": "/__/firebase/:path*",
+      "destination": "https://safarapp-460b1.firebaseapp.com/__/firebase/:path*"
+    },
+    {
+      "source": "/api/:path((?!router$).*)",
+      "destination": "/api/router?__path=:path"
+    },
+    {
+      "source": "/((?!api/|__/).*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
     {
       "source": "/sw.js",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
     },
     {
       "source": "/assets/(.*)",
-      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
     }
-  ]
+  ],
+  "functions": {
+    "api/router.ts": {
+      "maxDuration": 60
+    }
+  }
 }

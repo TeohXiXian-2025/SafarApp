@@ -1,6 +1,7 @@
 // Small shared UI primitives for the live app. Palette matches the prototype:
 // ink #161C23 · muted #6D7A77 · line #E7DFD5 · brand #00685F · sand #FAF8F5
-import { Loader2 } from 'lucide-react';
+import { Loader2, X } from 'lucide-react';
+import { useEffect } from 'react';
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
@@ -38,16 +39,44 @@ export function Button({
   );
 }
 
-export function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string; children: ReactNode }) {
+/**
+ * Labelled form field. For a single input it's a <label> (click label → focus input).
+ * Pass `group` when it holds several controls (chips, pickers, two inputs): it then
+ * renders a <fieldset>, so the caption doesn't get attached to the first button.
+ */
+export function Field({
+  label,
+  hint,
+  error,
+  group,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  error?: string;
+  group?: boolean;
+  children: ReactNode;
+}) {
+  const caption = <span className="block text-xs font-bold text-[#6D7A77] uppercase tracking-wider">{label}</span>;
+  const footer = error ? (
+    <span className="block text-xs text-[#B3261E]">{error}</span>
+  ) : hint ? (
+    <span className="block text-xs text-[#6D7A77]">{hint}</span>
+  ) : null;
+  if (group) {
+    return (
+      <fieldset className="space-y-1.5 min-w-0">
+        <legend className="mb-1.5">{caption}</legend>
+        {children}
+        {footer}
+      </fieldset>
+    );
+  }
   return (
     <label className="block space-y-1.5">
-      <span className="text-xs font-bold text-[#6D7A77] uppercase tracking-wider">{label}</span>
+      {caption}
       {children}
-      {error ? (
-        <span className="block text-xs text-[#B3261E]">{error}</span>
-      ) : hint ? (
-        <span className="block text-xs text-[#6D7A77]">{hint}</span>
-      ) : null}
+      {footer}
     </label>
   );
 }
@@ -119,3 +148,81 @@ export function Badge({ children, tone = 'brand' }: { children: ReactNode; tone?
 }
 
 export { cx };
+
+/**
+ * Bottom sheet on phones, centred dialog on larger screens.
+ * Closes on backdrop tap / Escape.
+ */
+export function Sheet({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-40 flex items-end md:items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(e) => e.stopPropagation()}
+        className={cx(
+          'w-full bg-[#FAF8F5] rounded-t-3xl md:rounded-3xl shadow-2xl max-h-[92dvh] flex flex-col',
+          wide ? 'md:max-w-2xl' : 'md:max-w-lg',
+        )}
+      >
+        <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-3 border-b border-[#E7DFD5]">
+          <h2 className="font-bold text-[#161C23]">{title}</h2>
+          <button onClick={onClose} aria-label="Close" className="w-9 h-9 rounded-full hover:bg-black/5 inline-flex items-center justify-center text-[#6D7A77]">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="overflow-y-auto overscroll-contain px-5 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+export function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+  return (
+    <label className="flex items-start justify-between gap-4 cursor-pointer">
+      <span>
+        <span className="block text-sm font-semibold text-[#161C23]">{label}</span>
+        {hint && <span className="block text-xs text-[#6D7A77]">{hint}</span>}
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={cx('relative w-11 h-6 rounded-full shrink-0 transition-colors', checked ? 'bg-[#00685F]' : 'bg-[#D5CEC4]')}
+      >
+        <span className={cx('absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform', checked && 'translate-x-5')} />
+      </button>
+    </label>
+  );
+}
+
+export function Chip({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onClick}
+      className={cx(
+        'px-3 min-h-9 rounded-full text-sm font-semibold border transition-colors',
+        selected ? 'bg-[#00685F] border-[#00685F] text-white' : 'bg-white border-[#E7DFD5] text-[#161C23] hover:border-[#00685F]/40',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
