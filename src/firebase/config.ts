@@ -8,24 +8,42 @@ import {
   User,
 } from 'firebase/auth';
 import {
-  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   doc,
   getDocFromServer,
-  collection,
-  onSnapshot,
-  setDoc,
-  updateDoc,
-  addDoc,
-  serverTimestamp,
 } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { getStorage } from 'firebase/storage';
+
+// Web config is public by design (security comes from Firestore/Storage rules).
+// Values live in .env.local locally and in Vercel env vars when deployed.
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
+const missing = Object.entries(firebaseConfig)
+  .filter(([, v]) => !v)
+  .map(([k]) => k);
+if (missing.length) {
+  console.error(`[Safar] Missing Firebase env vars: ${missing.join(', ')}. See .env.example.`);
+}
 
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with specific databaseId as mandated by guidelines
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Offline-first: cache Firestore data in IndexedDB so trips open without signal,
+// shared across tabs.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 
 export enum OperationType {
   CREATE = 'create',

@@ -1,6 +1,8 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+import {RouterProvider} from 'react-router';
+import {router} from './router';
+import {initSentry, sentryErrorHandler} from './lib/sentry';
 import './index.css';
 
 // Build stamp injected by vite.config.ts (`define`). Lets you confirm which
@@ -9,8 +11,13 @@ import './index.css';
 document.documentElement.dataset.buildCommit = __COMMIT_SHA__;
 console.info(`[Safar] build ${__COMMIT_SHA__}`);
 
-createRoot(document.getElementById('root')!).render(
+initSentry();
+
+createRoot(document.getElementById('root')!, {
+  onUncaughtError: sentryErrorHandler(),
+  onCaughtError: sentryErrorHandler(),
+}).render(
   <StrictMode>
-    <App />
+    <RouterProvider router={router} />
   </StrictMode>,
 );

@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 interface NavbarProps {
-  currentScreen: 'landing' | 'loading' | 'vault' | 'canvas';
+  currentScreen: 'landing' | 'loading' | 'vault' | 'canvas' | 'setup' | 'generating';
   step?: 'planTrip' | 'pasteInspiration' | 'generating';
   collaborators: Collaborator[];
   currentUser: Collaborator;

@@ -1,16 +1,8 @@
 {
   "rewrites": [
-    {
-      "source": "/pitch",
-      "destination": "/pitch.html"
-    },
-    {
-      "source": "/pitch/",
-      "destination": "/pitch.html"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/pitch", "destination": "/pitch.html" },
+    { "source": "/pitch/", "destination": "/pitch.html" },
+    { "source": "/api/:path((?!router$).*)", "destination": "/api/router?__path=:path" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

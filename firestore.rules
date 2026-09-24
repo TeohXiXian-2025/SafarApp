@@ -1,75 +1,84 @@
 rules_version = '2';
+
+// Safar Firestore rules.
+// Model: clients READ what they're a member of and WRITE only a few
+// user-owned things. Everything else (creating trips, joining, AI results,
+// halal verdicts) is written by the server (/api) with the Admin SDK,
+// which bypasses these rules. Paths mirror src/domain/paths.ts.
+// Deploy: npm run deploy:rules · Test: npm run test:rules
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global default-deny catch-all
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Helper functions
-    function isSignedIn() {
+    function signedIn() {
       return request.auth != null;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function isMember(tripId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/trips/$(tripId)/members/$(request.auth.uid));
     }
 
-    function incoming() {
-      return request.resource.data;
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
 
-    function existing() {
-      return resource.data;
+    // ─── User profiles ───────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['uid', 'displayName', 'email', 'photoURL', 'createdAt'])
+        && request.resource.data.uid == uid
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0
+        && request.resource.data.displayName.size() <= 100
+        && request.resource.data.createdAt is int;
+      allow update: if signedIn() && request.auth.uid == uid
+        && onlyChanges(['displayName', 'photoURL'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0
+        && request.resource.data.displayName.size() <= 100;
+      allow delete: if false;
     }
 
-    // Itineraries collection
-    match /itineraries/{itineraryId} {
-      allow read: if isSignedIn() && isValidId(itineraryId);
-      allow create: if isSignedIn() && isValidId(itineraryId)
-        && incoming().title is string && incoming().title.size() <= 200;
-      allow update: if isSignedIn() && isValidId(itineraryId)
-        && incoming().title is string && incoming().title.size() <= 200;
-      allow delete: if isSignedIn() && isValidId(itineraryId);
+    // ─── Trips ───────────────────────────────────────────────────────
+    match /trips/{tripId} {
+      // Checked against the doc itself so "my trips" queries
+      // (where memberIds array-contains uid) are allowed without extra reads.
+      allow read: if signedIn() && request.auth.uid in resource.data.memberIds;
+      allow write: if false; // server only
 
-      // Subcollection for blocks
-      match /blocks/{blockId} {
-        allow read: if isSignedIn() && isValidId(itineraryId) && isValidId(blockId);
-        allow create, update: if isSignedIn() && isValidId(itineraryId) && isValidId(blockId)
-          && incoming().title is string && incoming().title.size() <= 200;
-        allow delete: if isSignedIn() && isValidId(itineraryId) && isValidId(blockId);
+      match /members/{uid} {
+        allow read: if isMember(tripId);
+        // Members may edit their own travel preferences, nothing else.
+        allow update: if signedIn() && request.auth.uid == uid
+          && onlyChanges(['prefs'])
+          && request.resource.data.prefs is map;
+        allow create, delete: if false; // server only (join / remove / leave)
+      }
+
+      // Everything else under a trip: readable by members, server-written.
+      // Later phases open specific client writes here (votes, expenses, …).
+      match /{sub=**} {
+        allow read: if isMember(tripId);
+        allow write: if false;
       }
     }
 
-    // AI Mediator Timeline Clashes
-    match /clashes/{clashId} {
-      allow read: if isSignedIn() && isValidId(clashId);
-      allow create, update: if isSignedIn() && isValidId(clashId)
-        && incoming().slotTime is string && incoming().slotTime.size() <= 100;
-      allow delete: if isSignedIn() && isValidId(clashId);
-
-      // Subcollection for Anonymous Votes
-      match /votes/{voteId} {
-        allow read: if isSignedIn() && isValidId(clashId) && isValidId(voteId);
-        allow create: if isSignedIn() && isValidId(clashId) && isValidId(voteId)
-          && incoming().selectedOptionId is string && incoming().selectedOptionId.size() <= 100;
-        allow update, delete: if false; // Votes are write-once and immutable
-      }
+    // ─── Invite tokens (server only; looked up via /api/invites/*) ───
+    match /inviteTokens/{token} {
+      allow read, write: if false;
     }
 
-    // Restaurants collection (Halal Radar geospatial index)
-    match /restaurants/{restaurantId} {
-      allow read: if isSignedIn() && isValidId(restaurantId);
-      allow create, update: if isSignedIn() && isValidId(restaurantId)
-        && incoming().name is string && incoming().name.size() <= 200
-        && incoming().status in ['CERTIFIED_HALAL', 'MUSLIM_OWNED', 'PORK_FREE'];
-      allow delete: if isSignedIn() && isValidId(restaurantId);
+    // ─── Worldwide halal knowledge (shared across all trips) ─────────
+    match /halalSummary/{placeKey} {
+      allow read: if signedIn();
+      allow write: if false; // server aggregates reports
+    }
+    match /certifiers/{id} {
+      allow read: if signedIn();
+      allow write: if false;
     }
 
-    // Connection test document
-    match /test/{docId} {
-      allow read: if true;
-    }
+    // Anything not matched above is denied.
   }
 }
