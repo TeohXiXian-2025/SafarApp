@@ -13,6 +13,7 @@ import {
 import { detectInAppBrowser } from '../auth/inAppBrowser';
 import { InAppBrowserNotice } from '../auth/InAppBrowserNotice';
 import { Button, Card, ErrorBanner, Field, Input, Spinner } from '../ui';
+import { CONTACT_EMAIL } from '../config';
 
 type Mode = 'signIn' | 'signUp' | 'reset';
 
@@ -143,6 +144,21 @@ export function LoginPage() {
             )}
           </div>
         </Card>
+        <p className="text-center text-xs text-[#6D7A77]">
+          By continuing you agree to our{' '}
+          <a href="/terms" className="underline">
+            Terms
+          </a>{' '}
+          and{' '}
+          <a href="/privacy" className="underline">
+            Privacy Policy
+          </a>
+          . Questions?{' '}
+          <a href={`mailto:${CONTACT_EMAIL}`} className="underline">
+            Contact us
+          </a>
+          .
+        </p>
       </div>
     </div>
   );

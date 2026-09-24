@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate, Outlet } from 'react-router';
 import { RequireAuth } from './auth/RequireAuth';
 import { JoinPage } from './pages/JoinPage';
+import { PrivacyPage, TermsPage } from './pages/LegalPages';
 import { LoginPage } from './pages/LoginPage';
 import { NewTripPage } from './pages/NewTripPage';
 import { TripsPage } from './pages/TripsPage';
@@ -30,6 +31,9 @@ export const router = createBrowserRouter([
     children: [
       { path: '/', element: <Navigate to="/trips" replace /> },
       { path: '/login', element: <LoginPage /> },
+      // Public (no sign-in) — linked from the Google OAuth consent screen.
+      { path: '/privacy', element: <PrivacyPage /> },
+      { path: '/terms', element: <TermsPage /> },
       { path: '/trips', element: <RequireAuth><TripsPage /></RequireAuth> },
       { path: '/trips/new', element: <RequireAuth><NewTripPage /></RequireAuth> },
       { path: '/join/:token', element: <RequireAuth><JoinPage /></RequireAuth> },

@@ -1,5 +1,10 @@
 // Public-facing app settings (not secrets).
 
+/** Shown on the privacy policy / terms and in the OAuth consent screen. */
+export const APP_NAME = 'Safar';
+export const CONTACT_EMAIL = 'xixianteoh@gmail.com';
+export const LEGAL_UPDATED = '24 September 2026';
+
 /** The address people should use and share. Invite links always point here. */
 export const PUBLIC_ORIGIN = 'https://safar-app-cristal-teohs-projects.vercel.app';
 
