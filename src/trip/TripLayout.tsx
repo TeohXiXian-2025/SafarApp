@@ -1,4 +1,4 @@
-import { LayoutDashboard, Settings, Ticket, Users } from 'lucide-react';
+import { LayoutDashboard, Lightbulb, Settings, Ticket, Users } from 'lucide-react';
 import { Link, NavLink, Outlet, useOutletContext, useParams } from 'react-router';
 import { useAuth } from '../auth/auth';
 import { AppHeader } from '../components/live/AppHeader';
@@ -18,6 +18,7 @@ export const useTrip = () => useOutletContext<TripCtx>();
 
 const TABS = [
   { to: '', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: 'ideas', label: 'Ideas', icon: Lightbulb },
   { to: 'bookings', label: 'Bookings', icon: Ticket },
   { to: 'members', label: 'Group', icon: Users },
   { to: 'settings', label: 'Settings', icon: Settings },
@@ -94,7 +95,7 @@ export function TripLayout() {
 
       {/* Phone bottom tab bar */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-[#E7DFD5] pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-4">
+        <div className="grid grid-cols-5">
           {TABS.map((t) => (
             <NavLink
               key={t.label}

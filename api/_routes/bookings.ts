@@ -118,10 +118,13 @@ async function toDraft(e: Extracted, members: Member[], uploaderUid: string): Pr
   const warnings: string[] = [];
   const hotel = e.kind === 'hotel';
 
-  const fromQuery = hotel ? '' : [e.fromCode, e.fromName, e.fromCity].filter((x) => x?.trim()).join(' ');
-  const toQuery = hotel
-    ? [e.toName, e.toAddress || e.toCity].filter((x) => x?.trim()).join(', ')
-    : [e.toCode, e.toName, e.toCity].filter((x) => x?.trim()).join(' ');
+  // Flights: search by IATA code ("NRT airport") so we get the airport itself,
+  // not a terminal ("Terminal 2") the model may have copied from the ticket.
+  const iata = (code?: string) => (code?.trim().match(/^[A-Za-z]{3}$/) ? code.trim().toUpperCase() : null);
+  const leg = (code?: string, name?: string, city?: string) =>
+    e.kind === 'flight' && iata(code) ? `${iata(code)} ${city?.trim() ?? ''} airport`.replace(/\s+/g, ' ') : [code, name, city].filter((x) => x?.trim()).join(' ');
+  const fromQuery = hotel ? '' : leg(e.fromCode, e.fromName, e.fromCity);
+  const toQuery = hotel ? [e.toName, e.toAddress || e.toCity].filter((x) => x?.trim()).join(', ') : leg(e.toCode, e.toName, e.toCity);
 
   const [from, to] = await Promise.all([fromQuery ? findPlace(fromQuery) : null, findPlace(toQuery)]);
   if (!hotel && !from) warnings.push(`Couldn't find "${fromQuery}" on the map — please pick it.`);

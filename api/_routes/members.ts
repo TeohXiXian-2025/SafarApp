@@ -4,7 +4,7 @@ import { withTrip } from '../_lib/auth.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
 import type { RouteTable } from '../_lib/routes.js';
-import { arrayRemove, loadTrip, logActivity } from '../_lib/trip.js';
+import { arrayRemove, loadTrip, logActivity, retallyOpenIdeas } from '../_lib/trip.js';
 
 const UidBody = z.object({ uid: Id });
 
@@ -28,6 +28,7 @@ export const memberRoutes: RouteTable = {
       batch.update(db.doc(paths.trip(tripId)), { memberIds: arrayRemove(uid), updatedAt: Date.now() });
       logActivity(batch, tripId, admin.uid, `${admin.displayName} removed ${target.displayName}`);
       await batch.commit();
+      await retallyOpenIdeas(tripId);
       return json({ ok: true });
     },
     { admin: true, perMinute: 20 },
@@ -70,6 +71,7 @@ export const memberRoutes: RouteTable = {
       batch.update(db.doc(paths.trip(tripId)), { memberIds: arrayRemove(member.uid), updatedAt: Date.now() });
       logActivity(batch, tripId, member.uid, `${member.displayName} left the trip`);
       await batch.commit();
+      await retallyOpenIdeas(tripId);
       return json({ ok: true });
     },
     { perMinute: 10 },

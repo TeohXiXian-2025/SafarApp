@@ -6,33 +6,50 @@ import { HttpError } from './http.js';
 let client: GoogleGenAI | undefined;
 const ai = () => (client ??= new GoogleGenAI({ apiKey: requireEnv('GEMINI_API_KEY') }));
 
-/** Override with GEMINI_MODEL; the "-latest" aliases avoid breaking when versions retire. */
-export const geminiModel = () => process.env.GEMINI_MODEL || 'gemini-flash-latest';
-/** Used when the main model is overloaded. */
-const fallbackModel = () => process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-lite-latest';
+/**
+ * Models to try, in order (override with GEMINI_MODELS="a,b,c"). Each has its
+ * own quota, so when one is rate-limited or overloaded the next can answer.
+ * "-latest" aliases track new versions; a pinned model is kept as a backstop.
+ */
+export const geminiModels = (): string[] =>
+  (process.env.GEMINI_MODELS || 'gemini-flash-latest,gemini-2.5-flash,gemini-flash-lite-latest')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
+
+const PER_ATTEMPT_MS = 20_000;
+/** Stay well inside the 60 s function limit. */
+const TOTAL_BUDGET_MS = 45_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const isTransient = (err: unknown) => [429, 500, 503, 504].includes(Number((err as { status?: number })?.status));
+const statusOf = (err: unknown) => Number((err as { status?: number })?.status);
+const isTransient = (err: unknown) =>
+  [429, 500, 503, 504].includes(statusOf(err)) || (err as Error)?.name === 'AbortError' || /timed? ?out/i.test(String((err as Error)?.message));
 
 /**
- * Gemini regularly returns 503 "high demand" / 429 under load. Retry the main
- * model with backoff, then try the lighter fallback model once.
+ * One attempt per model (the SDK's own retries are off so we control timing).
+ * Rate-limited (429) → next model immediately; overloaded (503) → brief pause.
  */
-async function generateWithRetry(params: Parameters<GoogleGenAI['models']['generateContent']>[0]) {
-  const attempts = [
-    { model: geminiModel(), delay: 0 },
-    { model: geminiModel(), delay: 1200 },
-    { model: fallbackModel(), delay: 2500 },
-  ];
+async function generateWithFallback(params: Omit<Parameters<GoogleGenAI['models']['generateContent']>[0], 'model'>) {
+  const started = Date.now();
   let lastErr: unknown;
-  for (const a of attempts) {
-    if (a.delay) await sleep(a.delay);
+  for (const model of geminiModels()) {
+    const left = TOTAL_BUDGET_MS - (Date.now() - started);
+    if (left < 5_000) break;
     try {
-      return await ai().models.generateContent({ ...params, model: a.model });
+      return await ai().models.generateContent({
+        ...params,
+        model,
+        config: {
+          ...params.config,
+          httpOptions: { timeout: Math.min(PER_ATTEMPT_MS, left), retryOptions: { attempts: 1 } },
+        },
+      });
     } catch (err) {
       lastErr = err;
       if (!isTransient(err)) break;
-      console.warn(`[gemini] ${a.model} busy (${(err as { status?: number }).status}), retrying…`);
+      console.warn(`[gemini] ${model} unavailable (${statusOf(err) || (err as Error).name}), trying next model`);
+      if (statusOf(err) === 503) await sleep(800);
     }
   }
   throw lastErr;
@@ -50,8 +67,7 @@ export async function extractJson<S extends z.ZodType>(opts: {
 }): Promise<z.infer<S>> {
   let text: string | undefined;
   try {
-    const res = await generateWithRetry({
-      model: geminiModel(),
+    const res = await generateWithFallback({
       contents: [{ role: 'user', parts: opts.parts }],
       config: {
         systemInstruction: opts.system,
@@ -63,7 +79,7 @@ export async function extractJson<S extends z.ZodType>(opts: {
     text = res.text;
   } catch (err) {
     console.error('[gemini] request failed', err);
-    throw new HttpError(502, 'The AI service is unavailable right now. Please try again, or enter the details manually.');
+    throw new HttpError(503, 'The AI is busy right now. Please try again in a minute — or add it manually.');
   }
   const parsed = opts.validate.safeParse(JSON.parse(text ?? 'null'));
   if (!parsed.success) {

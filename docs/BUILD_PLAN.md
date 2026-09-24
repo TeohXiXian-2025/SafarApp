@@ -357,16 +357,17 @@ Estimates assume 3 people working part-time. Each phase ends with something usab
 - [x] Verified: `npm run e2e:phase3` (17 checks, real Gemini/Maps/Firebase) + browser flow on a phone viewport.
 
 ### Phase 4 — Idea Board + voting (weeks 5–6) ⭐ core loop
-- [ ] Manual add via Places Autocomplete / map pin → `ideas/`.
-- [ ] `/api/import/social`: oEmbed/OG fetch → Gemini place extraction → Places resolve → pick list. Add a screenshot/caption fallback.
-- [ ] Halal Signal Stack (§3a): Overpass `diet:halal` + Google Places halal search (+ optional Foursquare) + Gemini estimate → `/api/halal/assess` → `halalSummary`.
-- [ ] Community reports: "Report halal status" sheet, certificate/menu photo upload, trust-weighted aggregation, disputed state.
-- [ ] Moderator queue for certificates (Gemini reads the certifier/number/expiry) + `certifiers` seed list.
-- [ ] Halal verdict UI: badge + reasons + "unverified" state.
-- [ ] `/api/ideas/:id/analyze` review sentiment → verdict/pros/cons.
-- [ ] Voting UI (👍/👎 + reason). Server-side tally → `backlog` / `mixed` / `rejected`.
-- [ ] Admin: close vote, override.
-- [ ] Backlog panel.
+- [x] Add ideas three ways: paste a TikTok / Instagram / Xiaohongshu / YouTube link (caption via oEmbed or Open Graph; allow-listed hosts only, no arbitrary server fetches), upload a screenshot or paste a caption (Gemini reads it), or search any place.
+- [x] Gemini extracts named places → Google Places text search biased to the trip's destinations → pick list with distance warnings; duplicates are detected per trip.
+- [x] **Halal Radar** per place (cached 14 days, shared across trips): Google `halal_restaurant` type / name, Foursquare categories, OSM `diet:halal` + one Gemini pass over details & reviews. Listings outrank AI; "certified" never claimed without a named certifier; non-food places get Muslim-friendliness checks (alcohol, gambling, mixed bathing…).
+- [x] Review verdict (highly recommended / mixed / skip) with specific pros/cons from Google reviews, in the same Gemini call.
+- [x] Community halal reports (one per user per place) → trust-ordered consensus in `halalSummary` (≥2 agreeing, 60% weight, old reports count half; "disputed" otherwise). UI order: community > listings > AI estimate, always showing the basis.
+- [x] Voting 👍/👎 with optional reason, change or take back; unanimous 👍 → Backlog, unanimous 👎 → Rejected, split → "Split votes" (Split Track input for Phase 7). Leaving/removed members no longer block decisions.
+- [x] Admin: close voting early (non-voters abstain), move to backlog, reject, reopen. Delete by suggester or admin.
+- [x] Board with Voting / Backlog / Split votes / Rejected filters, "waiting for …", live updates, Google attribution + photo credits.
+- [x] Gemini reliability: model chain (`GEMINI_MODELS`), per-attempt 20 s / total 45 s budget, SDK retries off, rate-limited models skipped instantly.
+- [ ] Deferred to Phase 8: certificate photo upload + moderator verification, reporter trust scores.
+- [ ] Places content refresh: re-fetch place details older than 30 days (Google caching terms).
 
 ### Phase 5 — Timeline + manual arrange (week 7)
 - [ ] Day-by-day timeline from `schedule/` (rework `ItineraryFeed` to read the real model).
