@@ -137,3 +137,30 @@ ${schema}` },
     throw Object.assign(new Error(`Groq ${model} ${res.status}: ${text.slice(0, 200)}`), { status: res.status });
   }
 }
+
+/**
+ * Speech → text with Groq Whisper (free tier, ~25 MB per file). Used for what a
+ * creator SAYS in a reel/video (place names are often only spoken).
+ * Returns null when Groq isn't configured or the audio can't be transcribed.
+ */
+export async function transcribe(audio: Buffer, mimeType: string, fileName: string): Promise<string | null> {
+  const key = optionalEnv('GROQ_API_KEY');
+  if (!key || audio.length > 24 * 1024 * 1024) return null;
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(audio)], { type: mimeType }), fileName);
+  form.append('model', process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3-turbo');
+  form.append('response_format', 'json');
+  form.append('temperature', '0');
+  const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}` },
+    body: form,
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null);
+  if (!res?.ok) {
+    console.warn('[ai] whisper failed', res?.status, (await res?.text().catch(() => ''))?.slice(0, 160));
+    return null;
+  }
+  const text = String(((await res.json()) as { text?: string }).text ?? '').trim();
+  return text.length >= 3 ? text.slice(0, 8000) : null;
+}

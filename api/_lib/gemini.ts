@@ -36,9 +36,10 @@ type Attempt = { provider: string; text: string } | { provider: string; json: un
  * One attempt per Gemini model (SDK retries off so we control timing), moving
  * on immediately when one is rate-limited or overloaded; then Groq.
  */
-async function generate(opts: { system: string; parts: Part[]; responseSchema: Schema; imagesOptional?: boolean }): Promise<Attempt> {
+async function generate(opts: { system: string; parts: Part[]; responseSchema: Schema; imagesOptional?: boolean; budgetMs?: number }): Promise<Attempt> {
   const started = Date.now();
-  const left = () => TOTAL_BUDGET_MS - (Date.now() - started);
+  const budget = Math.min(opts.budgetMs ?? TOTAL_BUDGET_MS, TOTAL_BUDGET_MS);
+  const left = () => budget - (Date.now() - started);
   let lastErr: unknown;
 
   if (optionalEnv('GEMINI_API_KEY')) {
@@ -104,6 +105,8 @@ export async function extractJson<S extends z.ZodType>(opts: {
   validate: S;
   /** The images only supplement the text — fall back to text-only if no vision model is available. */
   imagesOptional?: boolean;
+  /** Time available for this call (ms), e.g. what's left of a request that already did slow work. */
+  budgetMs?: number;
 }): Promise<z.infer<S>> {
   let attempt: Attempt;
   try {

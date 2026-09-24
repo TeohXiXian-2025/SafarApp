@@ -1,5 +1,6 @@
 import { Lightbulb, Plus } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { Idea, paths, type IdeaStatus } from '../../domain';
 import { useQuery } from '../../lib/firestore';
 import { Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
@@ -20,6 +21,18 @@ export function IdeasPage() {
   const { trip, me } = useTrip();
   const [filter, setFilter] = useState<Filter>('voting');
   const [adding, setAdding] = useState(false);
+  // Arrived from the share sheet (/share → ?share=…): open the import pre-filled.
+  const [params, setParams] = useSearchParams();
+  const [sharedText, setSharedText] = useState<string>();
+  useEffect(() => {
+    const shared = params.get('share');
+    if (shared) {
+      setSharedText(shared);
+      setAdding(true);
+      params.delete('share');
+      setParams(params, { replace: true });
+    }
+  }, [params, setParams]);
   const ideas = useQuery(`ideas:${trip.id}`, () => paths.ideas(trip.id), Idea);
 
   const counts = useMemo(
@@ -92,7 +105,7 @@ export function IdeasPage() {
 
       <p className="text-[11px] text-[#9AA5A3] text-center">Place details and photos © Google. Halal information is guidance — always confirm with the venue.</p>
 
-      <AddIdeaSheet open={adding} onClose={() => setAdding(false)} />
+      <AddIdeaSheet open={adding} initialText={sharedText} onClose={() => (setAdding(false), setSharedText(undefined))} />
     </div>
   );
 }

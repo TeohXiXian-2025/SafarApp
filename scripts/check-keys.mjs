@@ -192,6 +192,23 @@ await check('Foursquare Places', async () => {
   }
 }, { optional: true });
 
+// ─── Social post readers (free credits) — checks spend no credits ───────────
+await check('Apify (Xiaohongshu reader)', async () => {
+  need('APIFY_TOKEN');
+  const r = await getJson(`https://api.apify.com/v2/users/me?token=${env.APIFY_TOKEN}`);
+  const plan = r.data?.plan?.id ?? r.data?.plan ?? 'unknown';
+  return `ok; user=${r.data?.username}, plan=${typeof plan === 'string' ? plan : 'free'}, monthly cap in app=${env.APIFY_MONTHLY_CAP ?? '—'}`;
+}, { optional: true });
+
+await check('ScrapeCreators (Instagram/TikTok reader)', async () => {
+  need('SCRAPECREATORS_API_KEY');
+  const res = await fetch('https://api.scrapecreators.com/v1/credit-balance', { headers: { 'x-api-key': env.SCRAPECREATORS_API_KEY }, signal: AbortSignal.timeout(10000) });
+  if (res.status === 401 || res.status === 403) throw new Error(`key rejected (HTTP ${res.status})`);
+  const body = await res.json().catch(() => ({}));
+  const credits = body.creditCount ?? body.credits ?? body.credit_balance ?? body.balance;
+  return res.ok ? `ok; credits left=${credits ?? '?'}, monthly cap in app=${env.SCRAPECREATORS_MONTHLY_CAP ?? '—'}` : `key present (balance endpoint HTTP ${res.status})`;
+}, { optional: true });
+
 // ─── Flight status ───────────────────────────────────────────────────────────
 await check('Flight status (AviationStack)', async () => {
   need('FLIGHT_STATUS_API_KEY');

@@ -18,7 +18,10 @@ import { analyzePlace } from '../_lib/halal.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
 import { DEFAULT_DURATION, placeDetails } from '../_lib/places.js';
 import type { RouteTable } from '../_lib/routes.js';
-import { extractCandidates, fetchPost, parseShareInput } from '../_lib/social.js';
+import { downloadMedia, extractCandidates, fetchPost, imagePart, parseShareInput } from '../_lib/social.js';
+import { fetchRichPost } from '../_lib/socialProviders.js';
+import { transcribe } from '../_lib/groq.js';
+import type { Part } from '@google/genai';
 import { loadTrip, logActivity } from '../_lib/trip.js';
 
 const ANALYSIS_TTL = 14 * 86_400_000;
@@ -36,93 +39,165 @@ const canManage = (idea: Idea, m: Member) => idea.createdBy === m.uid || m.role 
 
 export const ideaRoutes: RouteTable = {
   /**
-   * Link (or an app's copied share text) / screenshots / caption → candidate
-   * places. Nothing is saved yet.
+   * Find places in a social post. Any combination of:
+   *   url           — a link or an app's copied share text
+   *   storagePaths  — screenshots and/or screen-recording frames (≤ 8)
+   *   audioPath     — a screen recording's audio (speech → text)
+   *   text          — a pasted caption
+   * Links go through three layers: (1) free-credit readers for the FULL post
+   * (all images + the video's speech), else (2) free built-in readers
+   * (embed/oEmbed/share text), else (3) ask for a screen recording/screenshots.
+   * Nothing is saved yet.
    */
   'POST ideas/import': withTrip(
     async (req, { tripId, user }) => {
-      const body = await readJson(
+      const started = Date.now();
+      const raw = await readJson(
         req,
-        z.union([
-          z.object({ url: z.string().min(8).max(5000) }),
-          z.object({ text: z.string().min(8).max(5000) }),
-          z.object({ storagePaths: z.array(z.string().max(300)).min(1).max(4) }),
-          z.object({ storagePath: z.string().max(300) }),
-        ]),
+        z
+          .object({
+            url: z.string().min(8).max(5000).optional(),
+            text: z.string().min(8).max(5000).optional(),
+            storagePaths: z.array(z.string().max(300)).min(1).max(8).optional(),
+            storagePath: z.string().max(300).optional(), // older clients
+            audioPath: z.string().max(300).optional(),
+          })
+          .refine((b) => b.url || b.text || b.storagePaths || b.storagePath || b.audioPath, 'Send a link, screenshots, a recording or a caption'),
       );
+      const storagePaths = raw.storagePaths ?? (raw.storagePath ? [raw.storagePath] : []);
       const trip = await loadTrip(tripId);
       const platform = { instagram: 'Instagram', xiaohongshu: 'Xiaohongshu', tiktok: 'TikTok', youtube: 'YouTube' } as const;
+      const parts: Part[] = [];
+      const captions: string[] = [];
+      let source: IdeaSource = { type: storagePaths.length || raw.audioPath ? 'screenshot' : 'text' };
+      const used = { provider: null as string | null, images: 0, transcript: false };
 
-      let source: IdeaSource;
-      const parts: import('@google/genai').Part[] = [];
-      if ('url' in body) {
-        const { url, type, extraText } = parseShareInput(body.url);
-        const post = await fetchPost(url, type);
-        if (!post?.caption && !post?.image && !extraText) {
-          return json({
-            source: { type, url: url.href },
-            candidates: [],
-            unresolved: [],
-            skippedRegions: [],
-            needsScreenshot: true,
-            message:
-              type === 'xiaohongshu'
-                ? "Xiaohongshu doesn't let other apps read its posts. In the app, tap Share → Copy link and paste the whole copied text here — or upload screenshots of the post's photos."
-                : `${platform[type]} didn't share this post with us. Upload screenshots of the post (up to 4) instead.`,
-          });
+      // Uploaded files must be the caller's own, for this trip.
+      const prefix = `trips/${tripId}/users/${user.uid}/`;
+      const ownFile = async (path: string, allowed: RegExp) => {
+        if (!path.startsWith(prefix) || path.includes('..')) throw new HttpError(403, 'Invalid upload');
+        const file = adminBucket().file(path);
+        const [meta] = await file.getMetadata().catch(() => {
+          throw new HttpError(404, 'Upload not found — please upload it again');
+        });
+        const type = String(meta.contentType ?? '');
+        if (!allowed.test(type)) throw new HttpError(415, 'Unsupported file type');
+        const [buf] = await file.download();
+        return { buf, type };
+      };
+
+      // ── Link ──────────────────────────────────────────────────────────
+      if (raw.url) {
+        const { url, type, extraText } = parseShareInput(raw.url);
+        source = { type, url: url.href.slice(0, 2000) };
+        if (extraText) {
+          captions.push(extraText);
+          parts.push({ text: `Text shared with the link:\n${extraText}` });
         }
-        const caption = [post?.caption, extraText].filter(Boolean).join('\n\n');
-        source = {
-          type,
-          url: (post?.finalUrl ?? url.href).slice(0, 2000),
-          ...(caption ? { caption: caption.slice(0, 2000) } : {}),
-          ...(post?.author ? { author: post.author.slice(0, 120) } : {}),
-        };
-        if (post?.caption) parts.push({ text: `Post caption:
-${post.caption}` });
-        if (extraText) parts.push({ text: `Text shared with the link:
-${extraText}` });
-        if (post?.image) parts.push(post.image, { text: "Above: the post's cover image / thumbnail (may show place names)." });
-      } else if ('text' in body) {
-        source = { type: 'text', caption: body.text.slice(0, 2000) };
-        parts.push({ text: `Post caption:
-${body.text}` });
-      } else {
-        const storagePaths = 'storagePaths' in body ? body.storagePaths : [body.storagePath];
-        const prefix = `trips/${tripId}/users/${user.uid}/`;
-        for (const path of storagePaths) {
-          if (!path.startsWith(prefix) || path.includes('..')) throw new HttpError(403, 'Invalid upload');
-          const file = adminBucket().file(path);
-          const [meta] = await file.getMetadata().catch(() => {
-            throw new HttpError(404, 'Upload not found — please upload it again');
-          });
-          const type = String(meta.contentType ?? '');
-          if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(type)) throw new HttpError(415, 'Upload screenshots (images)');
-          const [buf] = await file.download();
-          parts.push({ inlineData: { mimeType: type, data: buf.toString('base64') } });
+
+        // Layer 1: full post from a free-credit reader (all images + video speech).
+        const rich = await fetchRichPost(url, type);
+        if (rich) {
+          used.provider = rich.provider;
+          if (rich.caption) {
+            captions.push(rich.caption);
+            parts.push({ text: `Post caption:\n${rich.caption}` });
+          }
+          if (rich.location) parts.push({ text: `Location tagged on the post: ${rich.location}` });
+          if (rich.author) source.author = rich.author.slice(0, 120);
+          const [images, transcript] = await Promise.all([
+            Promise.all(rich.imageUrls.slice(0, 8).map((u) => imagePart(u))),
+            rich.videoUrl && !raw.audioPath
+              ? downloadMedia(rich.videoUrl).then((m) => (m ? transcribe(m.data, m.mimeType, 'video.mp4') : null))
+              : Promise.resolve(null),
+          ]);
+          for (const img of images) if (img) parts.push(img), used.images++;
+          if (used.images) parts.push({ text: `Above: ${used.images} photo(s) from the post (place names are often written on them).` });
+          if (transcript) {
+            used.transcript = true;
+            parts.push({ text: `What is said in the post's video (auto transcript):\n${transcript}` });
+          }
         }
-        source = { type: 'screenshot' };
-        parts.push({ text: `These are ${storagePaths.length} screenshot(s) of one travel post (photos, video frames or its caption).` });
+
+        // Layer 2: free built-in readers (embed page / oEmbed / Open Graph).
+        if (!rich || (!rich.caption && !used.images)) {
+          const post = await fetchPost(url, type);
+          if (post?.caption) {
+            captions.push(post.caption);
+            parts.push({ text: `Post caption:\n${post.caption}` });
+          }
+          if (post?.image) parts.push(post.image, { text: "Above: the post's cover image / thumbnail (may show place names)." });
+          if (post?.author) source.author = post.author.slice(0, 120);
+          if (post?.finalUrl) source.url = post.finalUrl.slice(0, 2000);
+        }
       }
 
-      // For links the cover image is a bonus; screenshots ARE the content.
-      const { candidates, unresolved, skippedRegions } = await extractCandidates(parts, trip.destinations, { imagesOptional: 'url' in body });
+      // ── Pasted caption ────────────────────────────────────────────────
+      if (raw.text) {
+        captions.push(raw.text);
+        parts.push({ text: `Post caption:\n${raw.text}` });
+      }
+
+      // ── Screenshots / recording frames ───────────────────────────────
+      for (const path of storagePaths) {
+        const { buf, type } = await ownFile(path, /^image\/(jpeg|png|webp|heic|heif)$/);
+        parts.push({ inlineData: { mimeType: type, data: buf.toString('base64') } });
+      }
+      if (storagePaths.length) {
+        used.images += storagePaths.length;
+        parts.push({ text: `Above: ${storagePaths.length} screenshot(s) or frame(s) of the post (photos, video moments or its caption).` });
+      }
+
+      // ── Recording audio → speech to text ─────────────────────────────
+      if (raw.audioPath) {
+        const { buf, type } = await ownFile(raw.audioPath, /^audio\/(wav|x-wav|webm|mp4|m4a|mpeg|ogg)$/);
+        const transcript = await transcribe(buf, type, `recording.${type.split('/')[1].replace('x-', '')}`);
+        if (transcript) {
+          used.transcript = true;
+          parts.push({ text: `What is said in the recording (auto transcript):\n${transcript}` });
+        }
+      }
+
+      if (captions.length) source.caption = captions.join('\n\n').slice(0, 2000);
+
+      // Layer 3: nothing to read at all → ask for a recording/screenshots.
+      if (!parts.length) {
+        return json({
+          source,
+          candidates: [],
+          unresolved: [],
+          skippedRegions: [],
+          used,
+          needsScreenshot: true,
+          message:
+            source.type === 'xiaohongshu'
+              ? "Xiaohongshu doesn't let other apps read its posts. In the app, tap Share → Copy link and paste the whole copied text here — or upload a screen recording / screenshots of the note."
+              : `${platform[source.type as keyof typeof platform] ?? 'That site'} didn't share this post with us. Upload a screen recording or screenshots of it instead.`,
+        });
+      }
+
+      // Links: images are a bonus (text-only fallback if no vision model is free).
+      const { candidates, unresolved, skippedRegions } = await extractCandidates(parts, trip.destinations, {
+        imagesOptional: !!raw.url && !storagePaths.length,
+        budgetMs: Math.max(20_000, 100_000 - (Date.now() - started)),
+      });
       if (!candidates.length) {
-        const video = source.type === 'instagram' || source.type === 'tiktok' || source.type === 'youtube';
+        const video = ['instagram', 'tiktok', 'youtube'].includes(source.type);
         return json({
           source,
           candidates,
           unresolved,
           skippedRegions,
-          needsScreenshot: source.type !== 'screenshot',
+          used,
+          needsScreenshot: !storagePaths.length,
           message: unresolved.length
             ? `Found ${unresolved.join(', ')} but couldn't locate ${unresolved.length === 1 ? 'it' : 'them'} on the map. Try searching instead.`
             : video
-              ? `This post's caption doesn't name specific places${skippedRegions.length ? ` (only ${skippedRegions.join(', ')})` : ''} — they're probably only shown in the video. Pause on the moments that show each place's name and upload those screenshots (up to 4).`
-              : `No specific places found${skippedRegions.length ? ` — only ${skippedRegions.join(', ')}` : ''}. Try screenshots that show the place names, or search the place.`,
+              ? `We couldn't find specific places in this post${skippedRegions.length ? ` (only ${skippedRegions.join(', ')})` : ''} — they're probably only shown in the video. Upload a screen recording of it, or screenshots of the moments that show each place.`
+              : `No specific places found${skippedRegions.length ? ` — only ${skippedRegions.join(', ')}` : ''}. Try a screen recording or screenshots that show the place names, or search the place.`,
         });
       }
-      return json({ source, candidates, unresolved, skippedRegions });
+      return json({ source, candidates, unresolved, skippedRegions, used });
     },
     { perMinute: 8 },
   ),

@@ -9,14 +9,15 @@ service firebase.storage {
       return request.auth != null && request.auth.uid == uid;
     }
 
-    // A traveller's own uploads for a trip (tickets now, vault documents later).
+    // A traveller's own uploads for a trip: tickets, post screenshots/recording
+    // frames, recording audio (vault documents later).
     // Private to the uploader; the server reads them with the Admin SDK and
     // checks trip membership before using them.
     match /trips/{tripId}/users/{uid}/{allPaths=**} {
       allow read, delete: if isOwner(uid);
       allow create: if isOwner(uid)
         && request.resource.size < 10 * 1024 * 1024
-        && request.resource.contentType.matches('application/pdf|image/(jpeg|png|webp|heic|heif)');
+        && request.resource.contentType.matches('application/pdf|image/(jpeg|png|webp|heic|heif)|audio/(wav|x-wav|webm|mp4|m4a|mpeg|ogg)');
       allow update: if false;
     }
 

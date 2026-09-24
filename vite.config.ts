@@ -47,6 +47,8 @@ const pwa = VitePWA({
     theme_color: '#00685F',
     background_color: '#FAF8F5',
     categories: ['travel', 'lifestyle'],
+    // Android: "Share → Safar" from TikTok / Instagram / Xiaohongshu (not supported on iOS).
+    share_target: {action: '/share', method: 'GET', params: {title: 'title', text: 'text', url: 'url'}},
     icons: [
       {src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any'},
       {src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any'},

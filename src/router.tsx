@@ -4,6 +4,7 @@ import { JoinPage } from './pages/JoinPage';
 import { PrivacyPage, TermsPage } from './pages/LegalPages';
 import { LoginPage } from './pages/LoginPage';
 import { NewTripPage } from './pages/NewTripPage';
+import { SharePage } from './pages/SharePage';
 import { TripsPage } from './pages/TripsPage';
 import { BookingsPage } from './trip/bookings/BookingsPage';
 import { IdeasPage } from './trip/ideas/IdeasPage';
@@ -38,6 +39,8 @@ export const router = createBrowserRouter([
       { path: '/trips', element: <RequireAuth><TripsPage /></RequireAuth> },
       { path: '/trips/new', element: <RequireAuth><NewTripPage /></RequireAuth> },
       { path: '/join/:token', element: <RequireAuth><JoinPage /></RequireAuth> },
+      // Android share sheet → Safar (manifest share_target).
+      { path: '/share', element: <RequireAuth><SharePage /></RequireAuth> },
       {
         path: '/t/:tripId',
         element: <RequireAuth><TripLayout /></RequireAuth>,

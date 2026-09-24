@@ -18,7 +18,9 @@ const HOSTS: [RegExp, SocialType][] = [
   [/(^|\.)(youtube\.com|youtu\.be)$/, 'youtube'],
 ];
 // Cover images/thumbnails are only downloaded from these CDNs.
-const IMAGE_HOSTS = /(^|\.)(cdninstagram\.com|fbcdn\.net|tiktokcdn(-[a-z]+)?\.com|ytimg\.com|xhscdn\.com)$/;
+const IMAGE_HOSTS = /(^|\.)(cdninstagram\.com|fbcdn\.net|tiktokcdn(-[a-z]+)?\.com|ibyteimg\.com|muscdn\.com|ytimg\.com|xhscdn\.com|xhscdn\.net)$/;
+/** Video/audio downloads (for speech-to-text) — same CDNs. */
+const MEDIA_HOSTS = IMAGE_HOSTS;
 
 export function socialType(url: URL): SocialType | null {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
@@ -56,7 +58,7 @@ async function getJson(url: string) {
 }
 
 /** Downloads a cover image/thumbnail (allow-listed CDNs, ≤ 3 MB) as an AI image part. */
-async function imagePart(src?: string): Promise<Part | null> {
+export async function imagePart(src?: string): Promise<Part | null> {
   if (!src) return null;
   let u: URL;
   try {
@@ -67,10 +69,28 @@ async function imagePart(src?: string): Promise<Part | null> {
   if (u.protocol !== 'https:' || !IMAGE_HOSTS.test(u.hostname)) return null;
   const res = await fetch(u, { headers: { 'User-Agent': BROWSER_UA }, signal: AbortSignal.timeout(6000) }).catch(() => null);
   const type = res?.headers.get('content-type')?.split(';')[0] ?? '';
-  if (!res?.ok || !/^image\/(jpeg|png|webp)$/.test(type)) return null;
+  if (!res?.ok || !/^image\/(jpeg|png|webp|heic)$/.test(type)) return null;
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length > 3 * 1024 * 1024) return null;
   return { inlineData: { mimeType: type, data: buf.toString('base64') } };
+}
+
+/** Downloads a post's video (allow-listed CDNs, ≤ 24 MB) — only its audio is used (speech-to-text). */
+export async function downloadMedia(src: string): Promise<{ data: Buffer; mimeType: string } | null> {
+  let u: URL;
+  try {
+    u = new URL(decode(src));
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:' || !MEDIA_HOSTS.test(u.hostname)) return null;
+  const res = await fetch(u, { headers: { 'User-Agent': BROWSER_UA, Referer: `https://${u.hostname}/` }, signal: AbortSignal.timeout(15000) }).catch(() => null);
+  if (!res?.ok) return null;
+  const len = Number(res.headers.get('content-length') ?? 0);
+  if (len > 24 * 1024 * 1024) return null;
+  const data = Buffer.from(await res.arrayBuffer());
+  if (data.length > 24 * 1024 * 1024 || data.length < 1000) return null;
+  return { data, mimeType: res.headers.get('content-type')?.split(';')[0] || 'video/mp4' };
 }
 
 export interface FetchedPost {
@@ -194,6 +214,10 @@ export function isRegion(types: string[] = []): boolean {
   return types.includes('political') && !visitable;
 }
 
+const IMAGES_PER_CALL = 3;
+const MAX_PLACES = 15;
+const chunk = <T,>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
+
 export interface Candidate {
   place: PlaceRef;
   category: ReturnType<typeof categorize>;
@@ -206,21 +230,43 @@ export interface Candidate {
 export async function extractCandidates(
   parts: Part[],
   destinations: Destination[],
-  opts: { imagesOptional?: boolean } = {},
+  opts: { imagesOptional?: boolean; budgetMs?: number } = {},
 ): Promise<{ candidates: Candidate[]; unresolved: string[]; skippedRegions: string[] }> {
   const context = `Trip destinations: ${destinations.map((d) => d.address ?? d.name).join('; ')}`;
-  const { places } = await extractJson({
-    system: SYSTEM,
-    parts: [...parts, { text: context }],
-    responseSchema,
-    validate: Extracted,
-    imagesOptional: opts.imagesOptional,
-  });
+  const images = parts.filter((p) => p.inlineData?.mimeType?.startsWith('image/'));
+  const others = parts.filter((p) => !p.inlineData?.mimeType?.startsWith('image/'));
+  // Many frames (e.g. a screen recording): read them in small batches in
+  // parallel — keeps each request within every vision model's image limit.
+  const batches = images.length > IMAGES_PER_CALL ? chunk(images, IMAGES_PER_CALL).map((b) => [...others, ...b]) : [parts];
+  const results = await Promise.allSettled(
+    batches.map((batch) =>
+      extractJson({
+        system: SYSTEM,
+        parts: [...batch, { text: context }],
+        responseSchema,
+        validate: Extracted,
+        imagesOptional: opts.imagesOptional,
+        budgetMs: opts.budgetMs,
+      }),
+    ),
+  );
+  const ok = results.filter((r): r is PromiseFulfilledResult<z.infer<typeof Extracted>> => r.status === 'fulfilled');
+  if (!ok.length) throw (results[0] as PromiseRejectedResult).reason;
+  // Merge batches, keeping first-mention order and dropping repeats by name.
+  const seenNames = new Set<string>();
+  const places = ok
+    .flatMap((r) => r.value.places)
+    .filter((p) => {
+      const k = p.name.trim().toLowerCase();
+      if (seenNames.has(k)) return false;
+      seenNames.add(k);
+      return true;
+    });
 
   const unresolved: string[] = [];
   const skippedRegions: string[] = [];
   const found = await Promise.all(
-    places.slice(0, 12).map(async (p) => {
+    places.slice(0, MAX_PLACES).map(async (p) => {
       const where = [p.area, p.city, p.country].filter((x) => x?.trim()).join(', ');
       const lower = where.toLowerCase();
       // Bias the search to the destination the post mentions, else the first one.
