@@ -146,6 +146,9 @@ export const IdeaPlace = PlaceRef.extend({
   ratingCount: z.number().int().nonnegative().optional(),
   website: z.string().url().max(500).optional(),
   photoName: z.string().max(600).optional(), // Places photo resource name
+  /** Direct image URL resolved once (Google serves it cacheably) — avoids a billed photo call per view. */
+  photoUrl: z.string().url().max(2000).optional(),
+  photoUrlAt: Millis.optional(),
   photoAttribution: z.string().max(200).optional(),
 });
 export type IdeaPlace = z.infer<typeof IdeaPlace>;

@@ -37,7 +37,7 @@ type Attempt = { provider: string; text: string } | { provider: string; json: un
  * One attempt per Gemini model (SDK retries off so we control timing), moving
  * on immediately when one is rate-limited or overloaded; then Groq.
  */
-async function generate(opts: {
+async function generate(input: {
   system: string;
   parts: Part[];
   responseSchema: Schema;
@@ -45,7 +45,9 @@ async function generate(opts: {
   budgetMs?: number;
   merge?: (results: unknown[]) => unknown;
   groqTextOnly?: boolean;
+  beforeGroq?: () => Promise<Part[]>;
 }): Promise<Attempt> {
+  let opts = input;
   const started = Date.now();
   const budget = Math.min(opts.budgetMs ?? TOTAL_BUDGET_MS, TOTAL_BUDGET_MS);
   const left = () => budget - (Date.now() - started);
@@ -85,6 +87,12 @@ async function generate(opts: {
   // and silently lost the places in the failed groups.
   const isImage = (p: Part) => !!p.inlineData?.mimeType?.startsWith('image/');
   const images = opts.parts.filter(isImage);
+  // Gemini couldn't answer: now (and only now) read the images' text (OCR),
+  // so the free OCR allowance is spent only when it's actually needed.
+  if (opts.beforeGroq && images.length && !opts.groqTextOnly) {
+    const extra = await opts.beforeGroq().catch(() => [] as Part[]);
+    if (extra.length) opts = { ...opts, parts: [...opts.parts, ...extra], groqTextOnly: true };
+  }
   if (opts.groqTextOnly && images.length) {
     // The images' text was already read (OCR) — one cheap text request.
     try {
@@ -156,6 +164,8 @@ export async function extractJson<S extends z.ZodType>(opts: {
   merge?: (results: unknown[]) => unknown;
   /** The images' text is already in the parts (OCR): Groq can skip the images. */
   groqTextOnly?: boolean;
+  /** Extra parts (e.g. OCR text) computed only if Gemini fails and Groq takes over. */
+  beforeGroq?: () => Promise<Part[]>;
 }): Promise<z.infer<S>> {
   let attempt: Attempt;
   try {

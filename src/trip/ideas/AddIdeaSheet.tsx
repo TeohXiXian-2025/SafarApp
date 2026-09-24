@@ -39,7 +39,11 @@ async function addIdeas(tripId: string, items: { placeId: string; source: IdeaSo
     const res = await api.post<{ id: string; duplicate: boolean }>('ideas/add', it, { tripId });
     if (!res.duplicate) ids.push(res.id);
   }
-  for (const id of ids) void api.post('ideas/analyze', { ideaId: id }, { tripId }).catch(() => {});
+  // One after another in the background (not all at once): keeps the shared
+  // free AI allowance under its per-minute limits.
+  void (async () => {
+    for (const id of ids) await api.post('ideas/analyze', { ideaId: id }, { tripId }).catch(() => {});
+  })();
   return { added: ids.length, duplicates: items.length - ids.length };
 }
 

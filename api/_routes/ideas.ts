@@ -16,13 +16,14 @@ import { withTrip } from '../_lib/auth.js';
 import { adminBucket, adminDb } from '../_lib/firebaseAdmin.js';
 import { analyzePlace } from '../_lib/halal.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
-import { DEFAULT_DURATION, placeDetails } from '../_lib/places.js';
+import { DEFAULT_DURATION, photoUrl, placeDetails } from '../_lib/places.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { downloadMedia, extractCandidates, fetchPost, imagePart, parseShareInput } from '../_lib/social.js';
 import { fetchRichPost } from '../_lib/socialProviders.js';
 import { transcribe } from '../_lib/groq.js';
 import type { Part } from '@google/genai';
 import { loadTrip, logActivity } from '../_lib/trip.js';
+import { useDailyQuota } from '../_lib/quota.js';
 
 const ANALYSIS_TTL = 14 * 86_400_000;
 const ideaRef = (tripId: string, id: string) => adminDb().doc(paths.idea(tripId, id));
@@ -65,6 +66,7 @@ export const ideaRoutes: RouteTable = {
           .refine((b) => b.url || b.text || b.storagePaths || b.storagePath || b.audioPath, 'Send a link, screenshots, a recording or a caption'),
       );
       const storagePaths = raw.storagePaths ?? (raw.storagePath ? [raw.storagePath] : []);
+      await useDailyQuota(user.uid, 'import');
       const trip = await loadTrip(tripId);
       const platform = { instagram: 'Instagram', xiaohongshu: 'Xiaohongshu', tiktok: 'TikTok', youtube: 'YouTube' } as const;
       const parts: Part[] = [];
@@ -211,10 +213,15 @@ export const ideaRoutes: RouteTable = {
         z.object({ placeId: z.string().min(3).max(300), source: IdeaSource.default({ type: 'manual' }), notes: z.string().max(1000).optional() }),
       );
       const placeKey = paths.placeKey({ placeId: body.placeId });
+      await useDailyQuota(member.uid, 'addIdea');
       const existing = await adminDb().collection(paths.ideas(tripId)).where('placeKey', '==', placeKey).limit(1).get();
       if (!existing.empty) return json({ id: existing.docs[0].id, duplicate: true });
 
       const { place } = await placeDetails(body.placeId);
+      if (place.photoName) {
+        const url = await photoUrl(place.photoName);
+        if (url) Object.assign(place, { photoUrl: url, photoUrlAt: Date.now() });
+      }
       const ref = adminDb().collection(paths.ideas(tripId)).doc();
       const now = Date.now();
       const idea = Idea.parse({
@@ -242,7 +249,7 @@ export const ideaRoutes: RouteTable = {
 
   /** Halal Radar + review analysis for an idea (cached per place for 14 days). */
   'POST ideas/analyze': withTrip(
-    async (req, { tripId }) => {
+    async (req, { tripId, user }) => {
       const { ideaId, force } = await readJson(req, z.object({ ideaId: Id, force: z.boolean().default(false) }));
       const idea = await loadIdea(tripId, ideaId);
       const cacheRef = adminDb().doc(`placesCache/${idea.placeKey}`);
@@ -252,6 +259,7 @@ export const ideaRoutes: RouteTable = {
       if (cached && Date.now() - Number(cached.at) < ANALYSIS_TTL) {
         result = { halal: cached.halal, ...(cached.sentiment ? { sentiment: cached.sentiment } : {}) };
       } else {
+        await useDailyQuota(user.uid, 'analyze');
         await ideaRef(tripId, ideaId).update({ analysis: { status: 'pending', at: Date.now() } });
         try {
           const details = await placeDetails(idea.place.placeId!, { forAnalysis: true });

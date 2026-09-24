@@ -163,3 +163,16 @@ export function distanceKm(a: GeoPoint, b: GeoPoint): number {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * 6371 * Math.asin(Math.sqrt(h));
 }
+
+/**
+ * Resolves a Places photo to its direct image URL (one billed call). The
+ * media endpoint's redirect can't be cached, so linking it from <img> would
+ * bill a photo call on EVERY card view; the direct URL is cacheable.
+ */
+export async function photoUrl(photoName: string, maxWidthPx = 640): Promise<string | null> {
+  const url = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=${maxWidthPx}&skipHttpRedirect=true`;
+  const res = await fetch(url, { headers: { 'X-Goog-Api-Key': requireEnv('GOOGLE_MAPS_SERVER_KEY') }, signal: AbortSignal.timeout(8000) }).catch(() => null);
+  if (!res?.ok) return null;
+  const body = (await res.json().catch(() => null)) as { photoUri?: string } | null;
+  return body?.photoUri?.startsWith('https://') ? body.photoUri : null;
+}

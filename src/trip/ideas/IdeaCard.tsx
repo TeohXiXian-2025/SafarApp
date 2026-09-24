@@ -49,7 +49,8 @@ const SENTIMENT = {
   skip: { text: 'Reviewers say skip', tone: 'bad' },
 } as const;
 
-const STALE_MS = 90_000;
+/** Checks run one after another, so a big import can take a few minutes to finish. */
+const STALE_MS = 4 * 60_000;
 
 export function IdeaCard({ idea }: { idea: Idea }) {
   const { trip, members, me, isAdmin } = useTrip();
@@ -105,7 +106,18 @@ export function IdeaCard({ idea }: { idea: Idea }) {
     <article className="bg-white rounded-2xl border border-[#E7DFD5] shadow-xs overflow-hidden flex flex-col">
       {idea.place.photoName && (
         <div className="relative h-40 bg-[#F3EFE9]">
-          <img src={placePhotoUrl(idea.place.photoName)} alt="" loading="lazy" className="w-full h-full object-cover" />
+          <img
+            // The stored direct URL is free to load (and cached); the media endpoint bills per view — fallback only.
+            src={idea.place.photoUrl ?? placePhotoUrl(idea.place.photoName)}
+            onError={(e) => {
+              const fallback = placePhotoUrl(idea.place.photoName!);
+              if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback;
+            }}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="w-full h-full object-cover"
+          />
           {idea.place.photoAttribution && (
             <span className="absolute bottom-1 right-1.5 text-[10px] text-white/90 bg-black/40 rounded px-1.5 py-0.5 max-w-[80%] truncate">
               Photo: {idea.place.photoAttribution}

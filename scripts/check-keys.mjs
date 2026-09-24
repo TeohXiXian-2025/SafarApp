@@ -164,10 +164,10 @@ await check('Groq (backup AI)', async () => {
   need('GROQ_API_KEY');
   const r = await getJson('https://api.groq.com/openai/v1/models', { headers: { Authorization: `Bearer ${env.GROQ_API_KEY}` } });
   const ids = (r.data ?? []).map((m) => m.id);
-  const want = [env.GROQ_TEXT_MODEL || 'openai/gpt-oss-120b', env.GROQ_VISION_MODEL || 'qwen/qwen3.8-27b'];
+  const want = [...(env.GROQ_TEXT_MODELS || 'openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b').split(','), env.GROQ_VISION_MODEL || 'qwen/qwen3.8-27b'].map((m) => m.trim());
   const missing = want.filter((m) => !ids.includes(m));
   if (missing.length) throw new Error(`key works, but model(s) not available: ${missing.join(', ')}`);
-  return `ok; text=${want[0]}, vision=${want[1]}`;
+  return `ok; text models=${want.slice(0, -1).join(' → ')}, vision=${want.at(-1)}`;
 }, { optional: true });
 
 // ─── Hotels ──────────────────────────────────────────────────────────────────

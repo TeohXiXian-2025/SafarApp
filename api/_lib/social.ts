@@ -238,22 +238,20 @@ export async function extractCandidates(
   opts: { imagesOptional?: boolean; budgetMs?: number } = {},
 ): Promise<{ candidates: Candidate[]; unresolved: string[]; skippedRegions: string[] }> {
   const context = `Trip destinations: ${destinations.map((d) => d.address ?? d.name).join('; ')}`;
-  // OCR the photos first: place names printed on them become plain text that
-  // any model can read cheaply (Groq's free vision fits only ~3 photos/min).
+  // Photos go to Gemini as images. Only if Gemini can't answer are they OCR'd
+  // (Cloud Vision, 1,000/month free) so a cheap Groq text call can read the
+  // place names printed on them — Groq's free vision fits only ~3 photos/min.
   const images = parts.filter((p) => p.inlineData?.mimeType?.startsWith('image/'));
-  const texts = await ocrImages(images);
-  const ocrParts: Part[] = texts.flatMap((t, i) => (t ? [{ text: `Text printed on photo ${i + 1}:
-${t}` }] : []));
-  const readAllText = images.length > 0 && ocrParts.length > 0;
-
-  // One request with every image (Gemini reads many at once). If it falls back
-  // to Groq: with OCR text → a single text-only call; without → sequential groups.
   const { places: raw } = await extractJson({
     system: SYSTEM,
-    parts: [...parts, ...ocrParts, { text: context }],
-    groqTextOnly: readAllText,
+    parts: [...parts, { text: context }],
     responseSchema,
     validate: Extracted,
+    beforeGroq: async () => {
+      const texts = await ocrImages(images);
+      return texts.flatMap((t, i) => (t ? [{ text: `Text printed on photo ${i + 1}:
+${t}` }] : []));
+    },
     imagesOptional: opts.imagesOptional,
     budgetMs: opts.budgetMs,
     merge: (results) => ({ places: results.flatMap((r) => ((r as { places?: unknown[] })?.places ?? [])) }),

@@ -3,9 +3,15 @@
 // to Groq's vision model; PDFs are converted to text first (Groq can't read
 // PDF files). Output is JSON and is validated by the caller exactly like Gemini's.
 import type { Part, Schema } from '@google/genai';
+import { downModels, markDown } from './aiHealth.js';
 import { optionalEnv } from './env.js';
 
-const TEXT_MODEL = () => process.env.GROQ_TEXT_MODEL || 'openai/gpt-oss-120b';
+/** Text models to rotate through (each has its own free per-minute/per-day limits). */
+const TEXT_MODELS = (): string[] =>
+  (process.env.GROQ_TEXT_MODELS || 'openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
 const VISION_MODEL = () => process.env.GROQ_VISION_MODEL || 'qwen/qwen3.8-27b';
 
 /** Groq accepts base64 images up to ~4 MB and only common web formats. */
@@ -89,9 +95,15 @@ export async function groqJson(opts: { system: string; parts: Part[]; responseSc
   if (!converted) return undefined;
 
   const schema = JSON.stringify(toJsonSchema(opts.responseSchema));
-  const model = converted.hasImage ? VISION_MODEL() : TEXT_MODEL();
   const deadline = Date.now() + opts.timeoutMs;
-  const body = (jsonMode: boolean) => ({
+  // Each Groq model has its own free limits (per minute AND per day), so text
+  // work rotates through several; parked (exhausted) models are skipped.
+  const candidates = converted.hasImage ? [VISION_MODEL()] : TEXT_MODELS();
+  const parked = await downModels(candidates.map((m) => `groq:${m}`));
+  const models = candidates.filter((m) => !parked.has(`groq:${m}`));
+  if (!models.length) throw Object.assign(new Error('All Groq models are at their free limit right now'), { status: 429 });
+
+  const body = (model: string, jsonMode: boolean) => ({
     model,
     temperature: 0,
     // Extraction needs no chain-of-thought: thinking output breaks strict JSON
@@ -100,46 +112,52 @@ export async function groqJson(opts: { system: string; parts: Part[]; responseSc
     max_completion_tokens: 2500,
     ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
     messages: [
-      { role: 'system', content: `${opts.system}
-
-Respond with ONLY a JSON object that matches this JSON Schema:
-${schema}` },
+      { role: 'system', content: `${opts.system}\n\nRespond with ONLY a JSON object that matches this JSON Schema:\n${schema}` },
       { role: 'user', content: converted.content },
     ],
   });
 
-  let jsonMode = true;
-  let rateWaits = 0;
-  for (;;) {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-      body: JSON.stringify(body(jsonMode)),
-      signal: AbortSignal.timeout(Math.max(2_000, deadline - Date.now())),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-      return jsonFromReply(data.choices?.[0]?.message?.content ?? '');
+  let lastErr: unknown;
+  for (const [idx, model] of models.entries()) {
+    const isLast = idx === models.length - 1;
+    let jsonMode = true;
+    let rateWaits = 0;
+    for (;;) {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body(model, jsonMode)),
+        signal: AbortSignal.timeout(Math.max(2_000, deadline - Date.now())),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+        return jsonFromReply(data.choices?.[0]?.message?.content ?? '');
+      }
+      const text = await res.text().catch(() => '');
+      // Strict JSON mode rejected the reply → ask again without it and parse ourselves.
+      if (res.status === 400 && jsonMode && /json_validate_failed/.test(text)) {
+        jsonMode = false;
+        continue;
+      }
+      const retryAfter = Number(res.headers.get('retry-after')) || 0;
+      const tokenReset = parseDuration(res.headers.get('x-ratelimit-reset-tokens'));
+      const wait = Math.max(retryAfter, tokenReset) + 1;
+      if (res.status === 429 || res.status === 413) {
+        // Daily limit → park for an hour; per-minute → park briefly. Then use the next model.
+        const daily = /per day|TPD|RPD/i.test(text);
+        if (res.status === 429) await markDown(`groq:${model}`, 429, daily ? 3600 : Math.max(20, Math.ceil(wait)));
+        // Last model left: wait for its per-minute window (up to twice) if the budget allows.
+        if (isLast && res.status === 429 && !daily && rateWaits < 2 && wait <= 45 && Date.now() + wait * 1000 + 8_000 < deadline) {
+          rateWaits++;
+          await new Promise((r) => setTimeout(r, wait * 1000));
+          continue;
+        }
+      }
+      lastErr = Object.assign(new Error(`Groq ${model} ${res.status}: ${text.slice(0, 200)}`), { status: res.status });
+      break;
     }
-    const text = await res.text().catch(() => '');
-    // Strict JSON mode rejected the reply → ask again without it and parse ourselves.
-    if (res.status === 400 && jsonMode && /json_validate_failed/.test(text)) {
-      jsonMode = false;
-      continue;
-    }
-    // Free-tier per-minute limits reset within a minute. Wait for the token
-    // window to reset (it can be longer than retry-after), up to twice, if the
-    // request's time budget allows it — multi-photo posts need this.
-    const retryAfter = Number(res.headers.get('retry-after')) || 0;
-    const tokenReset = parseDuration(res.headers.get('x-ratelimit-reset-tokens'));
-    const wait = Math.max(retryAfter, tokenReset) + 1;
-    if (res.status === 429 && rateWaits < 2 && wait > 1 && wait <= 45 && Date.now() + wait * 1000 + 8_000 < deadline) {
-      rateWaits++;
-      await new Promise((r) => setTimeout(r, wait * 1000));
-      continue;
-    }
-    throw Object.assign(new Error(`Groq ${model} ${res.status}: ${text.slice(0, 200)}`), { status: res.status });
   }
+  throw lastErr;
 }
 
 /**

@@ -17,6 +17,7 @@ import { findPlace, localToInstant } from '../_lib/google.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { logActivity } from '../_lib/trip.js';
+import { useDailyQuota } from '../_lib/quota.js';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const PARSEABLE = /^(application\/pdf|image\/(jpeg|png|webp|heic|heif))$/;
@@ -240,6 +241,7 @@ export const bookingRoutes: RouteTable = {
         z.union([z.object({ storagePath: z.string().max(300) }), z.object({ text: z.string().min(20).max(20_000) })]),
       );
 
+      await useDailyQuota(user.uid, 'bookingParse');
       let parts: Part[];
       if ('storagePath' in body) {
         const prefix = `trips/${tripId}/users/${user.uid}/`;
