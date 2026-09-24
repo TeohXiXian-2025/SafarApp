@@ -2,6 +2,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, type Plugin} from 'vite';
+import {vercelApiDev} from './scripts/vite-api-dev';
 
 // ---------------------------------------------------------------------------
 // Build stamp
@@ -36,7 +37,7 @@ export default defineConfig(() => {
     define: {
       __COMMIT_SHA__: JSON.stringify(commitSha),
     },
-    plugins: [react(), tailwindcss(), buildStamp()],
+    plugins: [react(), tailwindcss(), buildStamp(), vercelApiDev()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -61,6 +62,8 @@ export default defineConfig(() => {
             if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler'))
               return 'react-vendor';
             if (id.includes('motion')) return 'motion';
+            if (id.includes('@sentry')) return 'sentry';
+            if (id.includes('react-router')) return 'router';
             if (id.includes('lucide-react')) return 'icons';
             if (id.includes('firebase') || id.includes('@firebase')) return 'firebase';
             if (id.includes('jspdf')) return 'pdf';

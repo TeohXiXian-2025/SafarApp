@@ -1414,7 +1414,7 @@ export const DiscoveryPanel: React.FC<DiscoveryPanelProps> = ({
           <iframe
             className="absolute inset-0 w-full h-full object-cover border-0 z-0"
             src="https://www.openstreetmap.org/export/embed.html?bbox=135.65%2C34.95%2C135.82%2C35.05&amp;layer=mapnik"
-            allowFullScreen=""
+            allowFullScreen
             loading="lazy"
             title="Kyoto Map"
           />
