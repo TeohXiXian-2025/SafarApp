@@ -148,6 +148,17 @@ await check('Gemini API', async () => {
   return `ok; flash models: ${flash.join(', ') || '(none matched)'}`;
 });
 
+// ─── Groq (free backup AI) ───────────────────────────────────────────────────
+await check('Groq (backup AI)', async () => {
+  need('GROQ_API_KEY');
+  const r = await getJson('https://api.groq.com/openai/v1/models', { headers: { Authorization: `Bearer ${env.GROQ_API_KEY}` } });
+  const ids = (r.data ?? []).map((m) => m.id);
+  const want = [env.GROQ_TEXT_MODEL || 'openai/gpt-oss-120b', env.GROQ_VISION_MODEL || 'qwen/qwen3.8-27b'];
+  const missing = want.filter((m) => !ids.includes(m));
+  if (missing.length) throw new Error(`key works, but model(s) not available: ${missing.join(', ')}`);
+  return `ok; text=${want[0]}, vision=${want[1]}`;
+}, { optional: true });
+
 // ─── Hotels ──────────────────────────────────────────────────────────────────
 await check('LiteAPI', async () => {
   need('LITEAPI_KEY');

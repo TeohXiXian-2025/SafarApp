@@ -365,7 +365,7 @@ Estimates assume 3 people working part-time. Each phase ends with something usab
 - [x] Voting 👍/👎 with optional reason, change or take back; unanimous 👍 → Backlog, unanimous 👎 → Rejected, split → "Split votes" (Split Track input for Phase 7). Leaving/removed members no longer block decisions.
 - [x] Admin: close voting early (non-voters abstain), move to backlog, reject, reopen. Delete by suggester or admin.
 - [x] Board with Voting / Backlog / Split votes / Rejected filters, "waiting for …", live updates, Google attribution + photo credits.
-- [x] Gemini reliability: model chain (`GEMINI_MODELS`), per-attempt 20 s / total 45 s budget, SDK retries off, rate-limited models skipped instantly.
+- [x] AI reliability: Gemini model chain (Flash-Lite first, `GEMINI_MODELS`), then **Groq** as a free backup (text: gpt-oss-120b; images: qwen3.8-27b vision; PDFs converted to text). Per-attempt/total time budgets, SDK retries off, rate-limited models skipped instantly. Verified: all Phase 3/4 e2e checks + image parsing pass with Gemini switched off.
 - [ ] Deferred to Phase 8: certificate photo upload + moderator verification, reporter trust scores.
 - [ ] Places content refresh: re-fetch place details older than 30 days (Google caching terms).
 

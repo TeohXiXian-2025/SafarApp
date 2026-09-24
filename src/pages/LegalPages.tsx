@@ -100,7 +100,11 @@ export function PrivacyPage() {
           <b>Google Firebase</b> (sign-in, database and file storage) and <b>Vercel</b> (hosting and server functions).
         </li>
         <li>
-          <b>Google Gemini API</b> — reads the tickets, screenshots or text you submit to extract booking details.
+          <b>Google Gemini API</b> — reads the tickets, screenshots, captions or text you submit to extract booking details and
+          places, and summarises public reviews.
+        </li>
+        <li>
+          <b>Groq</b> — a backup AI provider used for the same tasks when Gemini is unavailable.
         </li>
         <li>
           <b>Google Maps Platform</b> — place search, maps, travel times and timezones.
