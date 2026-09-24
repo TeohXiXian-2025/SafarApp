@@ -33,3 +33,25 @@ export async function loadTrip(tripId: string, tx?: Transaction): Promise<Trip> 
 
 export const arrayUnion = FieldValue.arrayUnion;
 export const arrayRemove = FieldValue.arrayRemove;
+
+/**
+ * After someone leaves or is removed, ideas that were only waiting on their
+ * vote can now be decided. Re-tallies every open idea against the current members.
+ */
+export async function retallyOpenIdeas(tripId: string) {
+  const { Idea, ideaStatusFromVotes, tallyVotes } = await import('../../src/domain/index.js');
+  const db = adminDb();
+  const trip = await loadTrip(tripId);
+  const open = await db.collection(paths.ideas(tripId)).where('status', '==', 'voting').get();
+  const batch = db.batch();
+  let changed = 0;
+  for (const d of open.docs) {
+    const idea = Idea.parse(d.data());
+    const next = ideaStatusFromVotes(tallyVotes(idea.votes, trip.memberIds));
+    if (next !== idea.status) {
+      batch.update(d.ref, { status: next, updatedAt: Date.now() });
+      changed++;
+    }
+  }
+  if (changed) await batch.commit();
+}

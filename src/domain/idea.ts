@@ -45,6 +45,61 @@ export const HalalReport = z.object({
 });
 export type HalalReport = z.infer<typeof HalalReport>;
 
+/** halalSummary/{placeKey} — community consensus, written by the server only. */
+export const HalalSummary = z.object({
+  placeKey: z.string().max(300),
+  name: z.string().max(200),
+  reportCount: z.number().int().nonnegative(),
+  counts: z.partialRecord(HalalTier, z.number().nonnegative()),
+  /** Consensus tier, when reports agree strongly enough. */
+  tier: HalalTier.optional(),
+  disputed: z.boolean(),
+  flags: HalalAssessment.shape.flags,
+  updatedAt: Millis,
+});
+export type HalalSummary = z.infer<typeof HalalSummary>;
+
+export const MIN_COMMUNITY_REPORTS = 2;
+const YEAR = 365 * 86_400_000;
+
+/**
+ * Community consensus from individual reports. Recent reports count fully,
+ * reports older than a year count half. A tier wins with ≥ 60% of the weight
+ * and at least MIN_COMMUNITY_REPORTS reports; otherwise, with 2+ reports that
+ * disagree, the place is "disputed".
+ */
+export function summarizeReports(
+  reports: Pick<HalalReport, 'tier' | 'flags' | 'updatedAt'>[],
+  now = Date.now(),
+): Pick<HalalSummary, 'reportCount' | 'counts' | 'tier' | 'disputed' | 'flags'> {
+  const counts: Partial<Record<HalalTier, number>> = {};
+  let total = 0;
+  for (const r of reports) {
+    const w = now - r.updatedAt > YEAR ? 0.5 : 1;
+    counts[r.tier] = (counts[r.tier] ?? 0) + w;
+    total += w;
+  }
+  const [topTier, topWeight] = (Object.entries(counts) as [HalalTier, number][]).sort((a, b) => b[1] - a[1])[0] ?? [];
+  const agreed = reports.length >= MIN_COMMUNITY_REPORTS && topWeight / total >= 0.6;
+  const majority = (key: keyof HalalReport['flags']) => {
+    const said = reports.filter((r) => r.flags?.[key] !== undefined);
+    if (!said.length) return undefined;
+    return said.filter((r) => r.flags[key]).length * 2 >= said.length;
+  };
+  return {
+    reportCount: reports.length,
+    counts,
+    ...(agreed ? { tier: topTier } : {}),
+    disputed: reports.length >= MIN_COMMUNITY_REPORTS && !agreed,
+    flags: {
+      ...(majority('servesAlcohol') !== undefined ? { servesAlcohol: majority('servesAlcohol') } : {}),
+      ...(majority('servesPork') !== undefined ? { servesPork: majority('servesPork') } : {}),
+      ...(majority('halalMenuOptions') !== undefined ? { halalMenuOptions: majority('halalMenuOptions') } : {}),
+      ...(majority('prayerSpaceOnSite') !== undefined ? { prayerSpaceOnSite: majority('prayerSpaceOnSite') } : {}),
+    },
+  };
+}
+
 // ─── Review sentiment ("is it worth going?") ────────────────────────────────
 
 export const Sentiment = z.object({
@@ -60,44 +115,90 @@ export type Sentiment = z.infer<typeof Sentiment>;
 // ─── Idea Board ─────────────────────────────────────────────────────────────
 
 export const IdeaCategory = z.enum(['food', 'attraction', 'activity', 'shopping', 'nature', 'culture', 'nightlife', 'other']);
+export type IdeaCategory = z.infer<typeof IdeaCategory>;
 
 export const IdeaSource = z.object({
-  type: z.enum(['tiktok', 'instagram', 'xiaohongshu', 'manual', 'radar', 'ai', 'split']),
+  type: z.enum(['tiktok', 'instagram', 'xiaohongshu', 'youtube', 'link', 'screenshot', 'text', 'manual', 'radar', 'ai', 'split']),
   url: z.string().url().max(2000).optional(),
   caption: z.string().max(2000).optional(),
+  author: z.string().max(120).optional(),
 });
+export type IdeaSource = z.infer<typeof IdeaSource>;
 
-export const IdeaStatus = z.enum(['voting', 'approved', 'mixed', 'split_pending', 'rejected', 'backlog', 'scheduled']);
+export const IdeaStatus = z.enum(['voting', 'backlog', 'mixed', 'split_pending', 'rejected', 'scheduled']);
 export type IdeaStatus = z.infer<typeof IdeaStatus>;
+
+/** Doc id of the voter is the map key. */
+export const Vote = z.object({
+  value: z.union([z.literal(1), z.literal(-1)]),
+  reason: z.string().max(300).optional(),
+  at: Millis,
+});
+export type Vote = z.infer<typeof Vote>;
+
+export const IdeaPlace = PlaceRef.extend({
+  category: IdeaCategory,
+  typeLabel: z.string().max(80).optional(), // e.g. "Halal restaurant"
+  types: z.array(z.string().max(60)).max(20).default([]),
+  openingHours: z.array(z.string().max(160)).max(7).optional(), // Google weekdayDescriptions
+  priceLevel: z.number().int().min(0).max(4).optional(),
+  rating: z.number().min(0).max(5).optional(),
+  ratingCount: z.number().int().nonnegative().optional(),
+  website: z.string().url().max(500).optional(),
+  photoName: z.string().max(600).optional(), // Places photo resource name
+  photoAttribution: z.string().max(200).optional(),
+});
+export type IdeaPlace = z.infer<typeof IdeaPlace>;
 
 export const Idea = z.object({
   id: Id,
-  place: PlaceRef.extend({
-    category: IdeaCategory,
-    openingHours: z.array(z.string().max(120)).max(7).optional(), // Google weekdayDescriptions
-    priceLevel: z.number().int().min(0).max(4).optional(),
-    rating: z.number().min(0).max(5).optional(),
-    ratingCount: z.number().int().nonnegative().optional(),
-    photoName: z.string().max(400).optional(), // Places photo resource name
-  }),
+  /** Shared key for this place across trips (halal reports/summary). */
+  placeKey: z.string().max(300),
+  place: IdeaPlace,
   source: IdeaSource,
   notes: z.string().max(1000).optional(),
   estDurationMin: z.number().int().min(5).max(24 * 60).default(60),
   halal: HalalAssessment.optional(),
   sentiment: Sentiment.optional(),
+  analysis: z.object({ status: z.enum(['pending', 'done', 'error']), at: Millis, error: z.string().max(300).optional() }).optional(),
   status: IdeaStatus,
-  voteSummary: z.object({ up: z.number().int(), down: z.number().int(), total: z.number().int() }).default({ up: 0, down: 0, total: 0 }),
+  votes: z.record(z.string(), Vote).default({}),
+  /** Set when the admin closes voting early or overrides the result. */
+  decidedBy: Id.optional(),
   createdBy: Id,
   createdAt: Millis,
   updatedAt: Millis,
 });
 export type Idea = z.infer<typeof Idea>;
 
-/** Path: trips/{tripId}/ideas/{ideaId}/votes/{uid} — doc id must equal the voter uid. */
-export const Vote = z.object({
-  uid: Id,
-  value: z.union([z.literal(1), z.literal(-1)]),
-  reason: z.string().max(300).optional(),
-  at: Millis,
-});
-export type Vote = z.infer<typeof Vote>;
+export interface VoteTally {
+  up: number;
+  down: number;
+  pending: string[]; // member uids who haven't voted
+}
+
+export function tallyVotes(votes: Record<string, Vote>, memberUids: string[]): VoteTally {
+  const current = memberUids.filter((u) => votes[u]);
+  return {
+    up: current.filter((u) => votes[u].value === 1).length,
+    down: current.filter((u) => votes[u].value === -1).length,
+    pending: memberUids.filter((u) => !votes[u]),
+  };
+}
+
+/**
+ * Where an idea stands after a vote.
+ * - Everyone 👍 → backlog (ready for the timeline)
+ * - Everyone 👎 → rejected
+ * - Everyone voted, opinions split → mixed (Split Track candidate)
+ * - Otherwise still voting — unless `closed` (admin closed voting early),
+ *   in which case non-voters are treated as abstaining.
+ */
+export function ideaStatusFromVotes(t: VoteTally, closed = false): 'voting' | 'backlog' | 'mixed' | 'rejected' {
+  const total = t.up + t.down;
+  if (!closed && t.pending.length) return 'voting';
+  if (total === 0) return closed ? 'rejected' : 'voting';
+  if (t.down === 0) return 'backlog';
+  if (t.up === 0) return 'rejected';
+  return 'mixed';
+}

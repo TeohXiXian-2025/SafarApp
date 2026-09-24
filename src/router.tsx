@@ -6,6 +6,7 @@ import { LoginPage } from './pages/LoginPage';
 import { NewTripPage } from './pages/NewTripPage';
 import { TripsPage } from './pages/TripsPage';
 import { BookingsPage } from './trip/bookings/BookingsPage';
+import { IdeasPage } from './trip/ideas/IdeasPage';
 import { MembersPage } from './trip/MembersPage';
 import { PreferencesPage } from './trip/PreferencesPage';
 import { OverviewPage } from './trip/OverviewPage';
@@ -42,6 +43,7 @@ export const router = createBrowserRouter([
         element: <RequireAuth><TripLayout /></RequireAuth>,
         children: [
           { index: true, element: <OverviewPage /> },
+          { path: 'ideas', element: <IdeasPage /> },
           { path: 'bookings', element: <BookingsPage /> },
           { path: 'members', element: <MembersPage /> },
           { path: 'preferences', element: <PreferencesPage /> },
