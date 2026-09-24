@@ -30,7 +30,10 @@ export function TripLayout() {
   const members = useQuery(`members:${tripId}`, () => paths.members(tripId), Member);
 
   const me = members.data.find((m) => m.uid === uid);
-  const loading = trip.loading || members.loading;
+  // A cached member list can be stale (e.g. you just joined). If you're not in
+  // it, wait for the server before deciding you have no access.
+  const awaitingServer = navigator.onLine && ((!me && members.fromCache) || (!trip.data && trip.fromCache));
+  const loading = trip.loading || members.loading || awaitingServer;
 
   if (!loading && (!trip.data || !me)) {
     // Not found, no permission, or just removed from the trip.

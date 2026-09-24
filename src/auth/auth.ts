@@ -15,7 +15,7 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { create } from 'zustand';
 import { paths, type UserProfile } from '../domain';
-import { auth, db, isStandaloneApp } from '../firebase/config';
+import { auth, db, isStandaloneApp, useSameOriginAuth } from '../firebase/config';
 
 interface AuthState {
   status: 'loading' | 'signedOut' | 'signedIn';
@@ -49,22 +49,32 @@ onAuthStateChanged(auth, (user) => {
   if (user) void ensureProfile(user);
 });
 
+/**
+ * Google sign-in.
+ * A full-page redirect only works when auth runs on OUR domain (see
+ * SAME_ORIGIN_AUTH_HOSTS in src/config.ts): through <project>.firebaseapp.com,
+ * modern Chrome/Safari block the cross-site storage the redirect result needs,
+ * so the user "signs in" and lands back on the login page in a loop.
+ * So: popup everywhere (works in browsers and the Android installed app), and
+ * redirect only on same-origin hosts.
+ */
 export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  if (isStandaloneApp) {
-    // Installed app: full-page redirect; the result is picked up by onAuthStateChanged.
+  if (useSameOriginAuth && isStandaloneApp) {
+    // Installed app on a registered host: redirect is reliable here.
     await signInWithRedirect(auth, provider);
     return;
   }
   try {
     await signInWithPopup(auth, provider);
   } catch (err: any) {
-    // Popups are often blocked on mobile / installed PWAs — fall back to a full-page redirect.
-    if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/operation-not-supported-in-this-environment') {
+    const blocked = err?.code === 'auth/popup-blocked' || err?.code === 'auth/operation-not-supported-in-this-environment';
+    if (blocked && useSameOriginAuth) {
       await signInWithRedirect(auth, provider);
       return;
     }
+    if (blocked) throw Object.assign(new Error('popup blocked'), { code: 'safar/popup-blocked' });
     throw err;
   }
 }
@@ -98,6 +108,7 @@ export function authErrorMessage(err: unknown): string {
     'auth/weak-password': 'Use a password with at least 6 characters.',
     'auth/too-many-requests': 'Too many attempts. Wait a minute and try again.',
     'auth/popup-closed-by-user': 'Sign-in was cancelled.',
+    'safar/popup-blocked': 'Your browser blocked the Google sign-in window. Allow pop-ups for this site, or sign in with email.',
     'auth/cancelled-popup-request': 'Sign-in was cancelled.',
     'auth/network-request-failed': "You're offline. Check your connection and try again.",
     'auth/unauthorized-domain': 'This domain is not authorised for sign-in (Firebase console → Authentication → Settings).',
