@@ -61,6 +61,25 @@
 
 html {
   scroll-behavior: smooth;
+  /* No grey flash when tapping links/buttons on mobile */
+  -webkit-tap-highlight-color: transparent;
+  /* Keep iOS from inflating text in landscape */
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Installed app (Add to Home Screen): behave like a native app —
+   no rubber-band bounce revealing the page background, no text selection
+   on UI chrome. Content areas keep normal scrolling. */
+@media (display-mode: standalone) {
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
+  header,
+  nav {
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 
 /* Respect the user's motion preference (accessibility) */

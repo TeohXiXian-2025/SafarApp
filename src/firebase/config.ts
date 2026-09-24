@@ -18,9 +18,18 @@ import { getStorage } from 'firebase/storage';
 
 // Web config is public by design (security comes from Firestore/Storage rules).
 // Values live in .env.local locally and in Vercel env vars when deployed.
+// Installed app (Add to Home Screen): sign-in popups can't report back on iOS
+// and Safari blocks cross-site redirect storage, so Google sign-in redirects
+// through our OWN domain — Vercel proxies /__/auth/* to Firebase (vercel.json).
+// https://firebase.google.com/docs/auth/web/redirect-best-practices (option 3)
+export const useSameOriginAuth =
+  import.meta.env.PROD &&
+  typeof window !== 'undefined' &&
+  (window.matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true);
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  authDomain: useSameOriginAuth ? window.location.host : import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,

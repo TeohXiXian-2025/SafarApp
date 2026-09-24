@@ -2,7 +2,64 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, type Plugin} from 'vite';
+import {VitePWA} from 'vite-plugin-pwa';
 import {vercelApiDev} from './scripts/vite-api-dev';
+
+// ---------------------------------------------------------------------------
+// Installable app (PWA): manifest for "Add to Home Screen" + a Workbox service
+// worker that precaches the app shell so it opens instantly and offline.
+// Trip data itself is cached offline by Firestore (IndexedDB), not the SW.
+// ---------------------------------------------------------------------------
+const pwa = VitePWA({
+  registerType: 'prompt', // show an "Update available" toast instead of silently swapping versions
+  injectRegister: false, // registered from React (src/pwa/UpdatePrompt.tsx)
+  includeAssets: ['favicon.svg', 'favicon-32.png', 'icons/apple-touch-icon.png'],
+  manifest: {
+    id: '/',
+    name: 'Safar — Halal Group Travel',
+    short_name: 'Safar',
+    description: 'Plan group trips around halal food and prayer times — together.',
+    lang: 'en',
+    start_url: '/trips',
+    scope: '/',
+    display: 'standalone',
+    theme_color: '#00685F',
+    background_color: '#FAF8F5',
+    categories: ['travel', 'lifestyle'],
+    icons: [
+      {src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any'},
+      {src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any'},
+      {src: '/icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable'},
+    ],
+  },
+  workbox: {
+    globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+    // The pitch deck is a separate page with big images — don't ship it to every phone.
+    // Pitch-deck screenshots and the /demo prototype's code load on demand instead.
+    globIgnores: ['pitch.html', 'assets/pitch-*', 'assets/*.png', 'assets/*.jpg', 'images/**', 'assets/App-*', 'assets/pdf-*', 'assets/motion-*'],
+    maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+    navigateFallback: '/index.html',
+    // Server routes and Firebase's auth handler must always hit the network.
+    navigateFallbackDenylist: [/^\/api\//, /^\/__\//, /^\/pitch/],
+    cleanupOutdatedCaches: true,
+    // Control the page right after the FIRST install, so the app works offline
+    // without needing a reload. Later updates still wait for the user's "Update" tap.
+    clientsClaim: true,
+    runtimeCaching: [
+      {
+        urlPattern: ({url}) => url.origin === 'https://fonts.googleapis.com' || url.origin === 'https://fonts.gstatic.com',
+        handler: 'CacheFirst',
+        options: {cacheName: 'google-fonts', expiration: {maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365}},
+      },
+      {
+        // Avatars from Google accounts
+        urlPattern: ({url}) => url.hostname.endsWith('googleusercontent.com'),
+        handler: 'StaleWhileRevalidate',
+        options: {cacheName: 'avatars', expiration: {maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 30}},
+      },
+    ],
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Build stamp
@@ -37,7 +94,7 @@ export default defineConfig(() => {
     define: {
       __COMMIT_SHA__: JSON.stringify(commitSha),
     },
-    plugins: [react(), tailwindcss(), buildStamp(), vercelApiDev()],
+    plugins: [react(), tailwindcss(), buildStamp(), vercelApiDev(), pwa],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -58,6 +115,10 @@ export default defineConfig(() => {
           // instead of one >500 kB bundle. Improves repeat-visit performance
           // and removes the Rollup chunk-size warning.
           manualChunks(id: string) {
+            // Rollup's own helpers (virtual "\0" modules, e.g. commonjsHelpers) are
+            // shared by every chunk — keep them in vendor, otherwise they can land in
+            // a lazy chunk (e.g. pdf) and force it to load on startup.
+            if (id.startsWith('\0')) return 'vendor';
             if (!id.includes('node_modules')) return;
             if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler'))
               return 'react-vendor';

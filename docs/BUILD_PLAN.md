@@ -333,14 +333,16 @@ Estimates assume 3 people working part-time. Each phase ends with something usab
 - [x] API behind a single Vercel function (`api/router.ts`), because Hobby allows at most 12 functions per deployment.
 - [ ] Delete `multiplayerSync.ts` / `firestoreService.ts` / mock data → when the `/demo` prototype is retired (its screens get rebuilt on live data in Phases 4–9).
 
-### Phase 2 — Mobile shell + PWA (week 3, can run in parallel with Phase 1)
-- [ ] Responsive app shell: bottom tab bar on mobile, nav rail on desktop. Modals → bottom sheets on mobile.
-- [ ] Make each existing screen usable at 375px width (timeline, idea board, map, radar, vault).
-- [ ] `vite-plugin-pwa`: manifest, icons (incl. maskable + apple-touch-icon), service worker, update toast.
-- [ ] Install button (Android) + iOS "Add to Home Screen" instructions banner.
-- [ ] Safe-area insets, `viewport-fit=cover`, `overscroll-behavior` on sheets.
-- [ ] Firestore offline persistence + offline indicator.
-- [ ] Test install on a real iPhone and a real Android phone.
+### Phase 2 — Mobile shell + PWA (week 3)
+- [x] Responsive app shell: bottom tab bar on phones, top tabs on desktop (built in Phase 1).
+- [x] Every live screen works at 375–390px with no horizontal scroll. _Prototype screens (timeline, idea board, radar, vault) are rebuilt mobile-first in their own phases._
+- [x] `vite-plugin-pwa`: manifest (standalone, `start_url: /trips`), icons (192/512, maskable 512, apple-touch 180, SVG favicon), Workbox service worker, "New version — Update" toast, hourly update check.
+- [x] Install UX: one-tap "Install app" on Android/desktop Chromium (`beforeinstallprompt`); iOS "Share → Add to Home Screen" instructions; dismiss remembered for 14 days.
+- [x] Safe-area insets, `viewport-fit=cover`, iOS home-screen meta tags, no overscroll bounce in the installed app.
+- [x] Offline: Firestore IndexedDB cache + service-worker app shell → trips open with no signal (verified: offline reload of a trip). Offline bar + friendly "needs a connection" API errors.
+- [x] Google sign-in inside the installed app: same-origin redirect via Vercel proxy of `/__/auth/*` (Firebase "redirect best practices" option 3).
+- [x] Performance: `/demo` prototype lazy-loaded (main bundle 470 KB → 54 KB); pitch/prototype images + chunks excluded from the offline precache (4.4 MB → 2.0 MB); fixed a Rollup helper that forced the PDF chunk to load on startup.
+- [ ] Test install on a real iPhone and a real Android phone (manual).
 
 ### Phase 3 — Bookings + preferences (week 4)
 - [ ] Storage rules + upload component (camera/file on mobile).
