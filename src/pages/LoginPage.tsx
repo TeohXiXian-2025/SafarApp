@@ -50,6 +50,8 @@ export function LoginPage() {
     try {
       await fn();
     } catch (err) {
+      // A newer Google attempt replaced an older popup — not an error for the user.
+      if ((err as { code?: string })?.code === 'auth/cancelled-popup-request') return;
       setError(authErrorMessage(err));
     } finally {
       setBusy(null);
@@ -93,6 +95,15 @@ export function LoginPage() {
               <Button variant="secondary" className="w-full" loading={busy === 'google'} onClick={() => run('google', signInWithGoogle)}>
                 <GoogleIcon /> Continue with Google
               </Button>
+              {busy === 'google' && (
+                // A popup can end up behind other windows/tabs — never leave people stuck on a spinner.
+                <p className="-mt-2 text-xs text-[#6D7A77] text-center">
+                  Finish signing in with Google in the other window.{' '}
+                  <button type="button" className="font-semibold text-[#00685F] underline" onClick={() => setBusy(null)}>
+                    Cancel
+                  </button>
+                </p>
+              )}
               <div className="flex items-center gap-3 text-xs text-[#9AA5A3]">
                 <span className="h-px flex-1 bg-[#E7DFD5]" /> or with email <span className="h-px flex-1 bg-[#E7DFD5]" />
               </div>

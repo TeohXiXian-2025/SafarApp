@@ -16,6 +16,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { create } from 'zustand';
 import { paths, type UserProfile } from '../domain';
 import { auth, db, isStandaloneApp, useSameOriginAuth } from '../firebase/config';
+import { isMobileDevice } from '../pwa/pwa';
 
 interface AuthState {
   status: 'loading' | 'signedOut' | 'signedIn';
@@ -51,18 +52,19 @@ onAuthStateChanged(auth, (user) => {
 
 /**
  * Google sign-in.
- * A full-page redirect only works when auth runs on OUR domain (see
- * SAME_ORIGIN_AUTH_HOSTS in src/config.ts): through <project>.firebaseapp.com,
- * modern Chrome/Safari block the cross-site storage the redirect result needs,
- * so the user "signs in" and lands back on the login page in a loop.
- * So: popup everywhere (works in browsers and the Android installed app), and
- * redirect only on same-origin hosts.
+ * - Phones / installed app on a same-origin host: full-page redirect in the
+ *   same tab. On phones a "popup" is really another tab; tapping Google's
+ *   Privacy/Terms links opens a third, and closing it drops people back on
+ *   our tab with the popup lost behind it (endless spinner).
+ * - Laptops: popup window.
+ * - Never redirect through <project>.firebaseapp.com: modern browsers block
+ *   the cross-site storage it needs, which caused a sign-in loop.
+ * Same-origin hosts are listed in SAME_ORIGIN_AUTH_HOSTS (src/config.ts).
  */
 export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  if (useSameOriginAuth && isStandaloneApp) {
-    // Installed app on a registered host: redirect is reliable here.
+  if (useSameOriginAuth && (isStandaloneApp || isMobileDevice())) {
     await signInWithRedirect(auth, provider);
     return;
   }
