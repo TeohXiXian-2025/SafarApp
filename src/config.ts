@@ -18,7 +18,7 @@ export const PUBLIC_ORIGIN = 'https://safar-app-cristal-teohs-projects.vercel.ap
  * Google rejects sign-in with redirect_uri_mismatch. Other hosts fall back to
  * <project>.firebaseapp.com, which always works in normal browsers.
  */
-export const SAME_ORIGIN_AUTH_HOSTS: string[] = [];
+export const SAME_ORIGIN_AUTH_HOSTS: string[] = ['safar-app-cristal-teohs-projects.vercel.app'];
 
 /** Link to share for a path, e.g. invite links. Local dev keeps localhost so links are testable. */
 export const shareUrl = (path: string) => `${import.meta.env.DEV ? window.location.origin : PUBLIC_ORIGIN}${path}`;
