@@ -10,6 +10,27 @@ import {vercelApiDev} from './scripts/vite-api-dev';
 // worker that precaches the app shell so it opens instantly and offline.
 // Trip data itself is cached offline by Firestore (IndexedDB), not the SW.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Installable on phones/tablets only. Browsers offer "Install" whenever the page
+// links a manifest, so the build strips the plugin's <link rel="manifest"> and an
+// inline script adds it back only on mobile devices. Laptops/desktops never see
+// an install option (the service worker still runs there for speed/offline).
+// Keep the device test in sync with isMobileDevice() in src/pwa/pwa.ts.
+// ---------------------------------------------------------------------------
+function manifestOnMobileOnly(): Plugin {
+  const script = `<script>(function(){var n=navigator,u=n.userAgent;var m=(n.userAgentData&&n.userAgentData.mobile)||/Android|iPhone|iPad|iPod|Mobile/i.test(u)||(n.platform==='MacIntel'&&n.maxTouchPoints>1);if(m){var l=document.createElement('link');l.rel='manifest';l.href='/manifest.webmanifest';document.head.appendChild(l);}})();</script>`;
+  return {
+    name: 'safar-manifest-mobile-only',
+    enforce: 'post',
+    transformIndexHtml: {
+      order: 'post',
+      handler: (html, ctx) =>
+        // Only the app page — the pitch deck isn't an app.
+        ctx.path.endsWith('pitch.html') ? html.replace(/\s*<link rel="manifest"[^>]*>/, '') : html.replace(/<link rel="manifest"[^>]*>/, script),
+    },
+  };
+}
+
 const pwa = VitePWA({
   registerType: 'prompt', // show an "Update available" toast instead of silently swapping versions
   injectRegister: false, // registered from React (src/pwa/UpdatePrompt.tsx)
@@ -94,7 +115,7 @@ export default defineConfig(() => {
     define: {
       __COMMIT_SHA__: JSON.stringify(commitSha),
     },
-    plugins: [react(), tailwindcss(), buildStamp(), vercelApiDev(), pwa],
+    plugins: [react(), tailwindcss(), buildStamp(), vercelApiDev(), pwa, manifestOnMobileOnly()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

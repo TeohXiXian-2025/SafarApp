@@ -1,7 +1,7 @@
 import { Download, Share, SquarePlus, X } from 'lucide-react';
 import { useState } from 'react';
 import { Button, Card } from '../ui';
-import { isIOS, prefs, promptInstall, useInstall } from './pwa';
+import { isIOS, isMobileDevice, prefs, promptInstall, useInstall } from './pwa';
 
 const DISMISS_KEY = 'safar:install-dismissed-at';
 const SNOOZE_MS = 14 * 86_400_000; // ask again after two weeks
@@ -16,7 +16,8 @@ export function InstallBanner() {
   const [dismissed, setDismissed] = useState(() => Date.now() - Number(prefs.get(DISMISS_KEY) ?? 0) < SNOOZE_MS);
   const ios = isIOS();
 
-  if (installed || dismissed || (!deferred && !ios)) return null;
+  // Laptops/desktops: never offer install.
+  if (!isMobileDevice() || installed || dismissed || (!deferred && !ios)) return null;
 
   const dismiss = () => {
     prefs.set(DISMISS_KEY, String(Date.now()));

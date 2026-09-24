@@ -12,6 +12,12 @@ interface BeforeInstallPromptEvent extends Event {
 export const isStandalone = () =>
   window.matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
 
+/** Phones and tablets — the only devices Safar can be installed on (see vite.config.ts). */
+export const isMobileDevice = () =>
+  (navigator as { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile === true ||
+  /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
 export const isIOS = () =>
   /iphone|ipad|ipod/i.test(navigator.userAgent) ||
   // iPadOS reports itself as a Mac; touch support gives it away.
