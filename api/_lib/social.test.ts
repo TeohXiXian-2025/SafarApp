@@ -15,6 +15,10 @@ describe('parseShareInput', () => {
     expect(r.url.href).toBe('http://xhslink.com/o/8AbCdEfGh');
     expect(r.extraText).toBe('兰卡威5天4夜攻略｜天空之桥+缆车、Cenang海滩日落、Kilim红树林');
   });
+  it('accepts xhslink.cn short links (not only .com)', () => {
+    const r = parseShareInput('https://xhslink.cn/o/6Nwf1taTaVC');
+    expect(r.type).toBe('xiaohongshu');
+  });
   it('rejects other sites', () => {
     expect(() => parseShareInput('https://example.com/post')).toThrow(/TikTok, Instagram/);
     expect(() => parseShareInput('no link here')).toThrow(/couldn't find a link/);

@@ -22,8 +22,8 @@ export const geminiModels = (): string[] =>
 
 /** Overloaded models can hang until a 504 — fail fast and move on. */
 const PER_ATTEMPT_MS = 12_000;
-/** Stay well inside the 60 s function limit, leaving room for Groq. */
-const TOTAL_BUDGET_MS = 48_000;
+/** Stay inside the 120 s function limit (vercel.json), leaving room for Groq. */
+const TOTAL_BUDGET_MS = 95_000;
 const GROQ_RESERVE_MS = 15_000;
 const GROQ_IMAGES_PER_CALL = 3;
 
@@ -100,7 +100,8 @@ async function generate(opts: {
     for (let i = 0; i < images.length; i += GROQ_IMAGES_PER_CALL) {
       if (left() < 6_000) break;
       try {
-        const json = await groqJson({ ...opts, parts: [...textParts, ...images.slice(i, i + GROQ_IMAGES_PER_CALL)], timeoutMs: Math.min(30_000, left()) });
+        // Whole remaining budget: Groq may ask us to wait ~30 s between groups.
+        const json = await groqJson({ ...opts, parts: [...textParts, ...images.slice(i, i + GROQ_IMAGES_PER_CALL)], timeoutMs: left() });
         if (json !== undefined) results.push(json);
       } catch (err) {
         console.warn(`[ai] groq group ${i / GROQ_IMAGES_PER_CALL + 1} failed`, (err as Error).message);

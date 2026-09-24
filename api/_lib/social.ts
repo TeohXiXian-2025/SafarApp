@@ -15,7 +15,8 @@ export type SocialType = Extract<IdeaSource['type'], 'tiktok' | 'instagram' | 'x
 const HOSTS: [RegExp, SocialType][] = [
   [/(^|\.)tiktok\.com$/, 'tiktok'],
   [/(^|\.)instagram\.com$/, 'instagram'],
-  [/(^|\.)(xiaohongshu\.com|xhslink\.com)$/, 'xiaohongshu'],
+  // Share links come as xhslink.com AND xhslink.cn (short), or xiaohongshu.com.
+  [/(^|\.)(xiaohongshu\.com|xhslink\.(com|cn))$/, 'xiaohongshu'],
   [/(^|\.)(youtube\.com|youtu\.be)$/, 'youtube'],
 ];
 // Cover images/thumbnails are only downloaded from these CDNs.
@@ -67,8 +68,11 @@ export async function imagePart(src?: string): Promise<Part | null> {
   } catch {
     return null;
   }
-  if (u.protocol !== 'https:' || !IMAGE_HOSTS.test(u.hostname)) return null;
-  const res = await fetch(u, { headers: { 'User-Agent': BROWSER_UA }, signal: AbortSignal.timeout(6000) }).catch(() => null);
+  if (!IMAGE_HOSTS.test(u.hostname)) return null;
+  // Some readers return http:// CDN links (Xiaohongshu) — these CDNs all serve https.
+  if (u.protocol === 'http:') u.protocol = 'https:';
+  if (u.protocol !== 'https:') return null;
+  const res = await fetch(u, { headers: { 'User-Agent': BROWSER_UA, ...(/xhscdn/.test(u.hostname) ? { Referer: 'https://www.xiaohongshu.com/' } : {}) }, signal: AbortSignal.timeout(8000) }).catch(() => null);
   const type = res?.headers.get('content-type')?.split(';')[0] ?? '';
   if (!res?.ok || !/^image\/(jpeg|png|webp|heic)$/.test(type)) return null;
   const buf = Buffer.from(await res.arrayBuffer());

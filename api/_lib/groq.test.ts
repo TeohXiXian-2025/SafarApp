@@ -1,6 +1,6 @@
 import { Type } from '@google/genai';
 import { describe, expect, it } from 'vitest';
-import { jsonFromReply, toJsonSchema } from './groq';
+import { jsonFromReply, parseDuration, toJsonSchema } from './groq';
 
 describe('groq helpers', () => {
   it('converts Gemini schemas to JSON Schema', () => {
@@ -29,5 +29,14 @@ describe('retryAfterFrom', () => {
   });
   it('uses the retry hint for short limits', () => {
     expect(retryAfterFrom(new Error('rate limited, "retryDelay":"30s"'))).toBe(30);
+  });
+});
+
+describe('parseDuration', () => {
+  it('parses Groq reset headers', () => {
+    expect(parseDuration('35.73s')).toBeCloseTo(35.73);
+    expect(parseDuration('1m2.5s')).toBeCloseTo(62.5);
+    expect(parseDuration('250ms')).toBeCloseTo(0.25);
+    expect(parseDuration(null)).toBe(0);
   });
 });

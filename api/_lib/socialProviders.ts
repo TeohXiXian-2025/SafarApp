@@ -110,13 +110,26 @@ function parseGeneric(json: unknown): Omit<RichPost, 'provider'> {
 
 // ─── Xiaohongshu via Apify ──────────────────────────────────────────────────
 
-/** Expands an xhslink.com short link to the full note URL (which carries xsec_token). */
+/**
+ * Expands an xhslink.com / xhslink.cn short link to the full note URL (which
+ * carries the xsec_token Apify needs). The redirect service is occasionally
+ * slow, so each hop is retried.
+ */
 async function expandXhsLink(url: URL): Promise<string> {
-  if (!/xhslink\.com$/i.test(url.hostname)) return url.href;
+  if (!/xhslink\.(com|cn)$/i.test(url.hostname)) return url.href;
   let current = url.href;
-  for (let i = 0; i < 4; i++) {
-    const res = await fetch(current, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X)' }, signal: AbortSignal.timeout(6000) }).catch(() => null);
-    const loc = res?.headers.get('location');
+  for (let hop = 0; hop < 4; hop++) {
+    let loc: string | null = null;
+    for (let attempt = 0; attempt < 3 && !loc; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 400 * attempt));
+      const res = await fetch(current, {
+        redirect: 'manual',
+        headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148' },
+        signal: AbortSignal.timeout(8000),
+      }).catch((err: Error) => (console.warn('[social] xhslink expand attempt failed', err.name), null));
+      if (res && res.status < 300) return current; // not a redirect — this is the page
+      loc = res?.headers.get('location') ?? null;
+    }
     if (!loc) break;
     current = new URL(loc, current).href;
     if (/xiaohongshu\.com\/(explore|discovery\/item)\//.test(current)) break;

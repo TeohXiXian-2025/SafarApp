@@ -109,7 +109,7 @@ ${schema}` },
   });
 
   let jsonMode = true;
-  let rateRetried = false;
+  let rateWaits = 0;
   for (;;) {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -127,10 +127,14 @@ ${schema}` },
       jsonMode = false;
       continue;
     }
-    // Free-tier per-minute limits reset quickly — wait once if Groq says it's short.
-    const wait = Number(res.headers.get('retry-after'));
-    if (res.status === 429 && !rateRetried && wait > 0 && wait <= 12 && Date.now() + wait * 1000 + 3_000 < deadline) {
-      rateRetried = true;
+    // Free-tier per-minute limits reset within a minute. Wait for the token
+    // window to reset (it can be longer than retry-after), up to twice, if the
+    // request's time budget allows it — multi-photo posts need this.
+    const retryAfter = Number(res.headers.get('retry-after')) || 0;
+    const tokenReset = parseDuration(res.headers.get('x-ratelimit-reset-tokens'));
+    const wait = Math.max(retryAfter, tokenReset) + 1;
+    if (res.status === 429 && rateWaits < 2 && wait > 1 && wait <= 45 && Date.now() + wait * 1000 + 8_000 < deadline) {
+      rateWaits++;
       await new Promise((r) => setTimeout(r, wait * 1000));
       continue;
     }
@@ -163,4 +167,12 @@ export async function transcribe(audio: Buffer, mimeType: string, fileName: stri
   }
   const text = String(((await res.json()) as { text?: string }).text ?? '').trim();
   return text.length >= 3 ? text.slice(0, 8000) : null;
+}
+
+/** "35.73s" / "1m2.5s" / "250ms" → seconds. */
+export function parseDuration(v: string | null): number {
+  if (!v) return 0;
+  let total = 0;
+  for (const [, n, unit] of v.matchAll(/([\d.]+)(ms|s|m|h)/g)) total += Number(n) * ({ ms: 0.001, s: 1, m: 60, h: 3600 } as Record<string, number>)[unit];
+  return total;
 }
