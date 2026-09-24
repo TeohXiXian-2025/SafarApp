@@ -3,35 +3,30 @@
 // Vercel's Hobby plan allows at most 12 functions per deployment, and Safar
 // needs far more endpoints than that, so vercel.json rewrites
 //   /api/<path>  →  /api/router?__path=<path>
-// and this file dispatches to handlers registered in api/_routes/*.
+// and api/_app.ts dispatches to handlers registered in api/_routes/*.
 // Local dev does the same rewrite (scripts/vite-api-dev.ts).
-import { json } from './_lib/http.js';
-import type { RouteTable } from './_lib/routes.js';
-import { systemRoutes } from './_routes/system.js';
-import { tripRoutes } from './_routes/trips.js';
-import { inviteRoutes } from './_routes/invites.js';
-import { memberRoutes } from './_routes/members.js';
+//
+// The app is loaded lazily so a startup failure (bad env, missing module)
+// becomes a JSON 500 we can read, instead of an opaque FUNCTION_INVOCATION_FAILED.
+type Dispatch = (req: Request) => Promise<Response>;
+let app: Promise<Dispatch> | undefined;
 
-const table: RouteTable = {
-  ...systemRoutes,
-  ...tripRoutes,
-  ...inviteRoutes,
-  ...memberRoutes,
-};
-
-async function dispatch(req: Request): Promise<Response> {
-  const url = new URL(req.url);
-  const path = (url.searchParams.get('__path') ?? url.pathname.replace(/^\/api\/?/, '')).replace(/^\/+|\/+$/g, '');
-  const handler = table[`${req.method} ${path}`];
-  if (handler) return handler(req);
-
-  const pathExists = Object.keys(table).some((k) => k.endsWith(` ${path}`));
-  return pathExists
-    ? json({ error: `${req.method} not allowed on /api/${path}` }, { status: 405 })
-    : json({ error: `No API route /api/${path}` }, { status: 404 });
+async function handler(req: Request): Promise<Response> {
+  try {
+    app ??= import('./_app.js').then((m) => m.dispatch);
+    return await (await app)(req);
+  } catch (err) {
+    app = undefined; // retry on next request
+    console.error('[api] startup failed', err);
+    const detail = process.env.VERCEL_ENV === 'production' ? undefined : String((err as Error)?.stack ?? err);
+    return new Response(JSON.stringify({ error: 'API failed to start', detail }), {
+      status: 500,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
 }
 
-export const GET = dispatch;
-export const POST = dispatch;
-export const PATCH = dispatch;
-export const DELETE = dispatch;
+export const GET = handler;
+export const POST = handler;
+export const PATCH = handler;
+export const DELETE = handler;
