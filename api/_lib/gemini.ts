@@ -2,6 +2,7 @@
 import { GoogleGenAI, type Part, type Schema } from '@google/genai';
 import type { z } from 'zod';
 import { optionalEnv } from './env.js';
+import { downModels, markDown, retryAfterFrom } from './aiHealth.js';
 import { groqJson } from './groq.js';
 import { HttpError } from './http.js';
 
@@ -19,7 +20,8 @@ export const geminiModels = (): string[] =>
     .map((m) => m.trim())
     .filter(Boolean);
 
-const PER_ATTEMPT_MS = 20_000;
+/** Overloaded models can hang until a 504 — fail fast and move on. */
+const PER_ATTEMPT_MS = 12_000;
 /** Stay well inside the 60 s function limit, leaving room for Groq. */
 const TOTAL_BUDGET_MS = 48_000;
 const GROQ_RESERVE_MS = 15_000;
@@ -40,7 +42,10 @@ async function generate(opts: { system: string; parts: Part[]; responseSchema: S
   let lastErr: unknown;
 
   if (optionalEnv('GEMINI_API_KEY')) {
-    for (const model of geminiModels()) {
+    const models = geminiModels();
+    // Skip models another request recently found exhausted/overloaded.
+    const down = models.length ? await downModels(models) : new Set<string>();
+    for (const model of models.filter((m) => !down.has(m))) {
       if (left() < GROQ_RESERVE_MS) break;
       try {
         const res = await ai().models.generateContent({
@@ -59,6 +64,7 @@ async function generate(opts: { system: string; parts: Part[]; responseSchema: S
         lastErr = err;
         if (!isTransient(err)) break;
         console.warn(`[ai] ${model} unavailable (${statusOf(err) || (err as Error).name}), trying next`);
+        await markDown(model, statusOf(err) || 504, retryAfterFrom(err));
       }
     }
   }

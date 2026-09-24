@@ -20,3 +20,14 @@ describe('groq helpers', () => {
     expect(jsonFromReply('<think>hmm {not json}</think>```json\n{"a":1}\n```')).toEqual({ a: 1 });
   });
 });
+
+import { retryAfterFrom } from './aiHealth';
+
+describe('retryAfterFrom', () => {
+  it('parks daily-quota models for an hour', () => {
+    expect(retryAfterFrom(new Error('quotaId GenerateRequestsPerDayPerProjectPerModel-FreeTier … Please retry in 46.6s'))).toBe(3600);
+  });
+  it('uses the retry hint for short limits', () => {
+    expect(retryAfterFrom(new Error('rate limited, "retryDelay":"30s"'))).toBe(30);
+  });
+});
