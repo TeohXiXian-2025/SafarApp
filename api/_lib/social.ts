@@ -18,7 +18,7 @@ const HOSTS: [RegExp, SocialType][] = [
   [/(^|\.)(youtube\.com|youtu\.be)$/, 'youtube'],
 ];
 // Cover images/thumbnails are only downloaded from these CDNs.
-const IMAGE_HOSTS = /(^|\.)(cdninstagram\.com|fbcdn\.net|tiktokcdn(-[a-z]+)?\.com|ibyteimg\.com|muscdn\.com|ytimg\.com|xhscdn\.com|xhscdn\.net)$/;
+const IMAGE_HOSTS = /(^|\.)(cdninstagram\.com|fbcdn\.net|tiktokcdn(-[a-z]+)?\.com|tiktokv\.(com|us)|ibyteimg\.com|muscdn\.com|ytimg\.com|xhscdn\.com|xhscdn\.net)$/;
 /** Video/audio downloads (for speech-to-text) — same CDNs. */
 const MEDIA_HOSTS = IMAGE_HOSTS;
 
@@ -84,7 +84,9 @@ export async function downloadMedia(src: string): Promise<{ data: Buffer; mimeTy
     return null;
   }
   if (u.protocol !== 'https:' || !MEDIA_HOSTS.test(u.hostname)) return null;
-  const res = await fetch(u, { headers: { 'User-Agent': BROWSER_UA, Referer: `https://${u.hostname}/` }, signal: AbortSignal.timeout(15000) }).catch(() => null);
+  // TikTok's CDN checks the Referer; Instagram's doesn't care.
+  const referer = /tiktok/.test(u.hostname) ? 'https://www.tiktok.com/' : `https://${u.hostname}/`;
+  const res = await fetch(u, { headers: { 'User-Agent': BROWSER_UA, Referer: referer }, redirect: 'follow', signal: AbortSignal.timeout(15000) }).catch(() => null);
   if (!res?.ok) return null;
   const len = Number(res.headers.get('content-length') ?? 0);
   if (len > 24 * 1024 * 1024) return null;

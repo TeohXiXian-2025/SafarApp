@@ -35,8 +35,13 @@ async function redis(commands: (string | number)[][]): Promise<{ result: unknown
 }
 
 const monthKey = (provider: string) => `social:usage:${provider}:${new Date().toISOString().slice(0, 7)}`;
-const capFor = (provider: 'apify' | 'scrapecreators') =>
-  Number(process.env[provider === 'apify' ? 'APIFY_MONTHLY_CAP' : 'SCRAPECREATORS_MONTHLY_CAP'] ?? 0) || 0;
+/** Monthly cap from env; defaults when unset (600 / 500). Set it to 0 to switch a provider off. */
+const DEFAULT_CAP = { apify: 600, scrapecreators: 500 } as const;
+const capFor = (provider: 'apify' | 'scrapecreators') => {
+  const raw = process.env[provider === 'apify' ? 'APIFY_MONTHLY_CAP' : 'SCRAPECREATORS_MONTHLY_CAP'];
+  const n = raw === undefined || raw.trim() === '' ? DEFAULT_CAP[provider] : Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+};
 
 /** Reserves one call within the monthly cap. False when capped (or no Redis to count with). */
 async function reserve(provider: 'apify' | 'scrapecreators'): Promise<boolean> {
@@ -94,7 +99,7 @@ function parseGeneric(json: unknown): Omit<RichPost, 'provider'> {
     if (/comment|avatar|profile_pic|related|recommend|music|author\.(?!nickname|username|unique)/i.test(path)) return;
     if (CAPTION_KEYS.test(key) && value.length >= 4 && !/^https?:/.test(value)) captions.push(value);
     else if (IMAGE_URL.test(value) && !/avatar|profile|s150x150|_s\.jpg/i.test(value)) images.add(value);
-    else if (!video && VIDEO_URL.test(value)) video = value;
+    else if (!video && (VIDEO_URL.test(value) || (/^(video_?url|play_?addr|download_?addr|play_?url)$/i.test(key) && /^https:/.test(value)))) video = value;
     if (!location && /location|poi/i.test(path) && /name$/i.test(key)) location = value;
     if (!author && /(^|\.)(username|nickname|unique_id|uniqueId)$/i.test(path)) author = value;
   });
@@ -151,6 +156,52 @@ async function apifyXhs(url: URL): Promise<RichPost | null> {
   return { provider: 'apify', ...p, caption, imageUrls: images.slice(0, 12) };
 }
 
+// ─── Exact parsers for the known response shapes ────────────────────────────
+
+type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/** Instagram GraphQL media (ScrapeCreators /v1/instagram/post → data.xdt_shortcode_media). */
+function parseInstagram(json: Json): Omit<RichPost, 'provider'> | null {
+  const m: Json | undefined = json?.data?.xdt_shortcode_media ?? json?.data?.shortcode_media ?? json?.xdt_shortcode_media;
+  if (!m) return null;
+  const caption = String(m.edge_media_to_caption?.edges?.[0]?.node?.text ?? '');
+  const children: Json[] = (m.edge_sidecar_to_children?.edges ?? []).map((e: Json) => e.node).filter(Boolean);
+  const slides = children.length ? children : [m];
+  const imageUrls = slides.map((n) => n.display_url).filter((u): u is string => typeof u === 'string');
+  const videoUrl = [m, ...children].map((n) => n.video_url).find((u) => typeof u === 'string');
+  return {
+    caption: caption.slice(0, 6000),
+    imageUrls: imageUrls.slice(0, 12),
+    ...(videoUrl ? { videoUrl } : {}),
+    ...(m.location?.name ? { location: String(m.location.name) } : {}),
+    ...(m.owner?.username ? { author: String(m.owner.username) } : {}),
+  };
+}
+
+const firstUrl = (list: unknown, prefer = /tiktokcdn|tiktokv|ibyteimg|muscdn/): string | undefined => {
+  const urls = Array.isArray(list) ? list.filter((u): u is string => typeof u === 'string' && u.startsWith('https://')) : [];
+  return urls.find((u) => prefer.test(new URL(u).hostname)) ?? urls[0];
+};
+
+/** TikTok aweme (ScrapeCreators /v2/tiktok/video → aweme_detail). */
+function parseTikTok(json: Json): Omit<RichPost, 'provider'> | null {
+  const a: Json | undefined = json?.aweme_detail ?? json?.data?.aweme_detail;
+  if (!a) return null;
+  const photos: string[] = (a.image_post_info?.images ?? [])
+    .map((i: Json) => firstUrl(i.display_image?.url_list) ?? firstUrl(i.owner_watermark_image?.url_list))
+    .filter(Boolean);
+  const cover = firstUrl(a.video?.origin_cover?.url_list) ?? firstUrl(a.video?.cover?.url_list);
+  const videoUrl = photos.length ? undefined : firstUrl(a.video?.play_addr?.url_list) ?? firstUrl(a.video?.download_addr?.url_list);
+  const poi = a.poi_info?.poi_name ?? a.poi?.poi_name ?? a.poi_info?.address_info?.city;
+  return {
+    caption: String(a.desc ?? '').slice(0, 6000),
+    imageUrls: (photos.length ? photos : cover ? [cover] : []).slice(0, 12),
+    ...(videoUrl ? { videoUrl } : {}),
+    ...(poi ? { location: String(poi) } : {}),
+    ...(a.author?.unique_id ? { author: String(a.author.unique_id) } : {}),
+  };
+}
+
 // ─── Instagram / TikTok via ScrapeCreators ──────────────────────────────────
 
 async function scrapeCreators(url: URL, type: 'instagram' | 'tiktok'): Promise<RichPost | null> {
@@ -168,7 +219,8 @@ async function scrapeCreators(url: URL, type: 'instagram' | 'tiktok'): Promise<R
   }
   const json = await res.json().catch(() => null);
   if (!json) return null;
-  const p = parseGeneric(json);
+  // Known shapes first; the generic walker only if the provider changes format.
+  const p = (type === 'instagram' ? parseInstagram(json) : parseTikTok(json)) ?? parseGeneric(json);
   return p.caption || p.imageUrls.length || p.videoUrl ? { provider: 'scrapecreators', ...p } : null;
 }
 
