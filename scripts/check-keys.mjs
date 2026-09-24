@@ -136,6 +136,17 @@ await check('Maps server key: Time Zone API', async () => {
   return `ok; ${r.timeZoneId}`;
 });
 
+await check('Maps server key: Cloud Vision OCR (reads text on post photos)', async () => {
+  // 1x1 white PNG — no text expected, just checks the API is allowed for this key.
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC';
+  await getJson(`https://vision.googleapis.com/v1/images:annotate?key=${env.GOOGLE_MAPS_SERVER_KEY}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requests: [{ image: { content: png }, features: [{ type: 'TEXT_DETECTION' }] }] }),
+  });
+  return 'ok (1,000 images/month free)';
+}, { optional: true });
+
 // ─── Gemini ──────────────────────────────────────────────────────────────────
 await check('Gemini API', async () => {
   need('GEMINI_API_KEY');

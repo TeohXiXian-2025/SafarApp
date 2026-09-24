@@ -70,7 +70,7 @@ export const ideaRoutes: RouteTable = {
       const parts: Part[] = [];
       const captions: string[] = [];
       let source: IdeaSource = { type: storagePaths.length || raw.audioPath ? 'screenshot' : 'text' };
-      const used = { provider: null as string | null, images: 0, transcript: false };
+      const used = { provider: null as string | null, images: 0, transcript: false, skipped: null as string | null };
 
       // Uploaded files must be the caller's own, for this trip.
       const prefix = `trips/${tripId}/users/${user.uid}/`;
@@ -96,7 +96,8 @@ export const ideaRoutes: RouteTable = {
         }
 
         // Layer 1: full post from a free-credit reader (all images + video speech).
-        const rich = await fetchRichPost(url, type);
+        const { post: rich, skipped } = await fetchRichPost(url, type);
+        if (skipped) used.skipped = skipped;
         if (rich) {
           used.provider = rich.provider;
           if (rich.caption) {

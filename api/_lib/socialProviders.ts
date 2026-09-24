@@ -124,14 +124,17 @@ async function expandXhsLink(url: URL): Promise<string> {
   return current;
 }
 
-async function apifyXhs(url: URL): Promise<RichPost | null> {
+async function apifyXhs(url: URL): Promise<RichPost | string> {
   const token = optionalEnv('APIFY_TOKEN');
-  if (!token || (await downModels(['social:apify'])).size || !(await reserve('apify'))) return null;
+  if (!token) return 'Xiaohongshu reader not configured';
+  if ((await downModels(['social:apify'])).size) return 'Xiaohongshu reader paused (out of credit or blocked recently)';
+  // Check the link BEFORE spending from the monthly allowance.
   const full = await expandXhsLink(url);
   if (!/xsec_token=/.test(full)) {
-    console.warn('[social] xiaohongshu link has no xsec_token — Apify needs the full share link');
-    return null;
+    console.warn('[social] xiaohongshu link has no xsec_token', full.slice(0, 120));
+    return "Xiaohongshu link couldn't be opened (it may have expired) — copy a fresh one with Share → Copy link";
   }
+  if (!(await reserve('apify'))) return 'Xiaohongshu reader monthly limit reached';
   const res = await fetch(`https://api.apify.com/v2/acts/dltik~rednote-xiaohongshu-scraper/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=28`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -140,12 +143,13 @@ async function apifyXhs(url: URL): Promise<RichPost | null> {
   }).catch(() => null);
   if (!res?.ok) {
     if (res && [402, 403, 429].includes(res.status)) await markDown('social:apify', 429, 6 * 3600); // out of credit / blocked
-    console.warn('[social] apify failed', res?.status);
-    return null;
+    const body = (await res?.text().catch(() => '')) ?? '';
+    console.warn('[social] apify failed', res?.status, body.slice(0, 200));
+    return `Xiaohongshu reader failed (${res?.status ?? 'timeout'})`;
   }
   const items = (await res.json().catch(() => [])) as unknown[];
   const item = items?.[0] as Record<string, unknown> | undefined;
-  if (!item) return null;
+  if (!item) return 'Xiaohongshu reader returned nothing for this note';
   const p = parseGeneric(item);
   // Prefer the actor's own fields when present.
   const title = typeof item.title === 'string' ? item.title : '';
@@ -204,9 +208,11 @@ function parseTikTok(json: Json): Omit<RichPost, 'provider'> | null {
 
 // ─── Instagram / TikTok via ScrapeCreators ──────────────────────────────────
 
-async function scrapeCreators(url: URL, type: 'instagram' | 'tiktok'): Promise<RichPost | null> {
+async function scrapeCreators(url: URL, type: 'instagram' | 'tiktok'): Promise<RichPost | string> {
   const key = optionalEnv('SCRAPECREATORS_API_KEY');
-  if (!key || (await downModels(['social:scrapecreators'])).size || !(await reserve('scrapecreators'))) return null;
+  if (!key) return 'Instagram/TikTok reader not configured';
+  if ((await downModels(['social:scrapecreators'])).size) return 'Instagram/TikTok reader paused (out of credit recently)';
+  if (!(await reserve('scrapecreators'))) return 'Instagram/TikTok reader monthly limit reached';
   const endpoint = type === 'instagram' ? '/v1/instagram/post' : '/v2/tiktok/video';
   const res = await fetch(`https://api.scrapecreators.com${endpoint}?url=${encodeURIComponent(url.href)}`, {
     headers: { 'x-api-key': key },
@@ -215,22 +221,26 @@ async function scrapeCreators(url: URL, type: 'instagram' | 'tiktok'): Promise<R
   if (!res?.ok) {
     if (res && [401, 402, 403, 429].includes(res.status)) await markDown('social:scrapecreators', 429, 6 * 3600);
     console.warn('[social] scrapecreators failed', res?.status);
-    return null;
+    return `Instagram/TikTok reader failed (${res?.status ?? 'timeout'})`;
   }
   const json = await res.json().catch(() => null);
-  if (!json) return null;
+  if (!json) return 'Instagram/TikTok reader returned nothing';
   // Known shapes first; the generic walker only if the provider changes format.
   const p = (type === 'instagram' ? parseInstagram(json) : parseTikTok(json)) ?? parseGeneric(json);
-  return p.caption || p.imageUrls.length || p.videoUrl ? { provider: 'scrapecreators', ...p } : null;
+  return p.caption || p.imageUrls.length || p.videoUrl ? { provider: 'scrapecreators', ...p } : 'Instagram/TikTok reader found no content (private or deleted post?)';
 }
 
-/** Full post (caption + all images + video) when a free-credit provider can supply it. */
-export async function fetchRichPost(url: URL, type: SocialType): Promise<RichPost | null> {
+/**
+ * Full post (caption + all images + video) when a free-credit provider can
+ * supply it; otherwise `skipped` says why (shown to the user, never silent).
+ */
+export async function fetchRichPost(url: URL, type: SocialType): Promise<{ post: RichPost | null; skipped?: string }> {
   try {
-    if (type === 'xiaohongshu') return await apifyXhs(url);
-    if (type === 'instagram' || type === 'tiktok') return await scrapeCreators(url, type);
+    const r = type === 'xiaohongshu' ? await apifyXhs(url) : type === 'instagram' || type === 'tiktok' ? await scrapeCreators(url, type) : null;
+    if (r === null) return { post: null };
+    return typeof r === 'string' ? { post: null, skipped: r } : { post: r };
   } catch (err) {
     console.warn('[social] provider error', (err as Error).message);
+    return { post: null, skipped: 'Post reader error' };
   }
-  return null;
 }

@@ -5,6 +5,7 @@ import { Type, type Part } from '@google/genai';
 import { z } from 'zod';
 import type { Destination, IdeaSource, PlaceRef } from '../../src/domain/index.js';
 import { extractJson } from './gemini.js';
+import { ocrImages } from './ocr.js';
 import { HttpError } from './http.js';
 import { categorize, distanceKm, searchPlace } from './places.js';
 
@@ -185,7 +186,7 @@ Rules:
 - name: the place's name as it appears on Google Maps (keep original script if that's all you have; add romanisation/English in brackets when helpful).
 - area: neighbourhood/street/town if mentioned, then city/island and country (use the trip destinations to disambiguate).
 - what: under 12 words — what the post says is good there (e.g. "wagyu ramen, halal", "sunset view", "RM90 cable car").
-Return at most 12 places, in the order the post mentions them. Empty list if there are no specific places.`;
+Return at most 20 places, in the order the post mentions them — include places that appear ONLY in the images. Empty list if there are no specific places.`;
 
 const responseSchema = {
   type: Type.OBJECT,
@@ -202,7 +203,7 @@ const responseSchema = {
   required: ['places'],
 };
 const Extracted = z.object({
-  places: z.array(z.object({ name: z.string(), area: z.string().optional(), city: z.string().optional(), country: z.string().optional(), what: z.string().optional() })).max(20),
+  places: z.array(z.object({ name: z.string(), area: z.string().optional(), city: z.string().optional(), country: z.string().optional(), what: z.string().optional() })).max(40),
 });
 
 /**
@@ -216,9 +217,7 @@ export function isRegion(types: string[] = []): boolean {
   return types.includes('political') && !visitable;
 }
 
-const IMAGES_PER_CALL = 3;
-const MAX_PLACES = 15;
-const chunk = <T,>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
+const MAX_PLACES = 20;
 
 export interface Candidate {
   place: PlaceRef;
@@ -235,35 +234,34 @@ export async function extractCandidates(
   opts: { imagesOptional?: boolean; budgetMs?: number } = {},
 ): Promise<{ candidates: Candidate[]; unresolved: string[]; skippedRegions: string[] }> {
   const context = `Trip destinations: ${destinations.map((d) => d.address ?? d.name).join('; ')}`;
+  // OCR the photos first: place names printed on them become plain text that
+  // any model can read cheaply (Groq's free vision fits only ~3 photos/min).
   const images = parts.filter((p) => p.inlineData?.mimeType?.startsWith('image/'));
-  const others = parts.filter((p) => !p.inlineData?.mimeType?.startsWith('image/'));
-  // Many frames (e.g. a screen recording): read them in small batches in
-  // parallel — keeps each request within every vision model's image limit.
-  const batches = images.length > IMAGES_PER_CALL ? chunk(images, IMAGES_PER_CALL).map((b) => [...others, ...b]) : [parts];
-  const results = await Promise.allSettled(
-    batches.map((batch) =>
-      extractJson({
-        system: SYSTEM,
-        parts: [...batch, { text: context }],
-        responseSchema,
-        validate: Extracted,
-        imagesOptional: opts.imagesOptional,
-        budgetMs: opts.budgetMs,
-      }),
-    ),
-  );
-  const ok = results.filter((r): r is PromiseFulfilledResult<z.infer<typeof Extracted>> => r.status === 'fulfilled');
-  if (!ok.length) throw (results[0] as PromiseRejectedResult).reason;
-  // Merge batches, keeping first-mention order and dropping repeats by name.
+  const texts = await ocrImages(images);
+  const ocrParts: Part[] = texts.flatMap((t, i) => (t ? [{ text: `Text printed on photo ${i + 1}:
+${t}` }] : []));
+  const readAllText = images.length > 0 && ocrParts.length > 0;
+
+  // One request with every image (Gemini reads many at once). If it falls back
+  // to Groq: with OCR text → a single text-only call; without → sequential groups.
+  const { places: raw } = await extractJson({
+    system: SYSTEM,
+    parts: [...parts, ...ocrParts, { text: context }],
+    groqTextOnly: readAllText,
+    responseSchema,
+    validate: Extracted,
+    imagesOptional: opts.imagesOptional,
+    budgetMs: opts.budgetMs,
+    merge: (results) => ({ places: results.flatMap((r) => ((r as { places?: unknown[] })?.places ?? [])) }),
+  });
+  // Keep first-mention order and drop repeats by name (groups can overlap).
   const seenNames = new Set<string>();
-  const places = ok
-    .flatMap((r) => r.value.places)
-    .filter((p) => {
-      const k = p.name.trim().toLowerCase();
-      if (seenNames.has(k)) return false;
-      seenNames.add(k);
-      return true;
-    });
+  const places = raw.filter((p) => {
+    const k = p.name.trim().toLowerCase();
+    if (seenNames.has(k)) return false;
+    seenNames.add(k);
+    return true;
+  });
 
   const unresolved: string[] = [];
   const skippedRegions: string[] = [];

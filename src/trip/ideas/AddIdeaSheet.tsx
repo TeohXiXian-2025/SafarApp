@@ -20,7 +20,7 @@ interface ImportResponse {
   candidates: Candidate[];
   unresolved: string[];
   skippedRegions?: string[];
-  used?: { provider: string | null; images: number; transcript: boolean };
+  used?: { provider: string | null; images: number; transcript: boolean; skipped?: string | null };
   needsScreenshot?: boolean;
   message?: string;
 }
@@ -136,7 +136,7 @@ export function AddIdeaSheet({ open, onClose, initialText }: { open: boolean; on
         setResult(res);
         setPicked(new Set(res.candidates.map((c) => c.place.placeId!)));
       } else if (res.needsScreenshot) {
-        setNotice(res.message ?? 'Upload a screen recording or screenshots of the post instead.');
+        setNotice([res.used?.skipped, res.message ?? 'Upload a screen recording or screenshots of the post instead.'].filter(Boolean).join(' — '));
         setTab('media');
       } else {
         setError(res.message ?? "We couldn't find any specific places. Try a screen recording or screenshots that show the place names.");
@@ -253,6 +253,11 @@ export function AddIdeaSheet({ open, onClose, initialText }: { open: boolean; on
             })}
           </ul>
           {!!result.unresolved.length && <p className="text-xs text-[#6D7A77]">Couldn't find on the map: {result.unresolved.join(', ')}.</p>}
+          {result.used?.skipped && (
+            <p className="text-xs text-[#96590B] bg-[#FDF3E1] rounded-lg px-2.5 py-2">
+              Only the caption could be read ({result.used.skipped}). Missing places? Add a screen recording or screenshots of the post.
+            </p>
+          )}
           <ErrorBanner>{error}</ErrorBanner>
           <div className="flex gap-3">
             <Button variant="secondary" onClick={reset}>

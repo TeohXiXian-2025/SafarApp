@@ -25,6 +25,7 @@ const PER_ATTEMPT_MS = 12_000;
 /** Stay well inside the 60 s function limit, leaving room for Groq. */
 const TOTAL_BUDGET_MS = 48_000;
 const GROQ_RESERVE_MS = 15_000;
+const GROQ_IMAGES_PER_CALL = 3;
 
 const statusOf = (err: unknown) => Number((err as { status?: number })?.status);
 const isTransient = (err: unknown) =>
@@ -36,7 +37,15 @@ type Attempt = { provider: string; text: string } | { provider: string; json: un
  * One attempt per Gemini model (SDK retries off so we control timing), moving
  * on immediately when one is rate-limited or overloaded; then Groq.
  */
-async function generate(opts: { system: string; parts: Part[]; responseSchema: Schema; imagesOptional?: boolean; budgetMs?: number }): Promise<Attempt> {
+async function generate(opts: {
+  system: string;
+  parts: Part[];
+  responseSchema: Schema;
+  imagesOptional?: boolean;
+  budgetMs?: number;
+  merge?: (results: unknown[]) => unknown;
+  groqTextOnly?: boolean;
+}): Promise<Attempt> {
   const started = Date.now();
   const budget = Math.min(opts.budgetMs ?? TOTAL_BUDGET_MS, TOTAL_BUDGET_MS);
   const left = () => budget - (Date.now() - started);
@@ -70,12 +79,47 @@ async function generate(opts: { system: string; parts: Part[]; responseSchema: S
     }
   }
 
-  try {
-    const json = await groqJson({ ...opts, timeoutMs: Math.max(8_000, left()) });
-    if (json !== undefined) return { provider: 'groq', json };
-  } catch (err) {
-    console.warn('[ai] groq failed', (err as Error).message);
-    lastErr = err;
+  // Groq's vision model takes at most 3 images per request and its free tier
+  // has a small per-minute budget: send groups of 3 ONE AFTER ANOTHER (it
+  // waits when told to slow down) and merge — parallel calls got rate-limited
+  // and silently lost the places in the failed groups.
+  const isImage = (p: Part) => !!p.inlineData?.mimeType?.startsWith('image/');
+  const images = opts.parts.filter(isImage);
+  if (opts.groqTextOnly && images.length) {
+    // The images' text was already read (OCR) — one cheap text request.
+    try {
+      const json = await groqJson({ ...opts, parts: opts.parts.filter((p) => !isImage(p)), timeoutMs: Math.max(8_000, left()) });
+      if (json !== undefined) return { provider: 'groq(ocr text)', json };
+    } catch (err) {
+      console.warn('[ai] groq (ocr text) failed', (err as Error).message);
+      lastErr = err;
+    }
+  } else if (images.length > GROQ_IMAGES_PER_CALL && opts.merge) {
+    const textParts = opts.parts.filter((p) => !isImage(p));
+    const results: unknown[] = [];
+    for (let i = 0; i < images.length; i += GROQ_IMAGES_PER_CALL) {
+      if (left() < 6_000) break;
+      try {
+        const json = await groqJson({ ...opts, parts: [...textParts, ...images.slice(i, i + GROQ_IMAGES_PER_CALL)], timeoutMs: Math.min(30_000, left()) });
+        if (json !== undefined) results.push(json);
+      } catch (err) {
+        console.warn(`[ai] groq group ${i / GROQ_IMAGES_PER_CALL + 1} failed`, (err as Error).message);
+        lastErr = err;
+      }
+    }
+    if (results.length) {
+      const groups = Math.ceil(images.length / GROQ_IMAGES_PER_CALL);
+      if (results.length < groups) console.warn(`[ai] groq read ${results.length}/${groups} image groups`);
+      return { provider: `groq(${results.length}/${groups} groups)`, json: opts.merge(results) };
+    }
+  } else {
+    try {
+      const json = await groqJson({ ...opts, timeoutMs: Math.max(8_000, left()) });
+      if (json !== undefined) return { provider: 'groq', json };
+    } catch (err) {
+      console.warn('[ai] groq failed', (err as Error).message);
+      lastErr = err;
+    }
   }
 
   // Images were only a bonus (e.g. a post's cover image next to its caption):
@@ -107,6 +151,10 @@ export async function extractJson<S extends z.ZodType>(opts: {
   imagesOptional?: boolean;
   /** Time available for this call (ms), e.g. what's left of a request that already did slow work. */
   budgetMs?: number;
+  /** Combines per-group answers when many images must be read in groups (Groq). */
+  merge?: (results: unknown[]) => unknown;
+  /** The images' text is already in the parts (OCR): Groq can skip the images. */
+  groqTextOnly?: boolean;
 }): Promise<z.infer<S>> {
   let attempt: Attempt;
   try {
