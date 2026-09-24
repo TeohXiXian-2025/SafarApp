@@ -1,5 +1,6 @@
 import {
   createUserWithEmailAndPassword,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   sendEmailVerification,
@@ -14,7 +15,7 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { create } from 'zustand';
 import { paths, type UserProfile } from '../domain';
-import { auth, db } from '../firebase/config';
+import { auth, db, useSameOriginAuth } from '../firebase/config';
 
 interface AuthState {
   status: 'loading' | 'signedOut' | 'signedIn';
@@ -51,6 +52,11 @@ onAuthStateChanged(auth, (user) => {
 export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
+  if (useSameOriginAuth) {
+    // Installed app: full-page redirect; the result is picked up by onAuthStateChanged.
+    await signInWithRedirect(auth, provider);
+    return;
+  }
   try {
     await signInWithPopup(auth, provider);
   } catch (err: any) {
@@ -74,6 +80,9 @@ export async function signUpWithEmail(name: string, email: string, password: str
   await ensureProfile(Object.assign(cred.user, { displayName: name }));
   void sendEmailVerification(cred.user).catch(() => {});
 }
+
+/** Surfaces an error from a finished redirect sign-in (e.g. account disabled). */
+export const checkRedirectResult = () => getRedirectResult(auth);
 
 export const resetPassword = (email: string) => sendPasswordResetEmail(auth, email);
 export const signOut = () => fbSignOut(auth);

@@ -7,6 +7,7 @@ import { paths, Trip } from '../domain';
 import { db } from '../firebase/config';
 import { useQuery } from '../lib/firestore';
 import { daysUntil, formatDateRange } from '../lib/format';
+import { InstallBanner } from '../pwa/InstallBanner';
 import { Badge, Button, Card, ErrorBanner, Spinner } from '../ui';
 
 export function TripsPage() {
@@ -37,6 +38,8 @@ export function TripsPage() {
             </Button>
           </Link>
         </div>
+
+        <InstallBanner />
 
         {trips.error && <ErrorBanner>Could not load your trips: {trips.error.message}</ErrorBanner>}
 

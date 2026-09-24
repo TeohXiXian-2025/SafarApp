@@ -23,11 +23,16 @@ async function request<T>(method: string, path: string, opts: { query?: Query; b
   if (token) headers.Authorization = `Bearer ${token}`;
   if (opts.body !== undefined) headers['content-type'] = 'application/json';
 
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch {
+    throw new ApiError(0, navigator.onLine ? 'Could not reach Safar. Please try again.' : "You're offline — this needs a connection.");
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`, data.details);
   return data as T;

@@ -1,8 +1,9 @@
 import { Compass } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Navigate, useSearchParams } from 'react-router';
 import {
   authErrorMessage,
+  checkRedirectResult,
   resetPassword,
   signInWithEmail,
   signInWithGoogle,
@@ -30,6 +31,10 @@ export function LoginPage() {
   const [busy, setBusy] = useState<'google' | 'email' | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    checkRedirectResult().catch((err) => setError(authErrorMessage(err)));
+  }, []);
 
   if (status === 'loading') return <Spinner />;
   if (status === 'signedIn') return <Navigate to={next} replace />;
