@@ -10,8 +10,13 @@ import {
   paths,
   summarizeReports,
   tallyVotes,
+  conflictKey,
+  ideaConflicts,
+  Member as MemberSchema,
   type Member,
 } from '../../src/domain/index.js';
+import { Type } from '@google/genai';
+import { extractJson } from '../_lib/gemini.js';
 import { withTrip } from '../_lib/auth.js';
 import { adminBucket, adminDb } from '../_lib/firebaseAdmin.js';
 import { analyzePlace } from '../_lib/halal.js';
@@ -26,6 +31,8 @@ import { loadTrip, logActivity } from '../_lib/trip.js';
 import { useDailyQuota } from '../_lib/quota.js';
 
 const ANALYSIS_TTL = 14 * 86_400_000;
+/** Bump when the analysis format changes so cached results are redone. */
+const ANALYSIS_VERSION = 3;
 const ideaRef = (tripId: string, id: string) => adminDb().doc(paths.idea(tripId, id));
 
 async function loadIdea(tripId: string, id: string): Promise<Idea> {
@@ -256,7 +263,7 @@ export const ideaRoutes: RouteTable = {
 
       const cached = force ? null : (await cacheRef.get()).data();
       let result: { halal: Idea['halal']; sentiment?: Idea['sentiment'] };
-      if (cached && Date.now() - Number(cached.at) < ANALYSIS_TTL) {
+      if (cached && cached.v === ANALYSIS_VERSION && Date.now() - Number(cached.at) < ANALYSIS_TTL) {
         result = { halal: cached.halal, ...(cached.sentiment ? { sentiment: cached.sentiment } : {}) };
       } else {
         await useDailyQuota(user.uid, 'analyze');
@@ -264,7 +271,7 @@ export const ideaRoutes: RouteTable = {
         try {
           const details = await placeDetails(idea.place.placeId!, { forAnalysis: true });
           result = await analyzePlace(details);
-          await cacheRef.set({ ...result, at: Date.now() });
+          await cacheRef.set({ ...result, v: ANALYSIS_VERSION, at: Date.now() });
         } catch (err) {
           const message = err instanceof HttpError ? err.message : 'Analysis failed';
           await ideaRef(tripId, ideaId).update({ analysis: { status: 'error', at: Date.now(), error: message.slice(0, 300) } });
@@ -278,6 +285,77 @@ export const ideaRoutes: RouteTable = {
         updatedAt: Date.now(),
       });
       return json(result);
+    },
+    { perMinute: 20 },
+  ),
+
+  /**
+   * AI middle-ground ideas for members whose preferences this idea conflicts
+   * with (halal level, alcohol, prayer, budget). Cached on the idea per
+   * conflict set; only nearby places we actually looked up are suggested.
+   */
+  'POST ideas/resolve': withTrip(
+    async (req, { tripId, user }) => {
+      const { ideaId, force } = await readJson(req, z.object({ ideaId: Id, force: z.boolean().default(false) }));
+      const db = adminDb();
+      const [idea, trip, memberSnap] = await Promise.all([loadIdea(tripId, ideaId), loadTrip(tripId), db.collection(paths.members(tripId)).get()]);
+      const members = memberSnap.docs.map((d) => MemberSchema.safeParse(d.data())).flatMap((r) => (r.success ? [r.data] : []));
+      const summary = (await db.doc(paths.halalSummary(idea.placeKey)).get()).data() as HalalSummary | undefined;
+      const conflicts = ideaConflicts(idea, members, { currency: trip.currency, ...(summary?.tier ? { communityTier: summary.tier } : {}) });
+      if (!conflicts.length) return json({ conflicts, suggestions: [] });
+      const key = conflictKey(conflicts);
+      if (!force && idea.resolution?.key === key) return json({ conflicts, suggestions: idea.resolution.suggestions });
+
+      await useDailyQuota(user.uid, 'analyze');
+      const h = idea.halal;
+      const facts = {
+        place: { name: idea.place.name, kind: idea.place.typeLabel ?? idea.place.category, address: idea.place.address, openingHours: idea.place.openingHours, durationMin: idea.estDurationMin },
+        radar: h ? { verdict: h.verdict, tier: h.tier, flags: h.flags, evidence: h.evidence.map((e) => e.text) } : null,
+        conflicts: conflicts.map((c) => ({ member: c.name, severity: c.severity, issue: c.detail })),
+        prayerSpacesNearby: h?.prayer?.places.map((p) => `${p.name} (${p.walkMin} min walk)`) ?? [],
+        halalFoodNearby: h?.halalFood?.places.map((p) => `${p.name} (${p.walkMin} min walk)`) ?? [],
+        groupSize: members.length,
+      };
+      const ai = await extractJson({
+        system: `You plan group trips where some members are Muslim or have other needs. An activity the group likes conflicts with some members' preferences. Suggest 2–4 practical middle-ground solutions so everyone can still enjoy the day. Types:
+- "alternative": a nearby substitute for the affected members (ONLY use places from halalFoodNearby / prayerSpacesNearby — never invent place names).
+- "split": the group splits briefly (e.g. others eat here, affected members eat at X, meet after).
+- "timing": schedule around it (e.g. visit after Asr, pray at X first, go at lunch when the halal counter is open).
+- "prep": something to do beforehand (e.g. ask staff about the halal kitchen, pack a prayer mat, set a spending cap).
+Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMembers = names of the members it helps. Be specific to the facts; no generic advice.`,
+        parts: [{ text: JSON.stringify(facts) }],
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            suggestions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  type: { type: Type.STRING, enum: ['alternative', 'split', 'timing', 'prep'] },
+                  title: { type: Type.STRING },
+                  detail: { type: Type.STRING },
+                  forMembers: { type: Type.ARRAY, items: { type: Type.STRING } },
+                },
+                required: ['type', 'title', 'detail', 'forMembers'],
+              },
+            },
+          },
+          required: ['suggestions'],
+        },
+        validate: z.object({
+          suggestions: z.array(z.object({ type: z.enum(['alternative', 'split', 'timing', 'prep']), title: z.string(), detail: z.string(), forMembers: z.array(z.string()).default([]) })).max(8),
+        }),
+      });
+      const uidByName = new Map(conflicts.map((c) => [c.name.toLowerCase(), c.uid]));
+      const suggestions = ai.suggestions.slice(0, 4).map((s) => ({
+        type: s.type,
+        title: s.title.trim().slice(0, 120),
+        detail: s.detail.trim().slice(0, 400),
+        forUids: [...new Set(s.forMembers.map((n) => uidByName.get(n.trim().toLowerCase())).filter((u): u is string => !!u))],
+      }));
+      await ideaRef(tripId, ideaId).update({ resolution: { key, suggestions, at: Date.now() } });
+      return json({ conflicts, suggestions });
     },
     { perMinute: 20 },
   ),

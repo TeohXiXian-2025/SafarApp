@@ -176,3 +176,37 @@ export async function photoUrl(photoName: string, maxWidthPx = 640): Promise<str
   const body = (await res.json().catch(() => null)) as { photoUri?: string } | null;
   return body?.photoUri?.startsWith('https://') ? body.photoUri : null;
 }
+
+/** Closest places of the given Google types around a point (nearest first); null if the lookup failed. */
+export async function searchNearby(
+  center: GeoPoint,
+  includedTypes: string[],
+  radiusM: number,
+  max = 5,
+): Promise<{ placeId: string; name: string; location: GeoPoint; types: string[] }[] | null> {
+  const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'X-Goog-Api-Key': requireEnv('GOOGLE_MAPS_SERVER_KEY'),
+      'X-Goog-FieldMask': 'places.id,places.displayName,places.location,places.types',
+    },
+    body: JSON.stringify({
+      includedTypes,
+      maxResultCount: max,
+      rankPreference: 'DISTANCE',
+      locationRestriction: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius: radiusM } },
+    }),
+    signal: AbortSignal.timeout(6000),
+  }).catch(() => null);
+  if (!res?.ok) return null; // unknown, not "none nearby"
+  const places = ((await res.json()) as { places?: RawPlace[] }).places ?? [];
+  return places
+    .filter((p) => p.location && p.displayName?.text)
+    .map((p) => ({
+      placeId: p.id,
+      name: p.displayName!.text.slice(0, 200),
+      location: { lat: p.location!.latitude, lng: p.location!.longitude },
+      types: p.types ?? [],
+    }));
+}

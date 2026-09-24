@@ -5,3 +5,4 @@ export * from './plan.js';
 export * from './extras.js';
 export * from './paths.js';
 export * from './prefs.js';
+export * from './conflicts.js';

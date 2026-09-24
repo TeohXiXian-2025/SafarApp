@@ -1,11 +1,27 @@
 import { z } from 'zod';
-import { HalalTier, Id, Millis, PlaceRef } from './common.js';
+import { GeoPoint, HalalTier, Id, Millis, PlaceRef } from './common.js';
 
 // ─── Halal assessment (the "Halal Radar" verdict for any place) ─────────────
 
 /** Where a halal verdict came from, highest trust first. */
 export const HalalSource = z.enum(['verified_certificate', 'community', 'google', 'foursquare', 'osm', 'ai_estimate']);
 export type HalalSource = z.infer<typeof HalalSource>;
+
+export const EvidenceSource = z.enum(['google', 'foursquare', 'openstreetmap', 'reviews', 'website', 'place_details', 'nearby', 'community', 'ai']);
+export type EvidenceSource = z.infer<typeof EvidenceSource>;
+
+export const NearbyPlace = z.object({
+  name: z.string().max(200),
+  placeId: z.string().max(300).optional(),
+  location: GeoPoint,
+  distanceM: z.number().int().nonnegative(),
+  walkMin: z.number().int().nonnegative(),
+});
+export type NearbyPlace = z.infer<typeof NearbyPlace>;
+
+/** How easy it is to pray from here: on site, ≤10 min walk, ≤25 min, further. */
+export const PrayerAccess = z.enum(['onsite', 'walkable', 'nearby', 'far', 'unknown']);
+export type PrayerAccess = z.infer<typeof PrayerAccess>;
 
 export const HalalAssessment = z.object({
   /** For food places. Absent for non-food activities. */
@@ -23,6 +39,15 @@ export const HalalAssessment = z.object({
     })
     .default({}),
   source: HalalSource,
+  /** Why we reached the verdict — each point names where it came from. */
+  evidence: z
+    .array(z.object({ text: z.string().max(240), source: EvidenceSource }))
+    .max(10)
+    .default([]),
+  /** Nearest mosques / prayer rooms (all places). */
+  prayer: z.object({ access: PrayerAccess, places: z.array(NearbyPlace).max(3) }).optional(),
+  /** Halal-listed food nearby (for alternatives and non-food places). */
+  halalFood: z.object({ places: z.array(NearbyPlace).max(3) }).optional(),
   confidence: z.number().min(0).max(1),
   certificate: z
     .object({ certifier: z.string().max(120), number: z.string().max(80).optional(), expiresAt: Millis.optional() })
@@ -168,6 +193,23 @@ export const Idea = z.object({
   votes: z.record(z.string(), Vote).default({}),
   /** Set when the admin closes voting early or overrides the result. */
   decidedBy: Id.optional(),
+  /** AI middle-ground suggestions for preference conflicts (keyed by the conflict set). */
+  resolution: z
+    .object({
+      key: z.string().max(500),
+      suggestions: z
+        .array(
+          z.object({
+            type: z.enum(['alternative', 'split', 'timing', 'prep']),
+            title: z.string().max(120),
+            detail: z.string().max(400),
+            forUids: z.array(Id).max(50).default([]),
+          }),
+        )
+        .max(5),
+      at: Millis,
+    })
+    .optional(),
   createdBy: Id,
   createdAt: Millis,
   updatedAt: Millis,
