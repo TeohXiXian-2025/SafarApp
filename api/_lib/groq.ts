@@ -11,6 +11,8 @@ const VISION_MODEL = () => process.env.GROQ_VISION_MODEL || 'qwen/qwen3.8-27b';
 /** Groq accepts base64 images up to ~4 MB and only common web formats. */
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const GROQ_IMAGE = /^image\/(jpeg|png|webp|gif)$/;
+/** Groq's vision model accepts at most 3 images per request. */
+const MAX_IMAGES = 3;
 
 export const groqConfigured = () => !!optionalEnv('GROQ_API_KEY');
 
@@ -45,6 +47,7 @@ type Content = { type: 'text'; text: string } | { type: 'image_url'; image_url: 
 async function toContent(parts: Part[]): Promise<{ content: Content[]; hasImage: boolean } | null> {
   const content: Content[] = [];
   let hasImage = false;
+  let imageCount = 0;
   for (const p of parts) {
     if (p.text) content.push({ type: 'text', text: p.text });
     else if (p.inlineData?.data && p.inlineData.mimeType) {
@@ -53,7 +56,8 @@ async function toContent(parts: Part[]): Promise<{ content: Content[]; hasImage:
         const text = await pdfToText(data);
         if (!text) return null;
         content.push({ type: 'text', text: `Document text (from PDF):\n${text}` });
-      } else if (GROQ_IMAGE.test(mimeType) && (data.length * 3) / 4 <= MAX_IMAGE_BYTES) {
+      } else if (GROQ_IMAGE.test(mimeType) && (data.length * 3) / 4 <= MAX_IMAGE_BYTES && imageCount < MAX_IMAGES) {
+        imageCount++;
         content.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${data}` } });
         hasImage = true;
       } else {
@@ -86,24 +90,50 @@ export async function groqJson(opts: { system: string; parts: Part[]; responseSc
 
   const schema = JSON.stringify(toJsonSchema(opts.responseSchema));
   const model = converted.hasImage ? VISION_MODEL() : TEXT_MODEL();
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      temperature: 0,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: `${opts.system}\n\nRespond with ONLY a JSON object that matches this JSON Schema:\n${schema}` },
-        { role: 'user', content: converted.content },
-      ],
-    }),
-    signal: AbortSignal.timeout(opts.timeoutMs),
+  const deadline = Date.now() + opts.timeoutMs;
+  const body = (jsonMode: boolean) => ({
+    model,
+    temperature: 0,
+    // Extraction needs no chain-of-thought: thinking output breaks strict JSON
+    // mode and burns the free tier's output-tokens-per-minute budget.
+    ...(/qwen/i.test(model) ? { reasoning_effort: 'none' } : /gpt-oss/i.test(model) ? { reasoning_effort: 'low' } : {}),
+    max_completion_tokens: 2500,
+    ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+    messages: [
+      { role: 'system', content: `${opts.system}
+
+Respond with ONLY a JSON object that matches this JSON Schema:
+${schema}` },
+      { role: 'user', content: converted.content },
+    ],
   });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw Object.assign(new Error(`Groq ${model} ${res.status}: ${body.slice(0, 200)}`), { status: res.status });
+
+  let jsonMode = true;
+  let rateRetried = false;
+  for (;;) {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body(jsonMode)),
+      signal: AbortSignal.timeout(Math.max(2_000, deadline - Date.now())),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      return jsonFromReply(data.choices?.[0]?.message?.content ?? '');
+    }
+    const text = await res.text().catch(() => '');
+    // Strict JSON mode rejected the reply → ask again without it and parse ourselves.
+    if (res.status === 400 && jsonMode && /json_validate_failed/.test(text)) {
+      jsonMode = false;
+      continue;
+    }
+    // Free-tier per-minute limits reset quickly — wait once if Groq says it's short.
+    const wait = Number(res.headers.get('retry-after'));
+    if (res.status === 429 && !rateRetried && wait > 0 && wait <= 12 && Date.now() + wait * 1000 + 3_000 < deadline) {
+      rateRetried = true;
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      continue;
+    }
+    throw Object.assign(new Error(`Groq ${model} ${res.status}: ${text.slice(0, 200)}`), { status: res.status });
   }
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  return jsonFromReply(data.choices?.[0]?.message?.content ?? '');
 }

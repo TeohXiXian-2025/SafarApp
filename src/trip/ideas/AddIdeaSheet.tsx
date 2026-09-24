@@ -18,11 +18,14 @@ interface ImportResponse {
   source: IdeaSource;
   candidates: Candidate[];
   unresolved: string[];
+  skippedRegions?: string[];
   needsScreenshot?: boolean;
   message?: string;
 }
 
 type Tab = 'link' | 'screenshot' | 'search';
+
+const MAX_SHOTS = 4;
 
 /** Adds ideas and kicks off the Halal Radar/review check (not awaited). */
 async function addIdeas(tripId: string, items: { placeId: string; source: IdeaSource }[]) {
@@ -45,7 +48,7 @@ export function AddIdeaSheet({ open, onClose }: { open: boolean; onClose: () => 
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [uploaded, setUploaded] = useState<string>();
+  const [uploaded, setUploaded] = useState<string[]>([]);
   const [searchPick, setSearchPick] = useState<DestinationInput>();
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -60,8 +63,8 @@ export function AddIdeaSheet({ open, onClose }: { open: boolean; onClose: () => 
     setWorking(null);
   };
   const close = () => {
-    if (uploaded) void deleteFile(uploaded);
-    setUploaded(undefined);
+    uploaded.forEach((p) => void deleteFile(p));
+    setUploaded([]);
     reset();
     onClose();
   };
@@ -73,18 +76,14 @@ export function AddIdeaSheet({ open, onClose }: { open: boolean; onClose: () => 
     setWorking(label);
     try {
       const res = await api.post<ImportResponse>('ideas/import', body, { tripId: trip.id });
-      if (res.needsScreenshot) {
-        setNotice(res.message ?? 'Upload a screenshot of the post instead.');
-        setTab('screenshot');
-      } else if (!res.candidates.length) {
-        setError(
-          res.unresolved.length
-            ? `Found ${res.unresolved.join(', ')} but couldn't locate them on the map. Try searching them instead.`
-            : "We couldn't find any named places in that post. Try a screenshot that shows the location, or search the place.",
-        );
-      } else {
+      if (res.candidates.length) {
         setResult(res);
         setPicked(new Set(res.candidates.map((c) => c.place.placeId!)));
+      } else if (res.needsScreenshot) {
+        setNotice(res.message ?? 'Upload screenshots of the post instead.');
+        setTab('screenshot');
+      } else {
+        setError(res.message ?? "We couldn't find any specific places. Try screenshots that show the place names, or search the place.");
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Something went wrong.');
@@ -93,12 +92,16 @@ export function AddIdeaSheet({ open, onClose }: { open: boolean; onClose: () => 
     }
   };
 
-  const onScreenshot = async (file: File) => {
+  const onScreenshots = async (files: File[]) => {
+    const chosen = files.slice(0, MAX_SHOTS);
     try {
-      setWorking('Uploading screenshot…');
-      const path = await uploadTripFile(trip.id, me.uid, 'ideas', file);
-      setUploaded(path);
-      await runImport({ storagePath: path }, 'Reading your screenshot with AI…');
+      const paths: string[] = [];
+      for (const [i, f] of chosen.entries()) {
+        setWorking(`Uploading screenshot ${i + 1} of ${chosen.length}…`);
+        paths.push(await uploadTripFile(trip.id, me.uid, 'ideas', f));
+      }
+      setUploaded(paths);
+      await runImport({ storagePaths: paths }, `Reading ${chosen.length > 1 ? `${chosen.length} screenshots` : 'your screenshot'} with AI…`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed.');
       setWorking(null);
@@ -111,7 +114,7 @@ export function AddIdeaSheet({ open, onClose }: { open: boolean; onClose: () => 
     try {
       const items = result.candidates.filter((c) => picked.has(c.place.placeId!)).map((c) => ({ placeId: c.place.placeId!, source: result.source }));
       const r = await addIdeas(trip.id, items);
-      setUploaded(undefined); // keep the screenshot: it's the idea's source
+      setUploaded([]); // keep the screenshots: they're the ideas' source
       reset();
       onClose();
       if (r.duplicates) alert(`${r.duplicates} of them ${r.duplicates === 1 ? 'was' : 'were'} already on the board.`);
@@ -147,11 +150,12 @@ export function AddIdeaSheet({ open, onClose }: { open: boolean; onClose: () => 
         ref={fileInput}
         type="file"
         accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const f = e.target.files?.[0];
+          const files = Array.from(e.target.files ?? []);
           e.target.value = '';
-          if (f) void onScreenshot(f);
+          if (files.length) void onScreenshots(files);
         }}
       />
 
@@ -232,8 +236,19 @@ export function AddIdeaSheet({ open, onClose }: { open: boolean; onClose: () => 
                 void runImport({ url }, 'Reading the post with AI…');
               }}
             >
-              <Input type="url" inputMode="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.tiktok.com/@…/video/…" aria-label="Post link" />
-              <p className="text-xs text-[#6D7A77]">TikTok, Instagram, Xiaohongshu (小红书) or YouTube. We read the caption and find every place it mentions.</p>
+              <textarea
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                rows={3}
+                maxLength={5000}
+                placeholder="https://www.instagram.com/reel/…  or paste Xiaohongshu's copied share text"
+                aria-label="Post link or share text"
+                className="w-full rounded-xl border border-[#E7DFD5] bg-white p-3 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#00685F]/40"
+              />
+              <p className="text-xs text-[#6D7A77]">
+                TikTok, Instagram, YouTube or Xiaohongshu (小红书). For Xiaohongshu, tap <b>Share → Copy link</b> in the app and paste everything it copies — the post's
+                text is what we read.
+              </p>
               <Button type="submit" className="w-full" disabled={url.trim().length < 10}>
                 <Sparkles className="w-4 h-4" /> Find places
               </Button>
@@ -243,8 +258,11 @@ export function AddIdeaSheet({ open, onClose }: { open: boolean; onClose: () => 
           {tab === 'screenshot' && (
             <div className="space-y-3">
               <Button variant="secondary" className="w-full" onClick={() => fileInput.current?.click()}>
-                <ImageUp className="w-4 h-4" /> Upload a screenshot of the post
+                <ImageUp className="w-4 h-4" /> Upload screenshots (up to {MAX_SHOTS})
               </Button>
+              <p className="text-xs text-[#6D7A77]">
+                For reels and Xiaohongshu notes: screenshot the photos or video moments that show each place's name.
+              </p>
               <div className="flex items-center gap-3 text-xs text-[#9AA5A3]">
                 <span className="h-px flex-1 bg-[#E7DFD5]" /> or paste the caption <span className="h-px flex-1 bg-[#E7DFD5]" />
               </div>

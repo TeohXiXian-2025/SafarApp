@@ -18,7 +18,7 @@ import { analyzePlace } from '../_lib/halal.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
 import { DEFAULT_DURATION, placeDetails } from '../_lib/places.js';
 import type { RouteTable } from '../_lib/routes.js';
-import { assertAllowed, extractCandidates, fetchCaption } from '../_lib/social.js';
+import { extractCandidates, fetchPost, parseShareInput } from '../_lib/social.js';
 import { loadTrip, logActivity } from '../_lib/trip.js';
 
 const ANALYSIS_TTL = 14 * 86_400_000;
@@ -35,54 +35,94 @@ const canManage = (idea: Idea, m: Member) => idea.createdBy === m.uid || m.role 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export const ideaRoutes: RouteTable = {
-  /** Link / screenshot / caption → candidate places (nothing saved yet). */
+  /**
+   * Link (or an app's copied share text) / screenshots / caption → candidate
+   * places. Nothing is saved yet.
+   */
   'POST ideas/import': withTrip(
     async (req, { tripId, user }) => {
       const body = await readJson(
         req,
         z.union([
-          z.object({ url: z.string().min(8).max(2000) }),
+          z.object({ url: z.string().min(8).max(5000) }),
           z.object({ text: z.string().min(8).max(5000) }),
+          z.object({ storagePaths: z.array(z.string().max(300)).min(1).max(4) }),
           z.object({ storagePath: z.string().max(300) }),
         ]),
       );
       const trip = await loadTrip(tripId);
+      const platform = { instagram: 'Instagram', xiaohongshu: 'Xiaohongshu', tiktok: 'TikTok', youtube: 'YouTube' } as const;
 
       let source: IdeaSource;
-      let parts: import('@google/genai').Part[];
+      const parts: import('@google/genai').Part[] = [];
       if ('url' in body) {
-        const { url, type } = assertAllowed(body.url);
-        const got = await fetchCaption(url, type);
-        if (!got) {
+        const { url, type, extraText } = parseShareInput(body.url);
+        const post = await fetchPost(url, type);
+        if (!post?.caption && !post?.image && !extraText) {
           return json({
             source: { type, url: url.href },
             candidates: [],
             unresolved: [],
+            skippedRegions: [],
             needsScreenshot: true,
-            message: `${type === 'instagram' ? 'Instagram' : type === 'xiaohongshu' ? 'Xiaohongshu' : 'That post'} didn't share its caption with us. Upload a screenshot of the post (or paste its caption) instead.`,
+            message:
+              type === 'xiaohongshu'
+                ? "Xiaohongshu doesn't let other apps read its posts. In the app, tap Share → Copy link and paste the whole copied text here — or upload screenshots of the post's photos."
+                : `${platform[type]} didn't share this post with us. Upload screenshots of the post (up to 4) instead.`,
           });
         }
-        source = { type, url: got.finalUrl.slice(0, 2000), caption: got.caption.slice(0, 2000), ...(got.author ? { author: got.author.slice(0, 120) } : {}) };
-        parts = [{ text: `Post caption:\n${got.caption}` }];
+        const caption = [post?.caption, extraText].filter(Boolean).join('\n\n');
+        source = {
+          type,
+          url: (post?.finalUrl ?? url.href).slice(0, 2000),
+          ...(caption ? { caption: caption.slice(0, 2000) } : {}),
+          ...(post?.author ? { author: post.author.slice(0, 120) } : {}),
+        };
+        if (post?.caption) parts.push({ text: `Post caption:
+${post.caption}` });
+        if (extraText) parts.push({ text: `Text shared with the link:
+${extraText}` });
+        if (post?.image) parts.push(post.image, { text: "Above: the post's cover image / thumbnail (may show place names)." });
       } else if ('text' in body) {
         source = { type: 'text', caption: body.text.slice(0, 2000) };
-        parts = [{ text: `Post caption:\n${body.text}` }];
+        parts.push({ text: `Post caption:
+${body.text}` });
       } else {
+        const storagePaths = 'storagePaths' in body ? body.storagePaths : [body.storagePath];
         const prefix = `trips/${tripId}/users/${user.uid}/`;
-        if (!body.storagePath.startsWith(prefix) || body.storagePath.includes('..')) throw new HttpError(403, 'Invalid upload');
-        const file = adminBucket().file(body.storagePath);
-        const [meta] = await file.getMetadata().catch(() => {
-          throw new HttpError(404, 'Upload not found');
-        });
-        const type = String(meta.contentType ?? '');
-        if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(type)) throw new HttpError(415, 'Upload a screenshot image');
-        const [buf] = await file.download();
+        for (const path of storagePaths) {
+          if (!path.startsWith(prefix) || path.includes('..')) throw new HttpError(403, 'Invalid upload');
+          const file = adminBucket().file(path);
+          const [meta] = await file.getMetadata().catch(() => {
+            throw new HttpError(404, 'Upload not found — please upload it again');
+          });
+          const type = String(meta.contentType ?? '');
+          if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(type)) throw new HttpError(415, 'Upload screenshots (images)');
+          const [buf] = await file.download();
+          parts.push({ inlineData: { mimeType: type, data: buf.toString('base64') } });
+        }
         source = { type: 'screenshot' };
-        parts = [{ inlineData: { mimeType: type, data: buf.toString('base64') } }, { text: 'This is a screenshot of a travel post.' }];
+        parts.push({ text: `These are ${storagePaths.length} screenshot(s) of one travel post (photos, video frames or its caption).` });
       }
 
-      const { candidates, unresolved } = await extractCandidates(parts, trip.destinations);
-      return json({ source, candidates, unresolved });
+      // For links the cover image is a bonus; screenshots ARE the content.
+      const { candidates, unresolved, skippedRegions } = await extractCandidates(parts, trip.destinations, { imagesOptional: 'url' in body });
+      if (!candidates.length) {
+        const video = source.type === 'instagram' || source.type === 'tiktok' || source.type === 'youtube';
+        return json({
+          source,
+          candidates,
+          unresolved,
+          skippedRegions,
+          needsScreenshot: source.type !== 'screenshot',
+          message: unresolved.length
+            ? `Found ${unresolved.join(', ')} but couldn't locate ${unresolved.length === 1 ? 'it' : 'them'} on the map. Try searching instead.`
+            : video
+              ? `This post's caption doesn't name specific places${skippedRegions.length ? ` (only ${skippedRegions.join(', ')})` : ''} — they're probably only shown in the video. Pause on the moments that show each place's name and upload those screenshots (up to 4).`
+              : `No specific places found${skippedRegions.length ? ` — only ${skippedRegions.join(', ')}` : ''}. Try screenshots that show the place names, or search the place.`,
+        });
+      }
+      return json({ source, candidates, unresolved, skippedRegions });
     },
     { perMinute: 8 },
   ),

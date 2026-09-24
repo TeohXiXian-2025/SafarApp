@@ -36,7 +36,7 @@ type Attempt = { provider: string; text: string } | { provider: string; json: un
  * One attempt per Gemini model (SDK retries off so we control timing), moving
  * on immediately when one is rate-limited or overloaded; then Groq.
  */
-async function generate(opts: { system: string; parts: Part[]; responseSchema: Schema }): Promise<Attempt> {
+async function generate(opts: { system: string; parts: Part[]; responseSchema: Schema; imagesOptional?: boolean }): Promise<Attempt> {
   const started = Date.now();
   const left = () => TOTAL_BUDGET_MS - (Date.now() - started);
   let lastErr: unknown;
@@ -76,6 +76,19 @@ async function generate(opts: { system: string; parts: Part[]; responseSchema: S
     console.warn('[ai] groq failed', (err as Error).message);
     lastErr = err;
   }
+
+  // Images were only a bonus (e.g. a post's cover image next to its caption):
+  // when vision is unavailable everywhere, answer from the text alone.
+  const textOnly = opts.parts.filter((p) => p.text);
+  if (opts.imagesOptional && textOnly.length && textOnly.length < opts.parts.length && left() > 5_000) {
+    try {
+      const json = await groqJson({ ...opts, parts: textOnly, timeoutMs: Math.max(8_000, left()) });
+      if (json !== undefined) return { provider: 'groq-text-only', json };
+    } catch (err) {
+      console.warn('[ai] groq text-only failed', (err as Error).message);
+      lastErr = err;
+    }
+  }
   throw lastErr ?? new Error('No AI provider available');
 }
 
@@ -89,6 +102,8 @@ export async function extractJson<S extends z.ZodType>(opts: {
   parts: Part[];
   responseSchema: Schema;
   validate: S;
+  /** The images only supplement the text — fall back to text-only if no vision model is available. */
+  imagesOptional?: boolean;
 }): Promise<z.infer<S>> {
   let attempt: Attempt;
   try {
