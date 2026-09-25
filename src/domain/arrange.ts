@@ -42,6 +42,12 @@ export interface DayFrame {
   end: number;
   /** Where the day starts and ends (hotel, or where you arrive). */
   base: GeoPoint;
+  /**
+   * False when there's no hotel or arrival that day: `base` is then just the
+   * destination's centre (for a country that can be hundreds of km away), so
+   * no travel is charged from or back to it.
+   */
+  baseKnown: boolean;
   /** Locked spans (same-day trains, …) nothing may overlap. */
   blocks: Block[];
   /** null → nobody in the group asked for prayer breaks. */
@@ -138,6 +144,8 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
   const out: DayTiming = { placed: [], prayers: [], unfit: [], travelMin: 0, cost: 0 };
   let cursor = frame.start;
   let prev: { id: string | null; loc: GeoPoint; walk: number } = { id: null, loc: frame.base, walk: 0 };
+  // Unknown start point: begin at the first stop (and pray near it) instead of a guessed centre.
+  if (!frame.baseKnown && units[0]) prev = { id: null, loc: units[0].loc, walk: units[0].prayerWalkMin ?? PRAYER_WALK_DEFAULT };
 
   const pray = (p: (typeof pending)[number], near: { id: string | null; loc: GeoPoint; walk: number }) => {
     const start = avoidBlocks(Math.max(cursor, p.t), PRAY_MIN + near.walk, frame.blocks);
@@ -190,7 +198,9 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
   // Prayers that come due by the time the last stop ends: pray before heading back.
   while (pending[0] && pending[0].t <= cursor && out.placed.length) pray(pending.shift()!, prev);
 
-  out.cost += travelOr(travel, prev.loc, frame.base) + 1000 * out.unfit.length;
+  // Nobody went out: prayers happen at the hotel, not on the plan.
+  if (!out.placed.length) out.prayers = [];
+  out.cost += (frame.baseKnown ? travelOr(travel, prev.loc, frame.base) : 0) + 1000 * out.unfit.length;
   return out;
 }
 
@@ -417,11 +427,15 @@ export function nearestDestination<D extends Pick<Destination, 'location'>>(dest
   return [...destinations].sort((a, b) => metersBetween(a.location, at) - metersBetween(b.location, at))[0];
 }
 
+/** Same-day journeys longer than this change city: the day starts after arriving (or ends before leaving). */
+const CITY_CHANGE_M = 30_000;
+
 /**
  * Each day's usable window and base from the bookings:
  * - arrive (flight +60 min, else +30) → the day can't start before that; you start from there
  * - depart (flight −150 min, else −45) → the day must end by then
- * - same-day journeys are blocked out
+ * - a same-day journey to another city counts as arriving there (or leaving, if it heads away
+ *   from the trip's destinations); a short local one is blocked out
  * - nights at a hotel make it the day's base (check-out day included)
  * Prayer times use the nearest destination's timezone (`praying` = someone asked for prayer breaks).
  */
@@ -433,7 +447,7 @@ export function dayFrames(
 ): DayFrame[] {
   const hotels = bookings.filter((b) => b.kind === 'hotel');
   const moves = bookings.filter((b) => b.kind !== 'hotel');
-  let lastBase = destinations[0].location;
+  const toTrip = (p: GeoPoint) => metersBetween(nearestDestination(destinations, p).location, p);
   return days.map((day) => {
     let start = DAY_START;
     let end = PACE[opts.pace].end;
@@ -444,9 +458,18 @@ export function dayFrames(
       const [eDay, eTime] = b.endLocal.split('T');
       const flight = b.kind === 'flight';
       if (sDay === day && eDay === day && eTime > sTime) {
-        // Same-day journey: before it you're at the origin, after it at the destination — block it out.
-        blocks.push({ start: toMin(sTime) - (flight ? 120 : 30), end: toMin(eTime) + (flight ? 45 : 15) });
-        if (toMin(sTime) < 12 * 60) arrivedAt = b.to.location;
+        const from = b.from?.location ?? b.to.location;
+        if (metersBetween(from, b.to.location) < CITY_CHANGE_M) {
+          // A local journey: you're around before and after it — just block it out.
+          blocks.push({ start: toMin(sTime) - (flight ? 120 : 30), end: toMin(eTime) + (flight ? 45 : 15) });
+        } else if (toTrip(b.to.location) <= toTrip(from)) {
+          // Arriving in (or moving between) trip cities: plan only after landing.
+          start = Math.max(start, toMin(eTime) + (flight ? 60 : 30));
+          arrivedAt = b.to.location;
+        } else {
+          // Leaving the trip: plan only before heading to the airport / station.
+          end = Math.min(end, toMin(sTime) - (flight ? 150 : 45));
+        }
         continue;
       }
       if (sDay === day) end = Math.min(end, toMin(sTime) - (flight ? 150 : 45));
@@ -456,14 +479,15 @@ export function dayFrames(
       }
     }
     const hotel = hotels.find((h) => h.startLocal.slice(0, 10) <= day && day <= h.endLocal.slice(0, 10));
-    const base = hotel?.to.location ?? arrivedAt ?? lastBase;
-    lastBase = base;
+    const known = hotel?.to.location ?? arrivedAt;
+    const base = known ?? destinations[0].location;
     const dest = nearestDestination(destinations, base);
     return {
       day,
       start: ceil5(start),
       end,
       base,
+      baseKnown: !!known,
       blocks,
       prayers: opts.praying ? prayerTimesOn(day, base, dest.timezone, dest.countryCode) : null,
     };

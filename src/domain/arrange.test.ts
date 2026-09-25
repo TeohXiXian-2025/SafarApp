@@ -9,7 +9,7 @@ const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${S
 const PRAYERS: DayPrayers = { date: '2026-12-07', sunrise: h('07:05'), times: { fajr: h('05:50'), dhuhr: h('13:05'), asr: h('16:25'), maghrib: h('19:10'), isha: h('20:25') } };
 const HOTEL = { lat: 3.1579, lng: 101.6995 };
 const near = (dLat: number, dLng = 0) => ({ lat: HOTEL.lat + dLat, lng: HOTEL.lng + dLng });
-const frame = (over: Partial<DayFrame> = {}): DayFrame => ({ day: '2026-12-07', start: h('09:00'), end: h('20:30'), base: HOTEL, blocks: [], prayers: null, ...over });
+const frame = (over: Partial<DayFrame> = {}): DayFrame => ({ day: '2026-12-07', start: h('09:00'), end: h('20:30'), base: HOTEL, baseKnown: true, blocks: [], prayers: null, ...over });
 const flat = () => 10; // every hop 10 min
 const unit = (id: string, duration: number, over: Partial<Unit> = {}): Unit => ({ id, loc: HOTEL, duration, ...over });
 
@@ -71,6 +71,23 @@ describe('orderByDistance', () => {
   it('visits stops along a line instead of zig-zagging', () => {
     const us = [unit('far', 60, { loc: near(0.03) }), unit('mid', 60, { loc: near(0.02) }), unit('close', 60, { loc: near(0.01) })];
     expect(orderByDistance(HOTEL, us).map((u) => u.id)).toEqual(['close', 'mid', 'far']);
+  });
+});
+
+describe('arrangeTrip without a hotel', () => {
+  it('does not charge travel from a far-away country centre', () => {
+    // Destination "South Korea" sits in the middle of the country, ~200 km from Seoul.
+    const KOREA = { lat: 35.9078, lng: 127.7669 };
+    const seoul = (d: number) => ({ lat: 37.565 + d, lng: 126.982 });
+    const r = arrangeTrip(
+      [frame({ base: KOREA, baseKnown: false, prayers: PRAYERS })],
+      [unit('lotte', 90, { loc: seoul(0), hours: ['Monday: 9:30202fAM2009–20098:00202fPM'] }), unit('square', 75, { loc: seoul(0.007) })],
+      { maxStops: 5 },
+    );
+    expect(r.unplaced).toEqual([]);
+    expect(r.days[0].timing.placed.map((p) => clock(p.start))[0] <= '09:30').toBe(true);
+    // Prayer breaks are prayed near the stops, not at the country centre.
+    expect(r.days[0].timing.prayers.every((p) => Math.abs(p.at.lat - 37.57) < 0.1)).toBe(true);
   });
 });
 
@@ -155,6 +172,23 @@ describe('dayFrames', () => {
     // Day 1 in KL, day 2 in Tokyo: Dhuhr in local time differs (≈13:10 KL vs ≈11:25 Tokyo in December).
     expect(f[0].prayers!.times.dhuhr).toBeGreaterThan(h('12:50'));
     expect(f[1].prayers!.times.dhuhr).toBeLessThan(h('11:45'));
+  });
+
+  it('plans a same-day international arrival only after landing', () => {
+    // KL 13:58 → Seoul 16:58 (both local times, same date): nothing in Seoul before ~18:00.
+    const SEOUL = { location: { lat: 37.5665, lng: 126.978 }, timezone: 'Asia/Seoul', countryCode: 'KR' };
+    const inbound = { kind: 'flight' as const, startLocal: '2026-09-28T13:58', endLocal: '2026-09-28T16:58', from: { location: KL.location }, to: { location: { lat: 37.46, lng: 126.44 } } };
+    const [f] = dayFrames(['2026-09-28'], [inbound], [SEOUL], { pace: 'moderate', praying: false });
+    expect(clock(f.start)).toBe('18:00');
+    expect(f.blocks).toEqual([]);
+    expect(f.baseKnown).toBe(true);
+  });
+
+  it('ends the day before a same-day flight home', () => {
+    const SEOUL = { location: { lat: 37.5665, lng: 126.978 }, timezone: 'Asia/Seoul', countryCode: 'KR' };
+    const home = { kind: 'flight' as const, startLocal: '2026-09-30T18:00', endLocal: '2026-09-30T23:30', from: { location: { lat: 37.46, lng: 126.44 } }, to: { location: KL.location } };
+    const [f] = dayFrames(['2026-09-30'], [home], [SEOUL], { pace: 'moderate', praying: false });
+    expect(clock(f.end)).toBe('15:30');
   });
 
   it('has no prayer times when nobody asked for prayer breaks', () => {
