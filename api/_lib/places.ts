@@ -17,6 +17,7 @@ const BASE_FIELDS = [
   'priceLevel',
   'photos',
   'websiteUri',
+  'internationalPhoneNumber',
 ];
 /** Extra fields for AI analysis (reviews are a pricier SKU — only fetched when analysing). */
 const ANALYSIS_FIELDS = ['reviews', 'editorialSummary', 'servesBeer', 'servesWine', 'servesVegetarianFood'];
@@ -81,6 +82,7 @@ interface RawPlace {
   priceLevel?: string;
   photos?: { name: string; authorAttributions?: { displayName?: string }[] }[];
   websiteUri?: string;
+  internationalPhoneNumber?: string;
   reviews?: { rating?: number; text?: { text?: string }; originalText?: { text?: string } }[];
   editorialSummary?: { text?: string };
   servesBeer?: boolean;
@@ -112,8 +114,10 @@ export async function placeDetails(placeId: string, opts: { forAnalysis?: boolea
     ...(p.rating !== undefined ? { rating: p.rating } : {}),
     ...(p.userRatingCount !== undefined ? { ratingCount: p.userRatingCount } : {}),
     ...(p.websiteUri && p.websiteUri.length <= 500 ? { website: p.websiteUri } : {}),
+    ...(p.internationalPhoneNumber && p.internationalPhoneNumber.length <= 40 ? { phone: p.internationalPhoneNumber } : {}),
     ...(photo ? { photoName: photo.name.slice(0, 600) } : {}),
     ...(photo?.authorAttributions?.[0]?.displayName ? { photoAttribution: photo.authorAttributions[0].displayName.slice(0, 200) } : {}),
+    fetchedAt: Date.now(),
   };
   return {
     place,

@@ -170,13 +170,20 @@ export const IdeaPlace = PlaceRef.extend({
   rating: z.number().min(0).max(5).optional(),
   ratingCount: z.number().int().nonnegative().optional(),
   website: z.string().url().max(500).optional(),
+  /** International format, e.g. "+60 3-2141 0000" — to ask the restaurant directly. */
+  phone: z.string().max(40).optional(),
   photoName: z.string().max(600).optional(), // Places photo resource name
   /** Direct image URL resolved once (Google serves it cacheably) — avoids a billed photo call per view. */
   photoUrl: z.string().url().max(2000).optional(),
   photoUrlAt: Millis.optional(),
   photoAttribution: z.string().max(200).optional(),
+  /** When these details came from Google — refreshed after PLACE_REFRESH_MS (Google caching terms). */
+  fetchedAt: Millis.optional(),
 });
 export type IdeaPlace = z.infer<typeof IdeaPlace>;
+
+/** Google allows caching place content (except the place ID) for up to 30 days. */
+export const PLACE_REFRESH_MS = 30 * 86_400_000;
 
 export const Idea = z.object({
   id: Id,
@@ -215,6 +222,9 @@ export const Idea = z.object({
   updatedAt: Millis,
 });
 export type Idea = z.infer<typeof Idea>;
+
+export const placeIsStale = (idea: Pick<Idea, 'place' | 'createdAt'>, now = Date.now()) =>
+  !!idea.place.placeId && now - (idea.place.fetchedAt ?? idea.createdAt) > PLACE_REFRESH_MS;
 
 export interface VoteTally {
   up: number;

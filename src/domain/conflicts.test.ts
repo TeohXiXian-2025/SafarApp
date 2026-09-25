@@ -45,6 +45,12 @@ describe('ideaConflicts', () => {
     const far = idea({ prayer: { access: 'far', places: [] } }, { category: 'attraction' });
     expect(ideaConflicts(far, [member('a', { prayerReminders: true }), member('b', { prayerReminders: false })]).map((c) => c.uid)).toEqual(['a']);
   });
+  it('prayer-far suggests going between prayers', () => {
+    const far = idea({ prayer: { access: 'far', places: [] } }, { category: 'attraction', location: { lat: 3.139, lng: 101.6869 } });
+    const trip = { startDate: '2026-10-12', endDate: '2026-10-14', destinations: [{ name: 'KL', location: { lat: 3.1, lng: 101.7 }, timezone: 'Asia/Kuala_Lumpur', countryCode: 'MY' }] };
+    const [c] = ideaConflicts(far, [member('a', { prayerReminders: true })], { trip });
+    expect(c.detail).toMatch(/Works if you go .*after (Dhuhr|Asr|Maghrib)|morning/);
+  });
   it('budget hint for pricey food against a small daily budget', () => {
     const cs = ideaConflicts(idea({ tier: 'certified' }, { priceLevel: 4 }), [member('a', { dailyBudget: 150 })], { currency: 'MYR' });
     expect(cs[0]).toMatchObject({ kind: 'budget', severity: 'warning' });

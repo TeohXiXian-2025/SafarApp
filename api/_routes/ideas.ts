@@ -10,8 +10,11 @@ import {
   paths,
   summarizeReports,
   tallyVotes,
+  placeIsStale,
   conflictKey,
   ideaConflicts,
+  visitPlan,
+  windowText,
   Member as MemberSchema,
   type Member,
 } from '../../src/domain/index.js';
@@ -254,6 +257,34 @@ export const ideaRoutes: RouteTable = {
     { perMinute: 30 },
   ),
 
+  /**
+   * Re-fetch place details older than 30 days (Google's caching terms) for a
+   * trip's ideas. Called when the board opens; a few per call keeps it cheap.
+   */
+  'POST ideas/refresh': withTrip(
+    async (_req, { tripId }) => {
+      const snap = await adminDb().collection(paths.ideas(tripId)).get();
+      const stale = snap.docs
+        .map((d) => Idea.safeParse(d.data()))
+        .flatMap((r) => (r.success && placeIsStale(r.data) ? [r.data] : []))
+        .slice(0, 8);
+      let refreshed = 0;
+      for (const idea of stale) {
+        const fresh = await placeDetails(idea.place.placeId!).catch(() => null);
+        if (!fresh) continue;
+        const place = { ...fresh.place, category: idea.place.category }; // keep the category people have been seeing
+        if (place.photoName) {
+          const url = await photoUrl(place.photoName);
+          if (url) Object.assign(place, { photoUrl: url, photoUrlAt: Date.now() });
+        }
+        await ideaRef(tripId, idea.id).update({ place, updatedAt: Date.now() });
+        refreshed++;
+      }
+      return json({ refreshed, remaining: Math.max(0, stale.length - refreshed) });
+    },
+    { perMinute: 4 },
+  ),
+
   /** Halal Radar + review analysis for an idea (cached per place for 14 days). */
   'POST ideas/analyze': withTrip(
     async (req, { tripId, user }) => {
@@ -263,15 +294,19 @@ export const ideaRoutes: RouteTable = {
 
       const cached = force ? null : (await cacheRef.get()).data();
       let result: { halal: Idea['halal']; sentiment?: Idea['sentiment'] };
+      // Picked up on analysis so ideas added before phone numbers were fetched get one too.
+      let phone: string | undefined;
       if (cached && cached.v === ANALYSIS_VERSION && Date.now() - Number(cached.at) < ANALYSIS_TTL) {
         result = { halal: cached.halal, ...(cached.sentiment ? { sentiment: cached.sentiment } : {}) };
+        phone = cached.phone;
       } else {
         await useDailyQuota(user.uid, 'analyze');
         await ideaRef(tripId, ideaId).update({ analysis: { status: 'pending', at: Date.now() } });
         try {
           const details = await placeDetails(idea.place.placeId!, { forAnalysis: true });
           result = await analyzePlace(details);
-          await cacheRef.set({ ...result, v: ANALYSIS_VERSION, at: Date.now() });
+          phone = details.place.phone;
+          await cacheRef.set({ ...result, ...(phone ? { phone } : {}), v: ANALYSIS_VERSION, at: Date.now() });
         } catch (err) {
           const message = err instanceof HttpError ? err.message : 'Analysis failed';
           await ideaRef(tripId, ideaId).update({ analysis: { status: 'error', at: Date.now(), error: message.slice(0, 300) } });
@@ -281,6 +316,7 @@ export const ideaRoutes: RouteTable = {
       await ideaRef(tripId, ideaId).update({
         halal: result.halal,
         ...(result.sentiment ? { sentiment: result.sentiment } : {}),
+        ...(phone && !idea.place.phone ? { 'place.phone': phone } : {}),
         analysis: { status: 'done', at: Date.now() },
         updatedAt: Date.now(),
       });
@@ -301,7 +337,7 @@ export const ideaRoutes: RouteTable = {
       const [idea, trip, memberSnap] = await Promise.all([loadIdea(tripId, ideaId), loadTrip(tripId), db.collection(paths.members(tripId)).get()]);
       const members = memberSnap.docs.map((d) => MemberSchema.safeParse(d.data())).flatMap((r) => (r.success ? [r.data] : []));
       const summary = (await db.doc(paths.halalSummary(idea.placeKey)).get()).data() as HalalSummary | undefined;
-      const conflicts = ideaConflicts(idea, members, { currency: trip.currency, ...(summary?.tier ? { communityTier: summary.tier } : {}) });
+      const conflicts = ideaConflicts(idea, members, { currency: trip.currency, trip, ...(summary?.tier ? { communityTier: summary.tier } : {}) });
       if (!conflicts.length) return json({ conflicts, suggestions: [] });
       const key = conflictKey(conflicts);
       if (!force && idea.resolution?.key === key) return json({ conflicts, suggestions: idea.resolution.suggestions });
@@ -309,19 +345,21 @@ export const ideaRoutes: RouteTable = {
       await useDailyQuota(user.uid, 'analyze');
       const h = idea.halal;
       const facts = {
-        place: { name: idea.place.name, kind: idea.place.typeLabel ?? idea.place.category, address: idea.place.address, openingHours: idea.place.openingHours, durationMin: idea.estDurationMin },
+        place: { name: idea.place.name, kind: idea.place.typeLabel ?? idea.place.category, address: idea.place.address, phone: idea.place.phone, openingHours: idea.place.openingHours, durationMin: idea.estDurationMin },
         radar: h ? { verdict: h.verdict, tier: h.tier, flags: h.flags, evidence: h.evidence.map((e) => e.text) } : null,
         conflicts: conflicts.map((c) => ({ member: c.name, severity: c.severity, issue: c.detail })),
         prayerSpacesNearby: h?.prayer?.places.map((p) => `${p.name} (${p.walkMin} min walk)`) ?? [],
         halalFoodNearby: h?.halalFood?.places.map((p) => `${p.name} (${p.walkMin} min walk)`) ?? [],
+        // Between-prayer slots the whole visit fits in (only when no mosque is close).
+        visitWindowsBetweenPrayers: h?.prayer?.access === 'far' ? visitPlan(idea, trip).windows.slice(0, 3).map(windowText) : undefined,
         groupSize: members.length,
       };
       const ai = await extractJson({
         system: `You plan group trips where some members are Muslim or have other needs. An activity the group likes conflicts with some members' preferences. Suggest 2–4 practical middle-ground solutions so everyone can still enjoy the day. Types:
 - "alternative": a nearby substitute for the affected members (ONLY use places from halalFoodNearby / prayerSpacesNearby — never invent place names).
 - "split": the group splits briefly (e.g. others eat here, affected members eat at X, meet after).
-- "timing": schedule around it (e.g. visit after Asr, pray at X first, go at lunch when the halal counter is open).
-- "prep": something to do beforehand (e.g. ask staff about the halal kitchen, pack a prayer mat, set a spending cap).
+- "timing": schedule around it (e.g. visit after Asr, pray at X first, go at lunch when the halal counter is open). If visitWindowsBetweenPrayers is given, use those exact times.
+- "prep": something to do beforehand (e.g. call the restaurant on its phone number to ask about the halal kitchen, pack a prayer mat, set a spending cap).
 Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMembers = names of the members it helps. Be specific to the facts; no generic advice.`,
         parts: [{ text: JSON.stringify(facts) }],
         responseSchema: {

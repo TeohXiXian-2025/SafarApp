@@ -2,8 +2,9 @@
 // (what people see) and the server (what the AI resolves). Pure function.
 import { HALAL_TIERS, tierSatisfies, type HalalTier } from './common.js';
 import type { Idea } from './idea.js';
+import { openingRanges, planningDate, prayerTimesOn, visitWindows, windowText, type VisitWindow } from './prayer.js';
 import { HALAL_TIER_LABELS } from './prefs.js';
-import type { Member } from './trip.js';
+import type { Member, Trip } from './trip.js';
 
 export type ConflictKind = 'halal' | 'pork' | 'alcohol' | 'prayer' | 'budget' | 'not_friendly';
 
@@ -26,8 +27,39 @@ const USD_TO: Record<string, number> = {
 
 const PRAYER_KM = { walkable: '≤ 10 min walk', nearby: '≤ 25 min walk' } as const;
 
-export function ideaConflicts(idea: Idea, members: Member[], opts: { currency?: string; communityTier?: HalalTier } = {}): Conflict[] {
+export interface VisitPlan {
+  date: string;
+  /** Stretches between prayers the whole visit fits in, longest first. */
+  windows: VisitWindow[];
+  /** Closed on that day (per Google's opening hours). */
+  closed: boolean;
+}
+
+type TripDays = Pick<Trip, 'destinations' | 'startDate' | 'endDate'>;
+
+/**
+ * When to go so nobody misses a prayer: pray first, visit, be back before the
+ * next one. Uses the trip destination closest to the place for its timezone.
+ */
+export function visitPlan(idea: Idea, trip: TripDays, now = new Date()): VisitPlan {
+  const at = idea.place.location;
+  const dest = [...trip.destinations].sort(
+    (a, b) => (a.location.lat - at.lat) ** 2 + (a.location.lng - at.lng) ** 2 - ((b.location.lat - at.lat) ** 2 + (b.location.lng - at.lng) ** 2),
+  )[0];
+  const date = planningDate(trip.startDate, trip.endDate, dest.timezone, now);
+  const open = openingRanges(idea.place.openingHours, date);
+  const day = prayerTimesOn(date, at, dest.timezone, dest.countryCode);
+  return { date, windows: open?.length === 0 ? [] : visitWindows(day, idea.estDurationMin, open), closed: open?.length === 0 };
+}
+
+export function ideaConflicts(
+  idea: Idea,
+  members: Member[],
+  opts: { currency?: string; communityTier?: HalalTier; trip?: TripDays } = {},
+): Conflict[] {
   const out: Conflict[] = [];
+  const farFromPrayer = idea.halal?.prayer?.access === 'far';
+  const plan = farFromPrayer && opts.trip ? visitPlan(idea, opts.trip) : null;
   const h = idea.halal;
   const food = idea.place.category === 'food';
   const tier = opts.communityTier ?? h?.tier;
@@ -55,9 +87,16 @@ export function ideaConflicts(idea: Idea, members: Member[], opts: { currency?: 
       if (h.flags.servesAlcohol) add('alcohol', 'warning', food ? 'Serves alcohol.' : 'Alcohol is served here.');
     }
 
-    if (p.prayerReminders && h?.prayer && h.prayer.access === 'far') {
+    if (p.prayerReminders && h?.prayer && farFromPrayer) {
       const nearest = h.prayer.places[0];
-      add('prayer', 'warning', nearest ? `Nearest prayer space is ${nearest.name}, ${nearest.walkMin} min walk away.` : 'No mosque or prayer room found within 2 km.');
+      const where = nearest ? `Nearest prayer space is ${nearest.name}, ${nearest.walkMin} min walk away.` : 'No mosque or prayer room found within 2 km.';
+      // Far from a mosque is fine if the visit sits between two prayers.
+      const when = !plan || plan.closed
+        ? ''
+        : plan.windows[0]
+          ? ` Works if you go ${windowText(plan.windows[0])}.`
+          : ` The ~${idea.estDurationMin} min visit doesn't fit between two prayers — plan where to pray.`;
+      add('prayer', 'warning', where + when);
     }
 
     if (food && p.dailyBudget && idea.place.priceLevel && opts.currency && USD_TO[opts.currency]) {

@@ -6,3 +6,4 @@ export * from './extras.js';
 export * from './paths.js';
 export * from './prefs.js';
 export * from './conflicts.js';
+export * from './prayer.js';

@@ -7,7 +7,9 @@ import {
   Landmark,
   Loader2,
   MapPin,
+  MessageCircle,
   MoreHorizontal,
+  Phone,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
@@ -19,7 +21,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { conflictKey, HalalSummary, ideaConflicts, paths, tallyVotes, type Conflict, type Idea, type NearbyPlace } from '../../domain';
+import { conflictKey, HalalSummary, ideaConflicts, paths, tallyVotes, visitPlan, windowText, type Conflict, type Idea, type NearbyPlace } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useDoc } from '../../lib/firestore';
 import { Avatar, Badge, cx, ErrorBanner } from '../../ui';
@@ -57,6 +59,7 @@ const SUGGESTION_TYPE = { alternative: 'Alternative', split: 'Split up briefly',
 const ACCEPTED: Idea['status'][] = ['backlog', 'scheduled', 'split_pending'];
 
 const fmtDist = (m: number) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
+const fmtDay = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 
 /** Checks run one after another, so a big import can take a few minutes to finish. */
 const STALE_MS = 4 * 60_000;
@@ -106,7 +109,7 @@ export function IdeaCard({ idea }: { idea: Idea }) {
     return act(action, () => api.post('ideas/decide', { ideaId: idea.id, action }, q));
   };
 
-  const conflicts = ideaConflicts(idea, members, { currency: trip.currency, ...(community.data?.tier ? { communityTier: community.data.tier } : {}) });
+  const conflicts = ideaConflicts(idea, members, { currency: trip.currency, trip, ...(community.data?.tier ? { communityTier: community.data.tier } : {}) });
   const cKey = conflictKey(conflicts);
   const accepted = ACCEPTED.includes(idea.status);
   const suggestions = idea.resolution?.key === cKey ? idea.resolution.suggestions : null;
@@ -124,6 +127,12 @@ export function IdeaCard({ idea }: { idea: Idea }) {
   const label = halalLabel(idea, community.data);
   const prayer = idea.halal?.prayer;
   const halalFood = idea.halal?.halalFood?.places ?? [];
+  // No mosque close by → suggest going between two prayers instead.
+  const plan = !pending && prayer?.access === 'far' ? visitPlan(idea, trip) : null;
+  const food = idea.place.category === 'food';
+  const phone = idea.place.phone;
+  // Listed / likely / unclear — worth a quick call before going.
+  const askRestaurant = food && !!phone && !pending && (!label || label.tone === 'ok' || label.tone === 'warn' || label.tone === 'muted');
   const HalalIcon = label ? TONE_ICON[label.tone] : ShieldQuestion;
   const s = idea.sentiment ? SENTIMENT[idea.sentiment.verdict] : null;
   const canManage = idea.createdBy === me.uid || isAdmin;
@@ -236,6 +245,39 @@ export function IdeaCard({ idea }: { idea: Idea }) {
             </span>
           </p>
         )}
+        {plan && (
+          <div className="flex items-start gap-1.5 text-xs text-[#3E4947]">
+            <Clock className="w-3.5 h-3.5 mt-px shrink-0" />
+            {plan.closed ? (
+              <span>Closed on {fmtDay(plan.date)}.</span>
+            ) : plan.windows.length ? (
+              <span>
+                Still works if you go between prayers ({fmtDay(plan.date)}):
+                {plan.windows.slice(0, 2).map((w) => (
+                  <span key={w.start} className="block font-semibold text-[#161C23]">
+                    {windowText(w)}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span>The ~{idea.estDurationMin} min visit doesn't fit between two prayers on {fmtDay(plan.date)} — plan where to pray.</span>
+            )}
+          </div>
+        )}
+        {askRestaurant && phone && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span className="text-[#6D7A77]">Not sure? Ask them:</span>
+            <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-1 font-bold text-[#00685F]">
+              <Phone className="w-3.5 h-3.5" /> {phone}
+            </a>
+            <a href={`https://wa.me/${phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-bold text-[#00685F]">
+              <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+            </a>
+            <button type="button" onClick={() => setReporting(true)} className="font-semibold text-[#6D7A77] underline underline-offset-2">
+              Report what they said
+            </button>
+          </div>
+        )}
 
         {details && (
           <div className="space-y-2 text-sm">
@@ -271,7 +313,9 @@ export function IdeaCard({ idea }: { idea: Idea }) {
                 </ul>
               </details>
             )}
-            <p className="text-[11px] text-[#9AA5A3]">Always confirm halal status with the restaurant. Place info © Google.</p>
+            <p className="text-[11px] text-[#9AA5A3]">
+              Always confirm halal status with the restaurant{food ? ' — ask if it is halal-certified and whether pork, lard or alcohol (e.g. mirin, cooking wine) is used' : ''}. Place info © Google.
+            </p>
           </div>
         )}
 

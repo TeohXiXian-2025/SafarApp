@@ -31,6 +31,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Menu as MenuIcon,
+  Phone,
 } from 'lucide-react';
 import { useHalalRadar, getMealtimeLabel } from '../hooks/useHalalRadar';
 import {
@@ -361,9 +362,17 @@ const MenuModal: React.FC<{
               Menu verified for halal compliance — all ingredients checked
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 text-amber-600 text-xs font-medium mb-4 bg-amber-50 p-2 rounded-xl">
-              <AlertCircle size={14} />
-              Menu not independently verified — check with staff for ingredients
+            <div className="text-amber-600 text-xs font-medium mb-4 bg-amber-50 p-2 rounded-xl space-y-1">
+              <div className="flex items-center gap-1.5">
+                <AlertCircle size={14} className="shrink-0" />
+                Menu not independently verified — check with staff for ingredients
+              </div>
+              {restaurant.phone && (
+                <a href={`tel:${restaurant.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-1.5 font-bold text-amber-700 underline underline-offset-2">
+                  <Phone size={14} className="shrink-0" />
+                  Call to verify: {restaurant.phone}
+                </a>
+              )}
             </div>
           )}
 

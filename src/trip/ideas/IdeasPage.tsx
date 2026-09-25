@@ -1,7 +1,8 @@
 import { Lightbulb, Plus } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { Idea, paths, type IdeaStatus } from '../../domain';
+import { Idea, paths, placeIsStale, type IdeaStatus } from '../../domain';
+import { api } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
 import { useTrip } from '../TripLayout';
@@ -34,6 +35,15 @@ export function IdeasPage() {
     }
   }, [params, setParams]);
   const ideas = useQuery(`ideas:${trip.id}`, () => paths.ideas(trip.id), Idea);
+  // Google place details may only be cached for 30 days — refresh old ones once per visit.
+  const refreshed = useRef('');
+  const hasStale = !ideas.loading && ideas.data.some((i) => placeIsStale(i));
+  useEffect(() => {
+    if (hasStale && navigator.onLine && refreshed.current !== trip.id) {
+      refreshed.current = trip.id;
+      void api.post('ideas/refresh', {}, { tripId: trip.id }).catch(() => {});
+    }
+  }, [hasStale, trip.id]);
 
   const counts = useMemo(
     () => Object.fromEntries(FILTERS.map((f) => [f.key, ideas.data.filter((i) => f.statuses.includes(i.status)).length])) as Record<Filter, number>,
