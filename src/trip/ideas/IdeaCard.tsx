@@ -21,13 +21,14 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { conflictKey, HalalSummary, ideaConflicts, paths, tallyVotes, visitPlan, windowText, type Conflict, type Idea, type NearbyPlace } from '../../domain';
+import { conflictKey, HalalSummary, ideaConflicts, paths, tallyVotes, visitPlan, windowText, type Conflict, type Idea, type NearbyPlace, type Split } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useDoc } from '../../lib/firestore';
 import { Avatar, Badge, cx, ErrorBanner } from '../../ui';
 import { useTrip } from '../TripLayout';
 import { EVIDENCE_SOURCE, halalLabel, placePhotoUrl, type Tone } from './halalLabel';
 import { ReportHalalSheet } from './ReportHalalSheet';
+import { SplitBox } from './SplitBox';
 
 const TONE: Record<Tone, string> = {
   good: 'bg-[#E3F4EC] text-[#0B6B45] border-[#B7E1CB]',
@@ -64,7 +65,7 @@ const fmtDay = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateStrin
 /** Checks run one after another, so a big import can take a few minutes to finish. */
 const STALE_MS = 4 * 60_000;
 
-export function IdeaCard({ idea }: { idea: Idea }) {
+export function IdeaCard({ idea, split, splitOther, scheduledDay }: { idea: Idea; split?: Split | null; splitOther?: Idea; scheduledDay?: string }) {
   const { trip, members, me, isAdmin } = useTrip();
   const community = useDoc(paths.halalSummary(idea.placeKey), HalalSummary);
   const [busy, setBusy] = useState<string | null>(null);
@@ -101,7 +102,8 @@ export function IdeaCard({ idea }: { idea: Idea }) {
 
   const tally = tallyVotes(idea.votes, trip.memberIds);
   const myVote = idea.votes[me.uid]?.value ?? 0;
-  const closed = !!idea.decidedBy || idea.status === 'scheduled';
+  // Split ideas are decided through the split, not by votes.
+  const closed = !!idea.decidedBy || idea.status === 'scheduled' || !!idea.splitId;
   const byUid = new Map(members.map((m) => [m.uid, m]));
   const vote = (value: 1 | -1) => act(`vote${value}`, () => api.post('ideas/vote', { ideaId: idea.id, value: myVote === value ? 0 : value }, q));
   const decide = (action: 'close' | 'backlog' | 'reject' | 'reopen') => {
@@ -109,7 +111,7 @@ export function IdeaCard({ idea }: { idea: Idea }) {
     return act(action, () => api.post('ideas/decide', { ideaId: idea.id, action }, q));
   };
 
-  const conflicts = ideaConflicts(idea, members, { currency: trip.currency, trip, ...(community.data?.tier ? { communityTier: community.data.tier } : {}) });
+  const conflicts = ideaConflicts(idea, members, { currency: trip.currency, trip, day: scheduledDay, ...(community.data?.tier ? { communityTier: community.data.tier } : {}) });
   const cKey = conflictKey(conflicts);
   const accepted = ACCEPTED.includes(idea.status);
   const suggestions = idea.resolution?.key === cKey ? idea.resolution.suggestions : null;
@@ -128,7 +130,7 @@ export function IdeaCard({ idea }: { idea: Idea }) {
   const prayer = idea.halal?.prayer;
   const halalFood = idea.halal?.halalFood?.places ?? [];
   // No mosque close by → suggest going between two prayers instead.
-  const plan = !pending && prayer?.access === 'far' ? visitPlan(idea, trip) : null;
+  const plan = !pending && prayer?.access === 'far' ? visitPlan(idea, trip, new Date(), scheduledDay) : null;
   const food = idea.place.category === 'food';
   const phone = idea.place.phone;
   // Listed / likely / unclear — worth a quick call before going.
@@ -197,9 +199,9 @@ export function IdeaCard({ idea }: { idea: Idea }) {
                   Re-check halal & reviews
                 </MenuItem>
                 {isAdmin && !closed && idea.status === 'voting' && <MenuItem onClick={() => decide('close')}>Close voting now</MenuItem>}
-                {isAdmin && idea.status !== 'backlog' && <MenuItem onClick={() => decide('backlog')}>Move to backlog</MenuItem>}
-                {isAdmin && idea.status !== 'rejected' && <MenuItem onClick={() => decide('reject')}>Reject</MenuItem>}
-                {isAdmin && closed && <MenuItem onClick={() => decide('reopen')}>Reopen voting</MenuItem>}
+                {isAdmin && !idea.splitId && idea.status !== 'scheduled' && idea.status !== 'backlog' && <MenuItem onClick={() => decide('backlog')}>Move to backlog</MenuItem>}
+                {isAdmin && !idea.splitId && idea.status !== 'scheduled' && idea.status !== 'rejected' && <MenuItem onClick={() => decide('reject')}>Reject</MenuItem>}
+                {isAdmin && !idea.splitId && idea.status !== 'scheduled' && closed && <MenuItem onClick={() => decide('reopen')}>Reopen voting</MenuItem>}
                 {canManage && (
                   <MenuItem
                     danger
@@ -319,6 +321,8 @@ export function IdeaCard({ idea }: { idea: Idea }) {
           </div>
         )}
 
+        <SplitBox idea={idea} split={split ?? null} other={splitOther} conflicts={conflicts} />
+
         {!!conflicts.length && (
           <ConflictBox conflicts={conflicts} accepted={accepted} suggestions={suggestions} busy={busy === 'resolve'} canResolve={mayResolve} onResolve={() => resolve(!!suggestions)} />
         )}
@@ -371,7 +375,8 @@ export function IdeaCard({ idea }: { idea: Idea }) {
               Waiting for {tally.pending.map((u) => (u === me.uid ? 'you' : byUid.get(u)?.displayName ?? 'someone')).join(', ')}
             </p>
           )}
-          {idea.status === 'mixed' && <p className="text-[11px] text-[#96590B]">Votes are split — the admin can move it to the backlog or reject it.</p>}
+          {idea.status === 'mixed' && !idea.splitId && <p className="text-[11px] text-[#96590B]">Votes are split — suggest a split above, or the admin can move it to the backlog or reject it.</p>}
+          {idea.status === 'scheduled' && scheduledDay && <p className="text-[11px] text-[#6D7A77]">On the timeline · {fmtDay(scheduledDay)}</p>}
           {closed && idea.decidedBy && <p className="text-[11px] text-[#6D7A77]">Decided by {byUid.get(idea.decidedBy)?.displayName ?? 'the admin'}.</p>}
         </div>
         <ErrorBanner>{error}</ErrorBanner>

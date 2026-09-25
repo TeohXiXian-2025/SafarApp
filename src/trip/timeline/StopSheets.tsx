@@ -62,6 +62,8 @@ export function EditStopSheet({
   item: ScheduleItem | null;
   idea?: Idea;
   title: string;
+  /** Split pairs: the length comes from the split (both groups + walking). */
+  fixedLength?: boolean;
   days: string[];
   onClose: () => void;
   onSave: (patch: { day: string; start: string; durationMin: number }) => Promise<void>;
@@ -78,6 +80,7 @@ export function EditStopSheet({
 function EditStopForm({
   item,
   idea,
+  fixedLength,
   days,
   onClose,
   onSave,
@@ -85,6 +88,7 @@ function EditStopForm({
 }: {
   item: ScheduleItem;
   idea?: Idea;
+  fixedLength?: boolean;
   days: string[];
   onClose: () => void;
   onSave: (patch: { day: string; start: string; durationMin: number }) => Promise<void>;
@@ -126,10 +130,13 @@ function EditStopForm({
         <Field label="Start">
           <Input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} required />
         </Field>
-        <Field label="How long">
-          <DurationSelect value={duration} onChange={setDuration} />
-        </Field>
+        {!fixedLength && (
+          <Field label="How long">
+            <DurationSelect value={duration} onChange={setDuration} />
+          </Field>
+        )}
       </div>
+      {fixedLength && <p className="text-xs text-[#6D7A77]">Both groups move together; the split takes {durLabel(duration)} including the walk.</p>}
       {start && <p className="text-xs text-[#6D7A77]">Ends at {fmtClock(Math.min(toMin(start) + duration, 24 * 60 - 1))}</p>}
       <HoursHint idea={idea} day={day} />
       {error && <ErrorBanner>{error}</ErrorBanner>}

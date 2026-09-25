@@ -1,3 +1,4 @@
+import { FieldValue } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import {
   HalalReport,
@@ -12,6 +13,7 @@ import {
   tallyVotes,
   placeIsStale,
   ideaItemId,
+  Split,
   conflictKey,
   ideaConflicts,
   visitPlan,
@@ -33,10 +35,11 @@ import { transcribe } from '../_lib/groq.js';
 import type { Part } from '@google/genai';
 import { loadTrip, logActivity } from '../_lib/trip.js';
 import { useDailyQuota } from '../_lib/quota.js';
+import { dissolveSplit } from './splits.js';
 
 const ANALYSIS_TTL = 14 * 86_400_000;
 /** Bump when the analysis format changes so cached results are redone. */
-const ANALYSIS_VERSION = 3;
+const ANALYSIS_VERSION = 4; // 4: OSM halal eateries no longer counted as prayer spaces
 const ideaRef = (tripId: string, id: string) => adminDb().doc(paths.idea(tripId, id));
 
 async function loadIdea(tripId: string, id: string): Promise<Idea> {
@@ -409,8 +412,8 @@ Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMember
         const snap = await tx.get(ideaRef(tripId, body.ideaId));
         if (!snap.exists) throw new HttpError(404, 'Idea not found');
         const idea = Idea.parse(snap.data());
-        if (!['voting', 'mixed', 'backlog', 'rejected'].includes(idea.status) || idea.decidedBy) {
-          throw new HttpError(409, 'Voting on this idea is closed');
+        if (!['voting', 'mixed', 'backlog', 'rejected'].includes(idea.status) || idea.decidedBy || idea.splitId) {
+          throw new HttpError(409, idea.splitId ? 'This idea is part of a split — the admin decides on the split' : 'Voting on this idea is closed');
         }
         const votes = { ...idea.votes };
         if (body.value === 0) delete votes[member.uid];
@@ -439,12 +442,14 @@ Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMember
         if (!snap.exists) throw new HttpError(404, 'Idea not found');
         const idea = Idea.parse(snap.data());
         if (idea.status === 'scheduled') throw new HttpError(409, `${idea.place.name} is on the timeline — take it off first`);
+        if (idea.splitId) throw new HttpError(409, `${idea.place.name} is part of a split — approve, reject or cancel the split instead`);
         const tally = tallyVotes(idea.votes, trip.memberIds);
         const next =
           action === 'close' ? ideaStatusFromVotes(tally, true) : action === 'backlog' ? 'backlog' : action === 'reject' ? 'rejected' : ideaStatusFromVotes(tally);
         tx.update(snap.ref, {
           status: next,
-          ...(action === 'reopen' ? { decidedBy: null } : { decidedBy: member.uid }),
+          // Delete, not null: the schema allows the field to be absent, not null.
+          ...(action === 'reopen' ? { decidedBy: FieldValue.delete() } : { decidedBy: member.uid }),
           updatedAt: Date.now(),
         });
         const verb = { close: `closed voting on ${idea.place.name} (${next})`, backlog: `moved ${idea.place.name} to the backlog`, reject: `rejected ${idea.place.name}`, reopen: `reopened voting on ${idea.place.name}` }[action];
@@ -463,6 +468,13 @@ Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMember
       const idea = await loadIdea(tripId, ideaId);
       if (!canManage(idea, member)) throw new HttpError(403, 'Only the person who suggested this, or the admin, can remove it');
       const batch = adminDb().batch();
+      // Removing either half of a split removes the split: the alternative goes, the original stays (unless it's the one deleted).
+      const split = idea.splitId ? Split.safeParse((await adminDb().doc(`${paths.splits(tripId)}/${idea.splitId}`).get()).data()) : null;
+      if (split?.success && split.data.status !== 'rejected') {
+        const s = split.data;
+        dissolveSplit(batch, tripId, s, { restoreOriginal: s.trackA.ideaId !== ideaId });
+        batch.delete(adminDb().doc(`${paths.schedule(tripId)}/${ideaItemId(s.trackA.ideaId)}`));
+      }
       batch.delete(ideaRef(tripId, ideaId));
       batch.delete(adminDb().doc(`${paths.schedule(tripId)}/${ideaItemId(ideaId)}`)); // and its timeline slot
       logActivity(batch, tripId, member.uid, `${member.displayName} removed ${idea.place.name}`);

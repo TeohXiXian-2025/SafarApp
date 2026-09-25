@@ -59,14 +59,20 @@ export const SplitTrack = z.object({
 
 export const Split = z.object({
   id: Id,
-  /** The idea that received mixed votes. */
+  /** The idea that received mixed votes (or clashes with someone's halal needs). */
   sourceIdeaId: Id,
+  /** Its status before the split, restored if the split is rejected. */
+  sourceStatus: z.enum(['voting', 'backlog', 'mixed']).default('mixed'),
   reason: z.enum(['mixed_votes', 'halal_conflict']),
   trackA: SplitTrack, // original idea
-  trackB: SplitTrack, // AI-proposed alternative (created as an idea with source "split")
+  trackB: SplitTrack, // nearby alternative (created as an idea with source "split")
+  /** Everyone meets back at the original place this long after the pair starts. */
   reunion: z.object({ place: PlaceRef, afterMinutes: z.number().int().positive() }),
+  /** Walk between the two places, one way. */
+  walkMin: z.number().int().nonnegative().default(0),
   explanation: z.string().max(1000),
   status: z.enum(['proposed', 'approved', 'rejected']),
+  createdBy: Id.optional(),
   decidedBy: Id.optional(),
   createdAt: Millis,
 });
@@ -87,14 +93,17 @@ export type TransitLeg = z.infer<typeof TransitLeg>;
 export const PrayerPairing = z.object({
   prayer: PrayerName,
   at: LocalTime,
-  facility: z.object({
+  /** Where to pray; absent when no mosque / prayer room was found nearby. */
+  facility: z
+    .object({
     name: z.string().max(200),
     location: GeoPoint,
     placeId: z.string().max(256).optional(),
     osmId: z.string().max(64).optional(),
     type: z.enum(['mosque', 'musalla', 'prayer_room', 'other']),
     walkMin: z.number().int().nonnegative(),
-  }),
+  })
+    .optional(),
   /** Suggested activity for non-praying members during the prayer break. */
   fillerIdeaId: Id.optional(),
   fillerPlace: PlaceRef.optional(),
@@ -156,3 +165,32 @@ export function bookingAnchors(b: Pick<BookingDraft, 'kind' | 'startLocal' | 'en
     { event: 'arrive', day: eDay, start: eTime, end: eTime },
   ];
 }
+
+// ─── AI Arrange jobs ────────────────────────────────────────────────────────
+
+const PrayerKeyZ = z.enum(['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']);
+
+/** A proposed plan: previewed first, applied by the admin, undoable. Path: trips/{id}/jobs/{jobId} */
+export const ArrangeJob = z.object({
+  id: Id,
+  kind: z.literal('arrange'),
+  status: z.enum(['preview', 'applied', 'undone', 'discarded']),
+  plan: z.object({
+    days: z.array(
+      z.object({
+        day: LocalDate,
+        note: z.string().max(300).optional(),
+        travelMin: z.number().int().nonnegative(),
+        stops: z.array(z.object({ ideaId: Id, start: LocalTime, end: LocalTime })),
+        prayers: z.array(z.object({ key: PrayerKeyZ, start: LocalTime, end: LocalTime })),
+      }),
+    ),
+    unplaced: z.array(z.object({ ideaId: Id, reason: z.enum(['closed', 'hours', 'time']) })),
+  }),
+  /** The timeline's movable stops before applying — restored by Undo. */
+  before: z.array(ScheduleItem).optional(),
+  createdBy: Id,
+  at: Millis,
+  appliedAt: Millis.optional(),
+});
+export type ArrangeJob = z.infer<typeof ArrangeJob>;

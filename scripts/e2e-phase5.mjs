@@ -131,7 +131,10 @@ try {
   const day1 = await dayItems(tripId, '2026-12-07');
   const order = day1.filter((i) => !i.locked).map((i) => i.id);
   assert.deepEqual(order, [`idea_${B}`, `idea_${A}`, `idea_${C}`]);
-  assert.equal(day1.find((i) => i.id === `idea_${B}`).start, '09:00');
+  // Packed from the day's first start, but never before a place opens (Aquaria opens at 10:00).
+  const b2 = day1.find((i) => i.id === `idea_${B}`);
+  assert.ok(b2.start >= '09:00' && b2.start <= '10:00', b2.start);
+  assert.ok(day1.find((i) => i.id === `idea_${A}`).start >= b2.end);
   assert.equal((await item(tripId, checkinId)).start, '15:00');
   const a2 = await item(tripId, `idea_${A}`);
   assert.equal(a2.transitFromPrev.fromId, `idea_${B}`);

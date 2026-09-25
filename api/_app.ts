@@ -8,6 +8,7 @@ import { memberRoutes } from './_routes/members.js';
 import { bookingRoutes } from './_routes/bookings.js';
 import { ideaRoutes } from './_routes/ideas.js';
 import { scheduleRoutes } from './_routes/schedule.js';
+import { splitRoutes } from './_routes/splits.js';
 
 const table: RouteTable = {
   ...systemRoutes,
@@ -17,6 +18,7 @@ const table: RouteTable = {
   ...bookingRoutes,
   ...ideaRoutes,
   ...scheduleRoutes,
+  ...splitRoutes,
 };
 
 export async function dispatch(req: Request): Promise<Response> {

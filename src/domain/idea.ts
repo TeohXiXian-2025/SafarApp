@@ -200,6 +200,8 @@ export const Idea = z.object({
   votes: z.record(z.string(), Vote).default({}),
   /** Set when the admin closes voting early or overrides the result. */
   decidedBy: Id.optional(),
+  /** Part of a split pair (the original or its alternative). */
+  splitId: Id.optional(),
   /** AI middle-ground suggestions for preference conflicts (keyed by the conflict set). */
   resolution: z
     .object({

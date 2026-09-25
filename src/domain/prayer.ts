@@ -54,7 +54,7 @@ export interface VisitWindow {
 }
 
 /** Time to pray before heading out. */
-const PRAY_MIN = 20;
+export const PRAY_MIN = 20;
 /** Night visits are left out — most places are closed and it's rarely the plan. */
 const GAPS: [VisitWindow['after'], PrayerKey][] = [
   ['sunrise', 'dhuhr'],

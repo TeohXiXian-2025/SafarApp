@@ -183,7 +183,8 @@ export async function transcribe(audio: Buffer, mimeType: string, fileName: stri
     console.warn('[ai] whisper failed', res?.status, (await res?.text().catch(() => ''))?.slice(0, 160));
     return null;
   }
-  const text = String(((await res.json()) as { text?: string }).text ?? '').trim();
+  const body = (await res.json().catch(() => null)) as { text?: string } | null;
+  const text = String(body?.text ?? '').trim();
   return text.length >= 3 ? text.slice(0, 8000) : null;
 }
 

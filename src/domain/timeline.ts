@@ -59,34 +59,6 @@ export function nextSlot(dayItems: (Timed & Partial<Pick<ScheduleItem, 'ref'>>)[
   return { start: toClock(start), end: toClock(start + durationMin) };
 }
 
-/**
- * Re-times a day after the unlocked items were put in a new order: they're
- * packed back to back (plus travel time) from where the day's first unlocked
- * item started, stepping over locked bookings. Durations are kept.
- */
-export function reflowDay(
-  items: Timed[],
-  order: string[],
-  gapBefore: (prevId: string, id: string) => number = () => DEFAULT_GAP,
-): { id: string; start: string; end: string; orderIndex: number }[] {
-  const locked = items.filter((i) => i.locked);
-  const free = new Map(items.filter((i) => !i.locked).map((i) => [i.id, i]));
-  const ordered = [...order.filter((id) => free.has(id)), ...[...free.keys()].filter((id) => !order.includes(id))];
-  if (!ordered.length) return [];
-
-  let cursor = Math.min(...ordered.map((id) => toMin(free.get(id)!.start)));
-  let prev: string | null = null;
-  return ordered.map((id, orderIndex) => {
-    const it = free.get(id)!;
-    const duration = Math.max(5, toMin(it.end) - toMin(it.start));
-    const gap = prev ? gapBefore(prev, id) : 0;
-    const start = fitAround(cursor + gap, duration, locked, DEFAULT_GAP);
-    cursor = start + duration;
-    prev = id;
-    return { id, start: toClock(start), end: toClock(start + duration), orderIndex };
-  });
-}
-
 // ─── Travel estimates ───────────────────────────────────────────────────────
 
 export function metersBetween(a: GeoPoint, b: GeoPoint): number {
@@ -114,22 +86,32 @@ export interface DayWarning {
 
 /**
  * Problems on one day, in time order. `hours` gives Google's weekday
- * descriptions for an item's place (undefined when unknown).
+ * descriptions for an item's place (undefined when unknown). Prayer breaks
+ * and the parallel half of a split (`side`) aren't part of the chain of
+ * stops; time spent praying between two stops counts against the transfer.
  */
 export function dayWarnings(
   day: string,
-  items: (Pick<ScheduleItem, 'id' | 'start' | 'end' | 'orderIndex'> & { transitMin?: number })[],
+  items: (Pick<ScheduleItem, 'id' | 'start' | 'end' | 'orderIndex'> & { transitMin?: number; kind?: 'prayer' | 'side' })[],
   hours: (id: string) => string[] | undefined,
 ): DayWarning[] {
   const out: DayWarning[] = [];
   const sorted = [...items].sort(byTime);
-  sorted.forEach((it, i) => {
+  const prayers = sorted.filter((i) => i.kind === 'prayer');
+  const chain = sorted.filter((i) => !i.kind);
+  for (const it of sorted) {
+    if (it.kind === 'prayer') continue;
     const s = toMin(it.start);
     const e = toMin(it.end);
-    const prev = sorted[i - 1];
+    const i = chain.indexOf(it);
+    const prev = i > 0 ? chain[i - 1] : undefined;
     if (prev && s < toMin(prev.end)) out.push({ itemId: it.id, kind: 'overlap', text: 'Overlaps the previous stop.' });
-    else if (prev && it.transitMin && s - toMin(prev.end) < it.transitMin) {
-      out.push({ itemId: it.id, kind: 'tight', text: `Only ${s - toMin(prev.end)} min to get here — the trip takes about ${it.transitMin} min.` });
+    else if (prev && it.transitMin) {
+      const praying = prayers.filter((p) => toMin(p.start) >= toMin(prev.end) && toMin(p.end) <= s).reduce((m, p) => m + toMin(p.end) - toMin(p.start), 0);
+      const free = s - toMin(prev.end) - praying;
+      if (free < it.transitMin) {
+        out.push({ itemId: it.id, kind: 'tight', text: `Only ${free} min to get here${praying ? ' after the prayer break' : ''} — the trip takes about ${it.transitMin} min.` });
+      }
     }
     if (e >= DAY_END) out.push({ itemId: it.id, kind: 'late', text: 'Runs past midnight.' });
 
@@ -138,6 +120,6 @@ export function dayWarnings(
     else if (open && !open.some(([o, c]) => s >= o && e <= c)) {
       out.push({ itemId: it.id, kind: 'hours', text: `Outside opening hours (${open.map(([o, c]) => `${toClock(o)}–${toClock(c)}`).join(', ')}).` });
     }
-  });
+  }
   return out;
 }

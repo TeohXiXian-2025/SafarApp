@@ -1,6 +1,9 @@
 // Day-by-day timeline: bookings are fixed anchors, approved ideas are dragged
-// in from the backlog (or added with a tap on phones), reordered, re-timed.
-// Travel time between stops comes from the Routes API (server-side).
+// in from the backlog (or added with a tap on phones), reordered, re-timed —
+// or planned for the whole trip by AI Arrange (admin, preview → apply → undo).
+// Prayer breaks are placed automatically for members who asked for them;
+// split pairs show both groups side by side. Travel time comes from the
+// Routes API (server-side). All times are local to where the group is that day.
 import {
   DndContext,
   DragOverlay,
@@ -17,12 +20,21 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { AlertTriangle, Car, Footprints, GripVertical, Lock, Map as MapIcon, MapPin, Plus, TrainFront } from 'lucide-react';
+import { AlertTriangle, Car, Footprints, GitFork, GripVertical, Lock, Map as MapIcon, MapPin, Plus, Sparkles, TrainFront, Undo2 } from 'lucide-react';
+import { collection, limit, orderBy, query } from 'firebase/firestore';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import {
+  ArrangeJob,
   Booking,
   byTime,
+  dayFrames,
+  mergePrefs,
+  nearestDestination,
+  PRAYER_LABEL,
+  prayersInGaps,
+  Split,
+  type Member,
   dayWarnings,
   estimateTravelMin,
   fmtClock,
@@ -36,13 +48,15 @@ import {
   type GeoPoint,
   type TransitLeg,
 } from '../../domain';
+import { db } from '../../firebase/config';
 import { api } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Badge, Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
-import { bookingTitle, formatDay, KIND } from '../bookings/format';
+import { bookingTitle, formatDay, KIND, tzCity } from '../bookings/format';
 import { placePhotoUrl } from '../ideas/halalLabel';
 import { useTrip } from '../TripLayout';
 import { DayMap, type MapStop } from './DayMap';
+import { ArrangeSheet } from './ArrangeSheet';
 import { AddStopSheet, EditStopSheet } from './StopSheets';
 
 interface Row {
@@ -54,7 +68,13 @@ interface Row {
   /** Where you arrive / leave from (for travel estimates and the map). */
   in?: GeoPoint;
   out?: GeoPoint;
+  /** An automatic prayer break. */
+  prayer?: boolean;
+  /** The other half of a split pair, running in parallel. */
+  side?: Row;
 }
+
+const prayerWalkOf = (idea?: Idea) => (idea?.halal?.prayer ? (idea.halal.prayer.access === 'onsite' ? 0 : idea.halal.prayer.places[0]?.walkMin) : undefined);
 
 const EVENT_LABEL = { span: '', depart: 'Departs', arrive: 'Arrives', checkin: 'Check-in', checkout: 'Check-out' } as const;
 
@@ -82,11 +102,11 @@ function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<strin
       out: outAt,
     };
   }
-  return { item, title: r.title, icon: <MapPin className="w-4 h-4" />, in: r.place?.location, out: r.place?.location };
+  return { item, title: r.title, icon: <MapPin className="w-4 h-4" />, in: r.place?.location, out: r.place?.location, prayer: !!item.prayer };
 }
 
 export function TimelinePage() {
-  const { trip } = useTrip();
+  const { trip, members, me, isAdmin } = useTrip();
   const [params, setParams] = useSearchParams();
   const days = useMemo(() => tripDays(trip.startDate, trip.endDate), [trip.startDate, trip.endDate]);
   const day = days.includes(params.get('day') ?? '') ? params.get('day')! : planningDate(trip.startDate, trip.endDate, trip.destinations[0].timezone);
@@ -95,6 +115,9 @@ export function TimelinePage() {
   const schedule = useQuery(`schedule:${trip.id}`, () => paths.schedule(trip.id), ScheduleItem);
   const ideas = useQuery(`ideas:${trip.id}`, () => paths.ideas(trip.id), Idea);
   const bookings = useQuery(`bookings:${trip.id}`, () => paths.bookings(trip.id), Booking);
+  const splits = useQuery(`splits:${trip.id}`, () => paths.splits(trip.id), Split);
+  const jobs = useQuery(`jobs:${trip.id}`, () => query(collection(db, paths.jobs(trip.id)), orderBy('at', 'desc'), limit(5)), ArrangeJob);
+  const people = useMemo(() => new Map(members.map((m) => [m.uid, m])), [members]);
 
   const ideaMap = useMemo(() => new Map(ideas.data.map((i) => [i.id, i])), [ideas.data]);
   const bookingMap = useMemo(() => new Map(bookings.data.map((b) => [b.id, b])), [bookings.data]);
@@ -104,9 +127,28 @@ export function TimelinePage() {
       const row = toRow(it, ideaMap, bookingMap);
       if (row) out.set(it.day, [...(out.get(it.day) ?? []), row]);
     }
+    // Track B of a split rides along with its track A row.
+    for (const [d, list] of out) {
+      const main = list.filter((r) => !r.item.track.endsWith(':B'));
+      for (const b of list.filter((r) => r.item.track.endsWith(':B'))) {
+        const a = main.find((m) => m.item.track === b.item.track.replace(/:B$/, ':A'));
+        if (a) a.side = b;
+        else main.push(b);
+      }
+      out.set(d, main);
+    }
     return out;
   }, [schedule.data, ideaMap, bookingMap]);
-  const backlog = useMemo(() => ideas.data.filter((i) => i.status === 'backlog').sort((a, b) => a.createdAt - b.createdAt), [ideas.data]);
+  const approved = useMemo(() => splits.data.filter((s) => s.status === 'approved'), [splits.data]);
+  // The alternative half of a split is added together with its original.
+  const backlog = useMemo(
+    () => ideas.data.filter((i) => i.status === 'backlog' && !approved.some((s) => s.trackB.ideaId === i.id)).sort((a, b) => a.createdAt - b.createdAt),
+    [ideas.data, approved],
+  );
+  const pairName = (ideaId: string) => {
+    const s = approved.find((x) => x.trackA.ideaId === ideaId);
+    return s ? ideaMap.get(s.trackB.ideaId)?.place.name : undefined;
+  };
 
   // Order shown while a reorder is on its way to the server.
   const [pending, setPending] = useState<{ day: string; order: string[] } | null>(null);
@@ -122,10 +164,36 @@ export function TimelinePage() {
 
   const warnings = useMemo(() => {
     const byItem = new Map<string, DayWarning[]>();
-    const list = dayWarnings(day, rows.map((r) => ({ ...r.item, transitMin: r.item.transitFromPrev?.minutes })), (id) => rows.find((r) => r.item.id === id)?.idea?.place.openingHours);
+    const all = rows.flatMap((r) => [r, ...(r.side ? [r.side] : [])]);
+    const list = dayWarnings(
+      day,
+      all.map((r) => ({ ...r.item, transitMin: r.item.transitFromPrev?.minutes, ...(r.prayer ? { kind: 'prayer' as const } : r.item.track.endsWith(':B') ? { kind: 'side' as const } : {}) })),
+      (id) => all.find((r) => r.item.id === id)?.idea?.place.openingHours,
+    );
     for (const w of list) byItem.set(w.itemId, [...(byItem.get(w.itemId) ?? []), w]);
     return byItem;
   }, [rows, day]);
+
+  // Prayer times and the day's local timezone (from where the group is that day).
+  const frame = useMemo(
+    () => dayFrames([day], bookings.data, trip.destinations, { pace: mergePrefs(members).pace ?? 'moderate', praying: members.some((m) => m.prefs?.prayerReminders) })[0],
+    [day, bookings.data, trip.destinations, members],
+  );
+  const tz = nearestDestination(trip.destinations, frame.base).timezone;
+  const missed = useMemo(
+    () =>
+      prayersInGaps(
+        frame.prayers,
+        rows.filter((r) => !r.prayer).map((r) => ({ id: r.item.id, start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), loc: r.out, prayerWalkMin: prayerWalkOf(r.idea) })),
+        frame.base,
+      ).missed,
+    [frame, rows],
+  );
+
+  const [preview, setPreview] = useState<ArrangeJob | null>(null);
+  const [arranging, setArranging] = useState(false);
+  const lastJob = jobs.data[0];
+  const canUndo = isAdmin && lastJob?.status === 'applied';
 
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<Row | null>(null);
@@ -149,7 +217,12 @@ export function TimelinePage() {
     useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-  const movable = rows.filter((r) => !r.item.locked).map((r) => r.item.id);
+  const movable = rows.filter((r) => !r.item.locked && !r.prayer).map((r) => r.item.id);
+  const arrange = async () => {
+    setArranging(true);
+    await call(async () => setPreview(await api.post<ArrangeJob>('schedule/arrange', {}, { tripId: trip.id })));
+    setArranging(false);
+  };
 
   const onDragStart = (e: DragStartEvent) => setDragging({ title: String(e.active.data.current?.title ?? '') });
   const onDragEnd = ({ active, over }: DragEndEvent) => {
@@ -177,7 +250,10 @@ export function TimelinePage() {
   const mapStops: MapStop[] = [];
   rows.forEach((r) => {
     const at = r.in ?? r.out;
-    if (at) mapStops.push({ id: r.item.id, label: r.item.locked ? '•' : String(mapStops.filter((s) => !s.booking).length + 1), title: r.title, location: at, booking: r.item.locked });
+    if (!at || r.prayer) return;
+    const n = mapStops.filter((s) => !s.booking && !s.label.endsWith('b')).length + 1;
+    mapStops.push({ id: r.item.id, label: r.item.locked ? '•' : String(n), title: r.title, location: at, booking: r.item.locked });
+    if (r.side?.in) mapStops.push({ id: r.side.item.id, label: `${n}b`, title: r.side.title, location: r.side.in });
   });
   const loading = schedule.loading || ideas.loading || bookings.loading;
 
@@ -189,20 +265,49 @@ export function TimelinePage() {
             <h1 className="text-xl font-extrabold text-[#161C23]">Timeline</h1>
             <p className="text-sm text-[#6D7A77]">Drag approved ideas onto a day. Bookings stay fixed.</p>
           </div>
-          <Button variant="secondary" className="md:hidden shrink-0" onClick={() => setShowMap((v) => !v)} aria-pressed={showMap}>
-            <MapIcon className="w-4 h-4" /> {showMap ? 'List' : 'Map'}
-          </Button>
+          <div className="flex gap-2 shrink-0">
+            {isAdmin && (
+              <Button onClick={arrange} loading={arranging} className="shrink-0">
+                <Sparkles className="w-4 h-4" /> <span className="hidden sm:inline">AI </span>Arrange
+              </Button>
+            )}
+            <Button variant="secondary" className="md:hidden shrink-0" onClick={() => setShowMap((v) => !v)} aria-pressed={showMap}>
+              <MapIcon className="w-4 h-4" /> {showMap ? 'List' : 'Map'}
+            </Button>
+          </div>
         </div>
+        {canUndo && (
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#E7DFD5] bg-white px-4 py-2.5 text-sm">
+            <span className="text-[#6D7A77]">
+              AI Arrange was applied{lastJob.appliedAt ? ` ${new Date(lastJob.appliedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}` : ''}.
+            </span>
+            <Button variant="ghost" className="shrink-0" onClick={() => call(() => api.post('schedule/undo', { jobId: lastJob.id }, { tripId: trip.id }))}>
+              <Undo2 className="w-4 h-4" /> Undo
+            </Button>
+          </div>
+        )}
 
         <div className="-mx-4 px-4 overflow-x-auto">
           <div className="flex gap-2 w-max pb-1">
             {days.map((d, i) => (
-              <DayChip key={d} day={d} index={i} selected={d === day} count={rowsByDay.get(d)?.length ?? 0} onClick={() => setDay(d)} />
+              <DayChip key={d} day={d} index={i} selected={d === day} count={rowsByDay.get(d)?.filter((r) => !r.prayer).length ?? 0} onClick={() => setDay(d)} />
             ))}
           </div>
         </div>
 
         {error && <ErrorBanner>{error}</ErrorBanner>}
+
+        <div className="text-xs text-[#6D7A77] space-y-1">
+          <p>
+            Times are local to {tzCity(tz)} ({tz}).
+          </p>
+          {frame.prayers && <p>Prayer times: {(['dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => `${PRAYER_LABEL[k]} ${fmtClock(frame.prayers!.times[k])}`).join(' · ')}</p>}
+        </div>
+        {missed.map((m) => (
+          <p key={m.key} className="flex items-start gap-1.5 rounded-xl bg-[#FFF8EC] border border-[#F2D8B0] px-3 py-2 text-xs text-[#8A5A00]">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" /> No free 30 min for {PRAYER_LABEL[m.key]} between {fmtClock(m.from)} and {fmtClock(m.to)} — shorten or move a stop.
+          </p>
+        ))}
 
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px] items-start">
           <div className={cx('space-y-2', showMap && 'hidden md:block')}>
@@ -211,12 +316,28 @@ export function TimelinePage() {
             ) : (
               <DayList empty={!rows.length}>
                 <SortableContext items={movable} strategy={verticalListSortingStrategy}>
-                  {rows.map((r, i) => (
-                    <div key={r.item.id}>
-                      {i > 0 && <TravelRow leg={r.item.transitFromPrev} a={rows[i - 1].out} b={r.in} />}
-                      <StopRow row={r} warnings={warnings.get(r.item.id) ?? []} onOpen={() => !r.item.locked && setEditing(r)} />
-                    </div>
-                  ))}
+                  {rows.map((r, i) => {
+                    // Travel legs skip prayer breaks: you go from the last stop to the next one.
+                    const prev = rows.slice(0, i).reverse().find((x) => !x.prayer);
+                    return (
+                      <div key={r.item.id}>
+                        {r.prayer ? (
+                          <PrayerRow row={r} people={people} me={me.uid} />
+                        ) : (
+                          <>
+                            {prev && <TravelRow leg={r.item.transitFromPrev} a={prev.out} b={r.in} />}
+                            <StopRow
+                              row={r}
+                              warnings={[...(warnings.get(r.item.id) ?? []), ...(r.side ? (warnings.get(r.side.item.id) ?? []) : [])]}
+                              people={people}
+                              me={me.uid}
+                              onOpen={() => !r.item.locked && setEditing(r)}
+                            />
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
                 </SortableContext>
               </DayList>
             )}
@@ -224,9 +345,9 @@ export function TimelinePage() {
 
           <div className="space-y-4 md:sticky md:top-4">
             <Card className={cx('overflow-hidden h-72 md:h-80', !showMap && 'hidden md:block')}>
-              <DayMap stops={mapStops} onSelect={(id) => setEditing(rows.find((r) => r.item.id === id && !r.item.locked) ?? null)} />
+              <DayMap stops={mapStops} onSelect={(id) => setEditing(rows.find((r) => (r.item.id === id || r.side?.item.id === id) && !r.item.locked) ?? null)} />
             </Card>
-            <Backlog ideas={backlog} onAdd={setAdding} />
+            <Backlog ideas={backlog} pairName={pairName} onAdd={setAdding} />
           </div>
         </div>
       </div>
@@ -238,7 +359,8 @@ export function TimelinePage() {
       <EditStopSheet
         item={editing?.item ?? null}
         idea={editing?.idea}
-        title={editing?.title ?? ''}
+        title={editing?.side ? `Split: ${editing.title} / ${editing.side.title}` : (editing?.title ?? '')}
+        fixedLength={!!editing?.side}
         days={days}
         onClose={() => setEditing(null)}
         onSave={async (patch) => {
@@ -247,6 +369,19 @@ export function TimelinePage() {
         }}
         onRemove={() => api.post('schedule/remove', { id: editing!.item.id }, { tripId: trip.id })}
       />
+      {preview && (
+        <ArrangeSheet
+          job={preview}
+          days={days}
+          ideas={ideaMap}
+          current={schedule.data}
+          onApply={() => api.post('schedule/apply', { jobId: preview.id }, { tripId: trip.id })}
+          onClose={() => {
+            if (jobs.data.find((j) => j.id === preview.id)?.status === 'preview') void api.post('schedule/discard', { jobId: preview.id }, { tripId: trip.id }).catch(() => {});
+            setPreview(null);
+          }}
+        />
+      )}
       <AddStopSheet
         idea={adding}
         days={days}
@@ -298,7 +433,7 @@ function DayList({ empty, children }: { empty: boolean; children: ReactNode }) {
   );
 }
 
-function StopRow({ row, warnings, onOpen }: { row: Row; warnings: DayWarning[]; onOpen: () => void }) {
+function StopRow({ row, warnings, people, me, onOpen }: { row: Row; warnings: DayWarning[]; people: Map<string, Member>; me: string; onOpen: () => void }) {
   const { item } = row;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: item.locked, data: { title: row.title } });
   const moment = item.start === item.end;
@@ -314,9 +449,10 @@ function StopRow({ row, warnings, onOpen }: { row: Row; warnings: DayWarning[]; 
             <span className="text-[#00685F] shrink-0">{row.icon}</span>
             <span className="truncate">{row.title}</span>
           </p>
-          {row.subtitle && <p className="text-xs text-[#6D7A77] truncate">{row.subtitle}</p>}
+          {row.subtitle && !row.side && <p className="text-xs text-[#6D7A77] truncate">{row.subtitle}</p>}
+          {row.side && <SplitHalves a={row} b={row.side} people={people} me={me} />}
           {warnings.map((w) => (
-            <p key={w.kind} className="mt-1 flex items-start gap-1 text-xs text-[#8A5A00]">
+            <p key={`${w.itemId}-${w.kind}`} className="mt-1 flex items-start gap-1 text-xs text-[#8A5A00]">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" /> {w.text}
             </p>
           ))}
@@ -363,7 +499,7 @@ function TravelRow({ leg, a, b }: { leg?: TransitLeg; a?: GeoPoint; b?: GeoPoint
   );
 }
 
-function Backlog({ ideas, onAdd }: { ideas: Idea[]; onAdd: (idea: Idea) => void }) {
+function Backlog({ ideas, pairName, onAdd }: { ideas: Idea[]; pairName: (ideaId: string) => string | undefined; onAdd: (idea: Idea) => void }) {
   return (
     <Card className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -377,7 +513,7 @@ function Backlog({ ideas, onAdd }: { ideas: Idea[]; onAdd: (idea: Idea) => void 
       ) : (
         <ul className="space-y-2">
           {ideas.map((i) => (
-            <BacklogItem key={i.id} idea={i} onAdd={() => onAdd(i)} />
+            <BacklogItem key={i.id} idea={i} pair={pairName(i.id)} onAdd={() => onAdd(i)} />
           ))}
         </ul>
       )}
@@ -385,7 +521,7 @@ function Backlog({ ideas, onAdd }: { ideas: Idea[]; onAdd: (idea: Idea) => void 
   );
 }
 
-function BacklogItem({ idea, onAdd }: { idea: Idea; onAdd: () => void }) {
+function BacklogItem({ idea, pair, onAdd }: { idea: Idea; pair?: string; onAdd: () => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `backlog:${idea.id}`, data: { title: idea.place.name } });
   const photo = idea.place.photoUrl ?? (idea.place.photoName ? placePhotoUrl(idea.place.photoName, 160) : null);
   return (
@@ -404,12 +540,71 @@ function BacklogItem({ idea, onAdd }: { idea: Idea; onAdd: () => void }) {
         {photo ? <img src={photo} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" loading="lazy" /> : <span className="w-10 h-10 rounded-xl bg-[#F3EFE9] shrink-0" />}
         <span className="min-w-0">
           <span className="block text-sm font-semibold text-[#161C23] truncate">{idea.place.name}</span>
-          <span className="block text-xs text-[#6D7A77] truncate">{idea.place.typeLabel ?? idea.place.category} · {idea.estDurationMin} min</span>
+          <span className="block text-xs text-[#6D7A77] truncate">
+            {pair ? (
+              <span className="inline-flex items-center gap-1 text-[#1D4E89]">
+                <GitFork className="w-3 h-3" /> Split with {pair}
+              </span>
+            ) : (
+              <>
+                {idea.place.typeLabel ?? idea.place.category} · {idea.estDurationMin} min
+              </>
+            )}
+          </span>
         </span>
       </button>
       <Button variant="ghost" className="shrink-0 px-2.5" onClick={onAdd} aria-label={`Add ${idea.place.name} to a day`}>
         <Plus className="w-4 h-4" /> Add
       </Button>
     </li>
+  );
+}
+
+function SplitHalves({ a, b, people, me }: { a: Row; b: Row; people: Map<string, Member>; me: string }) {
+  const half = (r: Row, label: string) => {
+    const mine = r.item.memberUids.includes(me);
+    return (
+      <div className={cx('rounded-lg px-2 py-1.5 min-w-0', mine ? 'bg-[#E8F1FB] ring-1 ring-[#1D4E89]/30' : 'bg-[#F6F4F0]')}>
+        <p className="text-[11px] font-bold text-[#1D4E89]">
+          {label} · {fmtClock(toMin(r.item.start))}–{fmtClock(toMin(r.item.end))}
+          {mine && ' · you'}
+        </p>
+        <p className="text-xs font-semibold text-[#161C23] truncate">{r.title}</p>
+        <p className="text-[11px] text-[#6D7A77] truncate">{r.item.memberUids.map((u) => people.get(u)?.displayName ?? '?').join(', ')}</p>
+      </div>
+    );
+  };
+  return (
+    <div className="mt-1.5 space-y-1">
+      <p className="text-[11px] text-[#1D4E89] flex items-center gap-1">
+        <GitFork className="w-3 h-3" /> Split — everyone meets back here at {fmtClock(toMin(a.item.end))}
+      </p>
+      <div className="grid grid-cols-2 gap-1.5">
+        {half(a, 'Group A')}
+        {half(b, 'Group B')}
+      </div>
+    </div>
+  );
+}
+
+function PrayerRow({ row, people, me }: { row: Row; people: Map<string, Member>; me: string }) {
+  const p = row.item.prayer!;
+  const f = p.facility;
+  const mine = row.item.memberUids.includes(me);
+  const who = row.item.memberUids.map((u) => people.get(u)?.displayName ?? '?').join(', ');
+  return (
+    <div className="flex items-stretch rounded-2xl border border-[#CFE7E2] bg-[#EEF7F5] my-1">
+      <div className="w-[4.75rem] shrink-0 py-2.5 pl-3 text-xs font-bold text-[#00685F] tabular-nums">
+        <p>{fmtClock(toMin(row.item.start))}</p>
+        <p className="font-semibold opacity-70">{fmtClock(toMin(row.item.end))}</p>
+      </div>
+      <div className="flex-1 min-w-0 py-2.5 pr-3">
+        <p className="font-semibold text-[#00685F] truncate">🕌 {mine ? `${p.prayer} prayer` : `Free time — ${p.prayer} prayer break`}</p>
+        <p className="text-xs text-[#3F6B64] truncate">
+          {f ? `${f.name} · ${f.walkMin ? `${f.walkMin} min walk` : 'on site'}` : 'No mosque found nearby — any clean, quiet spot works'}
+          {!mine && ` · ${who}`}
+        </p>
+      </div>
+    </div>
   );
 }

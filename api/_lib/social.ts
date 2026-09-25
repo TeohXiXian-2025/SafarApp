@@ -75,7 +75,10 @@ export async function imagePart(src?: string): Promise<Part | null> {
   const res = await fetch(u, { headers: { 'User-Agent': BROWSER_UA, ...(/xhscdn/.test(u.hostname) ? { Referer: 'https://www.xiaohongshu.com/' } : {}) }, signal: AbortSignal.timeout(8000) }).catch(() => null);
   const type = res?.headers.get('content-type')?.split(';')[0] ?? '';
   if (!res?.ok || !/^image\/(jpeg|png|webp|heic)$/.test(type)) return null;
-  const buf = Buffer.from(await res.arrayBuffer());
+  // The timeout also covers reading the body: a slow download is skipped, not a failed import.
+  const body = await res.arrayBuffer().catch(() => null);
+  if (!body) return null;
+  const buf = Buffer.from(body);
   if (buf.length > 3 * 1024 * 1024) return null;
   return { inlineData: { mimeType: type, data: buf.toString('base64') } };
 }
@@ -95,7 +98,9 @@ export async function downloadMedia(src: string): Promise<{ data: Buffer; mimeTy
   if (!res?.ok) return null;
   const len = Number(res.headers.get('content-length') ?? 0);
   if (len > 24 * 1024 * 1024) return null;
-  const data = Buffer.from(await res.arrayBuffer());
+  const body = await res.arrayBuffer().catch(() => null); // timed out mid-download → no transcript
+  if (!body) return null;
+  const data = Buffer.from(body);
   if (data.length > 24 * 1024 * 1024 || data.length < 1000) return null;
   return { data, mimeType: res.headers.get('content-type')?.split(';')[0] || 'video/mp4' };
 }

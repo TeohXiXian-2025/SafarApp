@@ -1,7 +1,7 @@
 import { Lightbulb, Plus } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { Idea, paths, placeIsStale, type IdeaStatus } from '../../domain';
+import { Idea, paths, placeIsStale, ScheduleItem, Split, type IdeaStatus } from '../../domain';
 import { api } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
@@ -35,6 +35,11 @@ export function IdeasPage() {
     }
   }, [params, setParams]);
   const ideas = useQuery(`ideas:${trip.id}`, () => paths.ideas(trip.id), Idea);
+  const splits = useQuery(`splits:${trip.id}`, () => paths.splits(trip.id), Split);
+  const schedule = useQuery(`schedule:${trip.id}`, () => paths.schedule(trip.id), ScheduleItem);
+  const splitById = useMemo(() => new Map(splits.data.filter((s) => s.status !== 'rejected').map((s) => [s.id, s])), [splits.data]);
+  const ideaById = useMemo(() => new Map(ideas.data.map((i) => [i.id, i])), [ideas.data]);
+  const dayOf = useMemo(() => new Map(schedule.data.flatMap((s) => (s.ref.kind === 'idea' ? [[s.ref.ideaId, s.day] as const] : []))), [schedule.data]);
   // Google place details may only be cached for 30 days — refresh old ones once per visit.
   const refreshed = useRef('');
   const hasStale = !ideas.loading && ideas.data.some((i) => placeIsStale(i));
@@ -51,6 +56,12 @@ export function IdeasPage() {
   );
   const needsMyVote = ideas.data.filter((i) => i.status === 'voting' && !i.votes[me.uid]).length;
   const active = FILTERS.find((f) => f.key === filter)!;
+  const cardSplit = (i: Idea) => {
+    const split = i.splitId ? splitById.get(i.splitId) : undefined;
+    if (!split) return {};
+    const otherId = split.trackA.ideaId === i.id ? split.trackB.ideaId : split.trackA.ideaId;
+    return { split, splitOther: ideaById.get(otherId) };
+  };
   const shown = ideas.data
     .filter((i) => active.statuses.includes(i.status))
     // Ones still needing my vote first, then newest.
@@ -108,7 +119,7 @@ export function IdeasPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 items-start">
           {shown.map((i) => (
-            <IdeaCard key={i.id} idea={i} />
+            <IdeaCard key={i.id} idea={i} {...cardSplit(i)} scheduledDay={dayOf.get(i.id)} />
           ))}
         </div>
       )}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayWarnings, estimateTravelMin, nextSlot, reflowDay, toClock, toMin, tripDays } from './timeline';
+import { dayWarnings, estimateTravelMin, nextSlot, toClock, toMin, tripDays } from './timeline';
 
 const item = (id: string, start: string, end: string, locked = false, orderIndex = 0) => ({ id, start, end, locked, orderIndex });
 const HOURS = ['Monday: 9:00 AM – 5:00 PM', 'Tuesday: Closed'];
@@ -38,32 +38,6 @@ describe('nextSlot', () => {
   });
 });
 
-describe('reflowDay', () => {
-  it('packs items in the new order from the first start, keeping durations', () => {
-    const day = [item('a', '09:00', '10:00'), item('b', '10:15', '12:15'), item('c', '13:00', '13:30')];
-    expect(reflowDay(day, ['c', 'a', 'b'], () => 10)).toEqual([
-      { id: 'c', start: '09:00', end: '09:30', orderIndex: 0 },
-      { id: 'a', start: '09:40', end: '10:40', orderIndex: 1 },
-      { id: 'b', start: '10:50', end: '12:50', orderIndex: 2 },
-    ]);
-  });
-
-  it('never moves locked items and flows around them', () => {
-    const day = [item('a', '09:00', '11:00'), item('train', '11:30', '13:00', true), item('b', '14:00', '15:00')];
-    const out = reflowDay(day, ['a', 'b']);
-    // b would start 11:15 but runs into the train, so it goes after it.
-    expect(out).toEqual([
-      { id: 'a', start: '09:00', end: '11:00', orderIndex: 0 },
-      { id: 'b', start: '13:15', end: '14:15', orderIndex: 1 },
-    ]);
-  });
-
-  it('keeps items missing from the order at the end', () => {
-    const day = [item('a', '09:00', '10:00'), item('b', '10:15', '11:00')];
-    expect(reflowDay(day, ['b']).map((x) => x.id)).toEqual(['b', 'a']);
-  });
-});
-
 describe('estimateTravelMin', () => {
   it('walks short hops and rides longer ones', () => {
     const klcc = { lat: 3.1579, lng: 101.7116 };
@@ -88,6 +62,24 @@ describe('dayWarnings', () => {
       ['b', 'overlap'],
       ['c', 'tight'],
     ]);
+  });
+
+  it('counts a prayer break between two stops against the transfer', () => {
+    const w = dayWarnings(
+      '2026-12-07',
+      [
+        item('a', '10:00', '12:00'),
+        { ...item('pr', '12:00', '12:25'), kind: 'prayer' as const },
+        { ...item('b', '12:30', '13:30'), transitMin: 15 },
+      ],
+      () => undefined,
+    );
+    expect(w).toEqual([{ itemId: 'b', kind: 'tight', text: 'Only 5 min to get here after the prayer break — the trip takes about 15 min.' }]);
+  });
+
+  it('ignores the parallel half of a split when checking overlaps', () => {
+    const w = dayWarnings('2026-12-07', [item('a', '12:00', '13:30'), { ...item('b', '12:05', '13:15'), kind: 'side' as const }], () => undefined);
+    expect(w).toEqual([]);
   });
 
   it('flags a place closed that day', () => {

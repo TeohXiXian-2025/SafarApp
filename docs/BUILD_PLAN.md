@@ -379,17 +379,22 @@ Estimates assume 3 people working part-time. Each phase ends with something usab
 - [ ] Check the page on a real phone (drag with touch, sheets) — manual.
 
 ### Phase 6 — AI Arrange + prayer pairing (weeks 8–9)
-- [ ] Job pattern (`jobs/` + progress UI replacing the fake `GeneratingScreen` countdown).
-- [ ] Scheduler: clustering → ordering (NN + 2-opt) → time-window fitting → unplaced list. **Unit-test heavily.**
-- [ ] Preview/diff + Apply + Undo.
-- [ ] Prayer pairing: Aladhan times + nearest facility (curated + Places + Overpass) + filler suggestions for non-Muslim members. Auto re-run on change.
-- [ ] Delete `aiPlannerService.ts` mocks and the fake `setTimeout` "thinking" delays.
+- [x] **Scheduling engine** `src/domain/arrange.ts` (pure, unit-tested): `dayFrames()` (bookings → each day's usable hours, hotel base, blocked journeys, local prayer times), `timeSequence()` (travel, opening hours, locked bookings, meal windows, prayer breaks), `arrangeTrip()`, `prayersInGaps()`.
+- [x] Scheduler: k-means clusters → days (nearest hotel) → capacity/pace cap → nearest neighbour + 2-opt → meal/prayer-aware local search → misfits tried on every other day → unplaced list with a reason. Pace sets day end + max stops (relaxed 18:30/3, moderate 20:30/5, fast 22:00/7).
+- [x] Preview → Apply → Undo (`schedule/arrange|apply|undo|discard`, admin). The preview is a `jobs/` doc (it runs in ~1 s, so no background job is needed); Apply stores the old timeline for Undo. Gemini adds one sentence per day (skipped if busy).
+- [x] Prayer pairing: times computed offline (`adhan`, country method) at the day's base in the nearest destination's timezone. Breaks (20 min + walk) go after the stop before each prayer, or first on arrival when the prayer would run out mid-visit. Place = the stop's known nearest mosque/musalla (Halal Radar), else a Places lookup. Only for members with prayer reminders; others see "free time". Re-run automatically after every manual change (in free gaps, stops never move); a banner shows any prayer with no free 30 min.
+- [x] Reorder uses the same engine (opening hours, bookings, prayers).
+- [x] Verified: `npm run e2e:phase6` (16 checks, real Firebase/Gemini/Places/Routes).
+- [ ] Legs in the preview are straight-line estimates (the real Routes legs are fetched after Apply). A Routes distance matrix would sharpen the order.
+- [ ] Filler suggestions for non-praying members are "free time" only (no specific place yet).
+- [ ] Delete `aiPlannerService.ts` mocks → when `/demo` is retired.
 
 ### Phase 7 — Split Tracks (week 10)
-- [ ] `/api/splits/propose`: grouping, alternative search, reunion point/time.
-- [ ] Admin approve/reject UI (reuse `AiMediatorModal` / `ConflictResolutionModal` visuals).
-- [ ] Parallel-track rendering on the timeline and map. Members see only their track highlighted.
-- [ ] Scheduler + prayer pairing handle split tracks.
+- [x] `splits/propose`: groups from votes (👎) and halal blockers (`splitGroups()`); alternative within 1.2 km — halal-listed food from the Halal Radar for halal needs, else the same kind of place; reunion = at the original after `max(A, walk + B + walk)`. "Another option" swaps the alternative. The alternative gets its own Halal Radar check.
+- [x] `splits/decide` (admin): approve (both → backlog as a pair), reject, or cancel an approved split. Votes/decisions on split ideas are locked; deleting either half dissolves the split.
+- [x] Timeline: the pair is one stop (both groups side by side, your group highlighted, reunion time); add/move/reorder/remove move both. Legs and warnings follow track A.
+- [x] AI Arrange and prayer pairing plan a pair as one unit.
+- [x] Verified in `npm run e2e:phase6`.
 
 ### Phase 8 — Hotels + Restaurant tab (week 11)
 - [ ] `HotelRatesProvider` interface + LiteAPI adapter (search by lat/lng → rates for trip dates/occupancy/currency).

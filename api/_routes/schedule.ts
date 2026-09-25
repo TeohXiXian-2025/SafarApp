@@ -1,198 +1,108 @@
-// Manual timeline arranging: put backlog ideas on a day, move / re-time /
-// reorder them, take them off again. Booking anchors stay locked. After every
-// change the day's travel legs are refreshed from the Routes API.
+// Timeline arranging.
+//   Manual: put backlog ideas on a day, move / re-time / reorder them, take
+//   them off again. Split pairs move together; bookings stay locked.
+//   AI Arrange (admin): plan every stop across the trip → preview → apply → undo.
+// After every change the day's prayer breaks and travel legs are refreshed.
+import { Type } from '@google/genai';
 import { z } from 'zod';
 import {
-  Booking,
-  byTime,
-  DEFAULT_GAP,
-  estimateTravelMin,
+  ArrangeJob,
+  arrangeTrip,
   Id,
-  Idea,
   ideaItemId,
   LocalDate,
   LocalTime,
   nextSlot,
+  PACE,
+  PRAYER_LABEL,
+  mergePrefs,
   paths,
-  reflowDay,
   ScheduleItem,
+  timeSequence,
   toClock,
   toMin,
-  type GeoPoint,
+  tripDays,
+  type Idea,
   type Trip,
+  type Unit,
 } from '../../src/domain/index.js';
 import { withTrip } from '../_lib/auth.js';
-import { travelLeg } from '../_lib/directions.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
+import { extractJson } from '../_lib/gemini.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
 import { useDailyQuota } from '../_lib/quota.js';
 import type { RouteTable } from '../_lib/routes.js';
-import { loadTrip, logActivity } from '../_lib/trip.js';
-import { FieldValue } from 'firebase-admin/firestore';
+import {
+  approvedSplit,
+  dayItems,
+  framesFor,
+  ideaDocRef,
+  isPrayerItem,
+  isTrackB,
+  itemEnds,
+  itemRef,
+  loadTripData,
+  pairIds,
+  refreshDay,
+  unitFor,
+  writeStops,
+  type TripData,
+} from '../_lib/schedule.js';
+import { logActivity } from '../_lib/trip.js';
 
-/** Google allows caching route results for up to 30 days. */
-const LEG_TTL = 30 * 86_400_000;
-/** Routes API calls per request — a day rarely has more new legs than this. */
-const MAX_NEW_LEGS = 12;
-
-const itemRef = (tripId: string, id: string) => adminDb().doc(`${paths.schedule(tripId)}/${id}`);
-const ideaRef = (tripId: string, id: string) => adminDb().doc(paths.idea(tripId, id));
-
-async function dayItems(tripId: string, day: string): Promise<ScheduleItem[]> {
-  const snap = await adminDb().collection(paths.schedule(tripId)).where('day', '==', day).get();
-  return snap.docs.flatMap((d) => {
-    const r = ScheduleItem.safeParse(d.data());
-    return r.success ? [r.data] : [];
-  });
-}
-
-async function loadItem(tripId: string, id: string): Promise<ScheduleItem> {
-  const snap = await itemRef(tripId, id).get();
-  if (!snap.exists) throw new HttpError(404, 'That stop is no longer on the timeline');
-  const item = ScheduleItem.parse(snap.data());
-  if (item.locked) throw new HttpError(409, 'Bookings are fixed — edit the booking to change its time');
-  return item;
-}
+const jobRef = (tripId: string, id: string) => adminDb().doc(paths.job(tripId, id));
 
 function assertTripDay(trip: Trip, day: string) {
   if (day < trip.startDate || day > trip.endDate) throw new HttpError(400, 'That day is outside the trip dates');
 }
 
-const minutesOf = (it: Pick<ScheduleItem, 'start' | 'end'>) => Math.max(5, toMin(it.end) - toMin(it.start));
-
-/** Where you arrive at an item, and where you leave it from. */
-interface Ends {
-  in: GeoPoint;
-  out: GeoPoint;
+async function loadMovable(tripId: string, id: string): Promise<ScheduleItem> {
+  const snap = await itemRef(tripId, id).get();
+  if (!snap.exists) throw new HttpError(404, 'That stop is no longer on the timeline');
+  const item = ScheduleItem.parse(snap.data());
+  if (item.locked) throw new HttpError(409, 'Bookings are fixed — edit the booking to change its time');
+  if (isPrayerItem(item)) throw new HttpError(409, 'Prayer breaks are placed automatically around your stops');
+  return item;
 }
 
-/** Locations for each item on a day (ideas and bookings are looked up in one read each). */
-async function itemEnds(tripId: string, items: ScheduleItem[]): Promise<Map<string, Ends>> {
-  const db = adminDb();
-  const ideaIds = [...new Set(items.flatMap((i) => (i.ref.kind === 'idea' ? [i.ref.ideaId] : [])))];
-  const bookingIds = [...new Set(items.flatMap((i) => (i.ref.kind === 'booking' ? [i.ref.bookingId] : [])))];
-  const [ideaSnaps, bookingSnaps] = await Promise.all([
-    ideaIds.length ? db.getAll(...ideaIds.map((id) => ideaRef(tripId, id))) : [],
-    bookingIds.length ? db.getAll(...bookingIds.map((id) => db.doc(`${paths.bookings(tripId)}/${id}`))) : [],
-  ]);
-  const ideas = new Map(ideaSnaps.flatMap((s) => (s.exists ? [[s.id, s.data() as Idea] as const] : [])));
-  const bookings = new Map(bookingSnaps.flatMap((s) => (s.exists ? [[s.id, s.data() as Booking] as const] : [])));
+const ideaOf = (data: TripData, item: ScheduleItem) => (item.ref.kind === 'idea' ? data.ideas.get(item.ref.ideaId) : undefined);
 
-  const out = new Map<string, Ends>();
-  for (const it of items) {
-    const r = it.ref;
-    if (r.kind === 'idea') {
-      const at = ideas.get(r.ideaId)?.place.location;
-      if (at) out.set(it.id, { in: at, out: at });
-    } else if (r.kind === 'booking') {
-      const b = bookings.get(r.bookingId);
-      if (!b) continue;
-      const from = b.from?.location ?? b.to.location;
-      const ends: Record<typeof r.event, Ends> = {
-        span: { in: from, out: b.to.location },
-        depart: { in: from, out: from },
-        arrive: { in: b.to.location, out: b.to.location },
-        checkin: { in: b.to.location, out: b.to.location },
-        checkout: { in: b.to.location, out: b.to.location },
-      };
-      out.set(it.id, ends[r.event]);
-    } else if (r.place) {
-      out.set(it.id, { in: r.place.location, out: r.place.location });
-    }
-  }
-  return out;
-}
-
-/**
- * Recomputes the travel leg into each stop of a day. A leg is reused while it
- * still starts from the same previous stop and is under 30 days old.
- */
-async function refreshLegs(tripId: string, day: string) {
-  const items = (await dayItems(tripId, day)).sort(byTime);
-  const ends = await itemEnds(tripId, items);
-  const batch = adminDb().batch();
-  let writes = 0;
-  let calls = 0;
-  for (let i = 0; i < items.length; i++) {
-    const it = items[i];
-    const prev = items[i - 1];
-    const a = prev && ends.get(prev.id)?.out;
-    const b = ends.get(it.id)?.in;
-    const leg = it.transitFromPrev;
-    if (!a || !b) {
-      if (leg) {
-        batch.update(itemRef(tripId, it.id), { transitFromPrev: FieldValue.delete() });
-        writes++;
-      }
-      continue;
-    }
-    if (leg && leg.fromId === prev.id && leg.at && Date.now() - leg.at < LEG_TTL) continue;
-    if (calls++ >= MAX_NEW_LEGS) break;
-    const fresh = await travelLeg(a, b);
-    batch.update(itemRef(tripId, it.id), {
-      transitFromPrev: fresh ? { ...fresh, fromId: prev.id, at: Date.now() } : FieldValue.delete(),
-    });
-    writes++;
-  }
-  if (writes) await batch.commit();
-}
-
-/** Packing gaps from straight-line estimates (the real legs arrive right after). */
-async function estimatedGaps(tripId: string, items: ScheduleItem[]) {
-  const ends = await itemEnds(tripId, items);
-  return (prevId: string, id: string) => {
-    const a = ends.get(prevId)?.out;
-    const b = ends.get(id)?.in;
-    return a && b ? Math.max(5, estimateTravelMin(a, b)) : DEFAULT_GAP;
-  };
+/** Refresh several days one after another (they share Routes API budgets). */
+async function refreshDays(tripId: string, days: Iterable<string>, data: TripData) {
+  for (const d of new Set(days)) await refreshDay(tripId, d, data);
 }
 
 export const scheduleRoutes: RouteTable = {
-  /** Put a backlog idea on a day — at `start`, or after the day's last stop. */
+  /** Put a backlog idea (or split pair) on a day — at `start`, or after the day's last stop. */
   'POST schedule/add': withTrip(
     async (req, { tripId, member }) => {
       const body = await readJson(req, z.object({ ideaId: Id, day: LocalDate, start: LocalTime.optional() }));
       await useDailyQuota(member.uid, 'arrange');
-      const db = adminDb();
-      await db.runTransaction(async (tx) => {
-        const trip = await loadTrip(tripId, tx);
-        assertTripDay(trip, body.day);
-        const snap = await tx.get(ideaRef(tripId, body.ideaId));
-        if (!snap.exists) throw new HttpError(404, 'Idea not found');
-        const idea = Idea.parse(snap.data());
-        if (idea.status === 'scheduled') throw new HttpError(409, `${idea.place.name} is already on the timeline`);
-        if (idea.status !== 'backlog') throw new HttpError(409, 'Only ideas in the backlog can go on the timeline');
+      const data = await loadTripData(tripId);
+      assertTripDay(data.trip, body.day);
+      const idea = data.ideas.get(body.ideaId);
+      if (!idea) throw new HttpError(404, 'Idea not found');
+      if (idea.status === 'scheduled') throw new HttpError(409, `${idea.place.name} is already on the timeline`);
+      if (idea.status !== 'backlog') throw new HttpError(409, 'Only ideas in the backlog can go on the timeline');
 
-        const day = (await tx.get(db.collection(paths.schedule(tripId)).where('day', '==', body.day))).docs.map((d) => d.data() as ScheduleItem);
-        const slot = body.start
-          ? { start: body.start, end: toClock(toMin(body.start) + idea.estDurationMin) }
-          : nextSlot(day, idea.estDurationMin);
-        const id = ideaItemId(idea.id);
-        tx.set(
-          itemRef(tripId, id),
-          ScheduleItem.parse({
-            id,
-            day: body.day,
-            ...slot,
-            ref: { kind: 'idea', ideaId: idea.id },
-            track: 'all',
-            memberUids: trip.memberIds,
-            locked: false,
-            orderIndex: day.length,
-            updatedBy: member.uid,
-            updatedAt: Date.now(),
-          }),
-        );
-        tx.update(snap.ref, { status: 'scheduled', updatedAt: Date.now() });
-        logActivity(tx, tripId, member.uid, `${member.displayName} added ${idea.place.name} to ${body.day}`);
-      });
-      await refreshLegs(tripId, body.day);
-      return json({ id: ideaItemId(body.ideaId) }, { status: 201 });
+      const split = approvedSplit(data, idea);
+      const lead = split ? data.ideas.get(split.trackA.ideaId)! : idea;
+      const day = (await dayItems(tripId, body.day)).filter((i) => !isPrayerItem(i));
+      const duration = unitFor(lead, split).duration;
+      const start = body.start ? toMin(body.start) : toMin(nextSlot(day, duration).start);
+
+      const batch = adminDb().batch();
+      const placed = writeStops(batch, tripId, { data, idea: lead, day: body.day, start, orderIndex: day.length, actor: member.uid });
+      placed.forEach((id) => batch.update(ideaDocRef(tripId, id), { status: 'scheduled', updatedAt: Date.now() }));
+      logActivity(batch, tripId, member.uid, `${member.displayName} added ${split ? `the split at ${lead.place.name}` : idea.place.name} to ${body.day}`);
+      await batch.commit();
+      await refreshDay(tripId, body.day, data);
+      return json({ id: ideaItemId(lead.id) }, { status: 201 });
     },
     { perMinute: 30 },
   ),
 
-  /** Move a stop to another day and/or time, or change how long it takes. */
+  /** Move a stop (split pairs move together) to another day and/or time, or change how long it takes. */
   'POST schedule/update': withTrip(
     async (req, { tripId, member }) => {
       const body = await readJson(
@@ -200,71 +110,243 @@ export const scheduleRoutes: RouteTable = {
         z.object({ id: Id, day: LocalDate.optional(), start: LocalTime.optional(), durationMin: z.number().int().min(5).max(24 * 60).optional() }),
       );
       await useDailyQuota(member.uid, 'arrange');
-      const [trip, item] = await Promise.all([loadTrip(tripId), loadItem(tripId, body.id)]);
+      const [data, item] = await Promise.all([loadTripData(tripId), loadMovable(tripId, body.id)]);
       const day = body.day ?? item.day;
-      assertTripDay(trip, day);
+      assertTripDay(data.trip, day);
       const moved = day !== item.day;
-      let start = body.start ?? item.start;
-      const duration = body.durationMin ?? minutesOf(item);
-      let orderIndex = item.orderIndex;
+      const current = await dayItems(tripId, item.day);
+      const group = pairIds(item, current);
+      const lead = group.find((i) => !isTrackB(i)) ?? item;
+      const leadIdea = ideaOf(data, lead);
+      if (!leadIdea) throw new HttpError(404, 'Idea not found');
+      const split = approvedSplit(data, leadIdea);
+
+      const duration = split ? split.reunion.afterMinutes : (body.durationMin ?? toMin(item.end) - toMin(item.start));
+      let start = body.start ? toMin(body.start) - (isTrackB(item) && split ? split.walkMin : 0) : toMin(lead.start);
+      let orderIndex = lead.orderIndex;
       if (moved) {
-        const target = await dayItems(tripId, day);
+        const target = (await dayItems(tripId, day)).filter((i) => !isPrayerItem(i));
         orderIndex = target.length;
-        if (!body.start) start = nextSlot(target, duration).start;
+        if (!body.start) start = toMin(nextSlot(target, duration).start);
       }
-      await itemRef(tripId, item.id).update({
-        day,
-        start,
-        end: toClock(toMin(start) + duration),
-        orderIndex,
-        // Leaving a day means a new previous stop.
-        ...(moved ? { transitFromPrev: FieldValue.delete() } : {}),
-        updatedBy: member.uid,
-        updatedAt: Date.now(),
-      });
-      await Promise.all([refreshLegs(tripId, day), moved ? refreshLegs(tripId, item.day) : null]);
+      const batch = adminDb().batch();
+      group.forEach((g) => batch.delete(itemRef(tripId, g.id)));
+      writeStops(batch, tripId, { data, idea: leadIdea, day, start, durationMin: split ? undefined : duration, orderIndex, actor: member.uid });
+      await batch.commit();
+      await refreshDays(tripId, moved ? [day, item.day] : [day], data);
       return json({ ok: true });
     },
     { perMinute: 60 },
   ),
 
-  /** New order for a day's movable stops; they're re-timed back to back around bookings. */
+  /** New order for a day's movable stops: re-timed back to back around bookings, opening hours and prayer times. */
   'POST schedule/reorder': withTrip(
     async (req, { tripId, member }) => {
       const body = await readJson(req, z.object({ day: LocalDate, order: z.array(Id).min(1).max(100) }));
       await useDailyQuota(member.uid, 'arrange');
+      const data = await loadTripData(tripId);
       const items = await dayItems(tripId, body.day);
-      const times = reflowDay(items, body.order, await estimatedGaps(tripId, items));
+      const movable = items.filter((i) => !i.locked && !isPrayerItem(i) && !isTrackB(i));
+      const ordered = [...body.order.flatMap((id) => movable.find((m) => m.id === id) ?? []), ...movable.filter((m) => !body.order.includes(m.id))];
+      if (!ordered.length) return json({ ok: true });
+
+      const ends = itemEnds(data, ordered);
+      const units: Unit[] = ordered.map((it) => {
+        const idea = ideaOf(data, it);
+        const base = idea ? unitFor(idea, approvedSplit(data, idea)) : null;
+        return { ...(base ?? { id: it.id }), id: it.id, loc: ends.get(it.id)?.in ?? data.trip.destinations[0].location, duration: Math.max(5, toMin(it.end) - toMin(it.start)) } as Unit;
+      });
+      const frame = framesFor(data, [body.day])[0];
+      const locked = items.filter((i) => i.locked && toMin(i.end) > toMin(i.start));
+      const timing = timeSequence(
+        { ...frame, start: Math.min(...ordered.map((i) => toMin(i.start))), end: 24 * 60 - 1, blocks: locked.map((l) => ({ start: toMin(l.start), end: toMin(l.end) })) },
+        units,
+        { strict: false },
+      );
+
       const batch = adminDb().batch();
-      for (const t of times) {
-        batch.update(itemRef(tripId, t.id), { start: t.start, end: t.end, orderIndex: t.orderIndex, updatedBy: member.uid, updatedAt: Date.now() });
-      }
+      timing.placed.forEach((p, orderIndex) => {
+        const it = ordered.find((o) => o.id === p.id)!;
+        const shift = p.start - toMin(it.start);
+        for (const g of pairIds(it, items)) {
+          batch.update(itemRef(tripId, g.id), { start: toClock(toMin(g.start) + shift), end: toClock(toMin(g.end) + shift), orderIndex, updatedBy: member.uid, updatedAt: Date.now() });
+        }
+      });
       logActivity(batch, tripId, member.uid, `${member.displayName} reordered ${body.day}`);
       await batch.commit();
-      await refreshLegs(tripId, body.day);
-      return json({ items: times });
-    },
-    { perMinute: 60 },
-  ),
-
-  /** Take a stop off the timeline; its idea goes back to the backlog. */
-  'POST schedule/remove': withTrip(
-    async (req, { tripId, member }) => {
-      const { id } = await readJson(req, z.object({ id: Id }));
-      const item = await loadItem(tripId, id);
-      const batch = adminDb().batch();
-      batch.delete(itemRef(tripId, id));
-      if (item.ref.kind === 'idea') {
-        const idea = await ideaRef(tripId, item.ref.ideaId).get();
-        if (idea.exists) {
-          batch.update(idea.ref, { status: 'backlog', updatedAt: Date.now() });
-          logActivity(batch, tripId, member.uid, `${member.displayName} took ${(idea.data() as Idea).place.name} off ${item.day}`);
-        }
-      }
-      await batch.commit();
-      await refreshLegs(tripId, item.day);
+      await refreshDay(tripId, body.day, data);
       return json({ ok: true });
     },
     { perMinute: 60 },
   ),
+
+  /** Take a stop (or split pair) off the timeline; its ideas go back to the backlog. */
+  'POST schedule/remove': withTrip(
+    async (req, { tripId, member }) => {
+      const { id } = await readJson(req, z.object({ id: Id }));
+      const [data, item] = await Promise.all([loadTripData(tripId), loadMovable(tripId, id)]);
+      const group = pairIds(item, await dayItems(tripId, item.day));
+      const batch = adminDb().batch();
+      for (const g of group) {
+        batch.delete(itemRef(tripId, g.id));
+        const idea = ideaOf(data, g);
+        if (idea) batch.update(ideaDocRef(tripId, idea.id), { status: 'backlog', updatedAt: Date.now() });
+      }
+      const lead = ideaOf(data, group.find((g) => !isTrackB(g)) ?? item);
+      if (lead) logActivity(batch, tripId, member.uid, `${member.displayName} took ${lead.place.name} off ${item.day}`);
+      await batch.commit();
+      await refreshDay(tripId, item.day, data);
+      return json({ ok: true });
+    },
+    { perMinute: 60 },
+  ),
+
+  /**
+   * AI Arrange (admin): plans every backlog + scheduled idea across the trip
+   * around the bookings, opening hours, meal times, pace and prayer times.
+   * Nothing changes until the admin applies the preview.
+   */
+  'POST schedule/arrange': withTrip(
+    async (_req, { tripId, user }) => {
+      await useDailyQuota(user.uid, 'arrange');
+      const data = await loadTripData(tripId);
+      const days = tripDays(data.trip.startDate, data.trip.endDate);
+      const frames = framesFor(data, days);
+      const ideas = [...data.ideas.values()].filter((i) => (i.status === 'backlog' || i.status === 'scheduled') && !isAltOfSplit(data, i));
+      if (!ideas.length) throw new HttpError(409, 'Nothing to arrange yet — approve some ideas on the Idea Board first');
+      const units = ideas.map((i) => unitFor(i, approvedSplit(data, i)));
+      const pace = mergePrefs(data.members).pace ?? 'moderate';
+      const result = arrangeTrip(frames, units, { maxStops: PACE[pace].maxStops });
+
+      const plan: ArrangeJob['plan'] = {
+        days: result.days
+          .filter((d) => d.timing.placed.length)
+          .map((d) => ({
+            day: d.day,
+            travelMin: Math.round(d.timing.travelMin),
+            stops: d.timing.placed.map((p) => ({ ideaId: p.id, start: toClock(p.start), end: toClock(p.end) })),
+            prayers: d.timing.prayers.map((p) => ({ key: p.key, start: toClock(p.start), end: toClock(p.end) })),
+          })),
+        unplaced: result.unplaced.map((u) => ({ ideaId: u.id, reason: u.reason })),
+      };
+      await addNotes(plan, data);
+
+      const ref = adminDb().collection(paths.jobs(tripId)).doc();
+      const job = ArrangeJob.parse({ id: ref.id, kind: 'arrange', status: 'preview', plan, createdBy: user.uid, at: Date.now() });
+      await ref.set(job);
+      return json(job);
+    },
+    { admin: true, perMinute: 6 },
+  ),
+
+  /** Apply a previewed plan: replaces every movable stop (bookings stay). Undo restores the old ones. */
+  'POST schedule/apply': withTrip(
+    async (req, { tripId, member }) => {
+      const { jobId } = await readJson(req, z.object({ jobId: Id }));
+      const snap = await jobRef(tripId, jobId).get();
+      const job = snap.exists ? ArrangeJob.parse(snap.data()) : null;
+      if (job?.status !== 'preview') throw new HttpError(409, 'That preview is no longer available — arrange again');
+      const data = await loadTripData(tripId);
+      const current = (await adminDb().collection(paths.schedule(tripId)).get()).docs.map((d) => ScheduleItem.parse(d.data()));
+      const before = current.filter((i) => !i.locked);
+
+      const batch = adminDb().batch();
+      before.forEach((i) => batch.delete(itemRef(tripId, i.id)));
+      const scheduled = new Set<string>();
+      for (const d of job.plan.days) {
+        d.stops.forEach((s, orderIndex) => {
+          const idea = data.ideas.get(s.ideaId);
+          if (!idea) return;
+          const split = approvedSplit(data, idea);
+          const ids = writeStops(batch, tripId, { data, idea, day: d.day, start: toMin(s.start), durationMin: split ? undefined : toMin(s.end) - toMin(s.start), orderIndex, actor: member.uid });
+          ids.forEach((id) => scheduled.add(id));
+        });
+      }
+      const wasScheduled = new Set(before.flatMap((i) => (i.ref.kind === 'idea' ? [i.ref.ideaId] : [])));
+      for (const id of new Set([...scheduled, ...wasScheduled])) {
+        if (data.ideas.has(id)) batch.update(ideaDocRef(tripId, id), { status: scheduled.has(id) ? 'scheduled' : 'backlog', updatedAt: Date.now() });
+      }
+      batch.update(snap.ref, { status: 'applied', before, appliedAt: Date.now() });
+      logActivity(batch, tripId, member.uid, `${member.displayName} applied AI Arrange (${scheduled.size} stops over ${job.plan.days.length} days)`);
+      await batch.commit();
+      await refreshDays(tripId, [...job.plan.days.map((d) => d.day), ...before.map((i) => i.day)], data);
+      return json({ ok: true });
+    },
+    { admin: true, perMinute: 6 },
+  ),
+
+  /** Undo an applied plan: puts back exactly what was on the timeline before. */
+  'POST schedule/undo': withTrip(
+    async (req, { tripId, member }) => {
+      const { jobId } = await readJson(req, z.object({ jobId: Id }));
+      const snap = await jobRef(tripId, jobId).get();
+      const job = snap.exists ? ArrangeJob.parse(snap.data()) : null;
+      if (job?.status !== 'applied' || !job.before) throw new HttpError(409, 'Nothing to undo');
+      const data = await loadTripData(tripId);
+      const current = (await adminDb().collection(paths.schedule(tripId)).get()).docs.map((d) => ScheduleItem.parse(d.data())).filter((i) => !i.locked);
+
+      const batch = adminDb().batch();
+      current.forEach((i) => batch.delete(itemRef(tripId, i.id)));
+      // Restore stops whose ideas still exist (one may have been deleted since).
+      const restore = job.before.filter((i) => i.ref.kind !== 'idea' || data.ideas.has(i.ref.ideaId));
+      restore.forEach((i) => batch.set(itemRef(tripId, i.id), i));
+      const restored = new Set(restore.flatMap((i) => (i.ref.kind === 'idea' ? [i.ref.ideaId] : [])));
+      const nowScheduled = new Set(current.flatMap((i) => (i.ref.kind === 'idea' ? [i.ref.ideaId] : [])));
+      for (const id of new Set([...restored, ...nowScheduled])) {
+        if (data.ideas.has(id)) batch.update(ideaDocRef(tripId, id), { status: restored.has(id) ? 'scheduled' : 'backlog', updatedAt: Date.now() });
+      }
+      batch.update(snap.ref, { status: 'undone' });
+      logActivity(batch, tripId, member.uid, `${member.displayName} undid AI Arrange`);
+      await batch.commit();
+      await refreshDays(tripId, [...current.map((i) => i.day), ...restore.map((i) => i.day)], data);
+      return json({ ok: true });
+    },
+    { admin: true, perMinute: 6 },
+  ),
+
+  /** Close a preview without applying it. */
+  'POST schedule/discard': withTrip(
+    async (req, { tripId }) => {
+      const { jobId } = await readJson(req, z.object({ jobId: Id }));
+      const ref = jobRef(tripId, jobId);
+      const snap = await ref.get();
+      if (snap.exists && snap.data()?.status === 'preview') await ref.update({ status: 'discarded' });
+      return json({ ok: true });
+    },
+    { admin: true, perMinute: 30 },
+  ),
 };
+
+/** The alternative half of a split is planned together with its original. */
+function isAltOfSplit(data: TripData, idea: Idea) {
+  const s = idea.splitId ? data.splits.get(idea.splitId) : undefined;
+  return s?.status === 'approved' && s.trackB.ideaId === idea.id;
+}
+
+/** One friendly sentence per day from the AI (skipped quietly if it's busy). */
+async function addNotes(plan: ArrangeJob['plan'], data: TripData) {
+  if (!plan.days.length) return;
+  const facts = plan.days.map((d) => ({
+    day: d.day,
+    stops: d.stops.map((s) => `${s.start} ${data.ideas.get(s.ideaId)?.place.name ?? ''}`),
+    prayerBreaks: d.prayers.map((p) => `${p.start} ${PRAYER_LABEL[p.key]}`),
+    travelMin: d.travelMin,
+  }));
+  try {
+    const out = await extractJson({
+      system:
+        'You summarise a group trip plan. For each day write ONE short, friendly sentence (max 25 words) saying what the day is about and why the order works (e.g. same area, lunch near X, prayer break between). Use only the given facts; never invent places.',
+      parts: [{ text: JSON.stringify(facts) }],
+      responseSchema: { type: Type.OBJECT, properties: { days: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { day: { type: Type.STRING }, note: { type: Type.STRING } }, required: ['day', 'note'] } } }, required: ['days'] },
+      validate: z.object({ days: z.array(z.object({ day: z.string(), note: z.string() })) }),
+      budgetMs: 12_000,
+    });
+    for (const n of out.days) {
+      const d = plan.days.find((x) => x.day === n.day);
+      if (d) d.note = n.note.slice(0, 300);
+    }
+  } catch {
+    // Notes are a nice-to-have; the plan stands on its own.
+  }
+}
+

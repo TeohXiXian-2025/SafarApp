@@ -87,7 +87,8 @@ const osmPoint = (e: OsmElement): GeoPoint | null => {
   const lon = e.lon ?? e.center?.lon;
   return lat === undefined || lon === undefined ? null : { lat, lng: lon };
 };
-const isPrayer = (e: OsmElement) => e.tags?.amenity === 'prayer_room' || e.tags?.religion === 'muslim';
+// Mosques and prayer rooms only — halal eateries are often tagged religion=muslim too.
+const isPrayer = (e: OsmElement) => e.tags?.amenity === 'prayer_room' || (e.tags?.amenity === 'place_of_worship' && e.tags?.religion === 'muslim');
 
 function osmSignal(d: PlaceDetails, osm: OsmElement[] | null): Signal | null {
   const hit = osm?.find((e) => {

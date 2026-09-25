@@ -41,12 +41,13 @@ type TripDays = Pick<Trip, 'destinations' | 'startDate' | 'endDate'>;
  * When to go so nobody misses a prayer: pray first, visit, be back before the
  * next one. Uses the trip destination closest to the place for its timezone.
  */
-export function visitPlan(idea: Idea, trip: TripDays, now = new Date()): VisitPlan {
+export function visitPlan(idea: Idea, trip: TripDays, now = new Date(), onDay?: string): VisitPlan {
   const at = idea.place.location;
   const dest = [...trip.destinations].sort(
     (a, b) => (a.location.lat - at.lat) ** 2 + (a.location.lng - at.lng) ** 2 - ((b.location.lat - at.lat) ** 2 + (b.location.lng - at.lng) ** 2),
   )[0];
-  const date = planningDate(trip.startDate, trip.endDate, dest.timezone, now);
+  // The day it's on the timeline, else the day being planned.
+  const date = onDay ?? planningDate(trip.startDate, trip.endDate, dest.timezone, now);
   const open = openingRanges(idea.place.openingHours, date);
   const day = prayerTimesOn(date, at, dest.timezone, dest.countryCode);
   return { date, windows: open?.length === 0 ? [] : visitWindows(day, idea.estDurationMin, open), closed: open?.length === 0 };
@@ -55,11 +56,11 @@ export function visitPlan(idea: Idea, trip: TripDays, now = new Date()): VisitPl
 export function ideaConflicts(
   idea: Idea,
   members: Member[],
-  opts: { currency?: string; communityTier?: HalalTier; trip?: TripDays } = {},
+  opts: { currency?: string; communityTier?: HalalTier; trip?: TripDays; /** Day it's scheduled on (for prayer times). */ day?: string } = {},
 ): Conflict[] {
   const out: Conflict[] = [];
   const farFromPrayer = idea.halal?.prayer?.access === 'far';
-  const plan = farFromPrayer && opts.trip ? visitPlan(idea, opts.trip) : null;
+  const plan = farFromPrayer && opts.trip ? visitPlan(idea, opts.trip, new Date(), opts.day) : null;
   const h = idea.halal;
   const food = idea.place.category === 'food';
   const tier = opts.communityTier ?? h?.tier;
