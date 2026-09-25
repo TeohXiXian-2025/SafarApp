@@ -58,6 +58,11 @@ export interface DayFrame {
   blocks: Block[];
   /** null → nobody in the group asked for prayer breaks. */
   prayers: DayPrayers | null;
+  /**
+   * When the group is at the destination that day (minutes): from landing on
+   * the arrival day, until leaving on the last day; otherwise the whole day.
+   */
+  inTrip?: [number, number];
 }
 
 export interface PrayerSlot {
@@ -137,10 +142,10 @@ export interface LockedPrayer {
   end: number;
 }
 
-/** Dhuhr, Asr, Maghrib and Isha, locked at their times. Fajr is before any day out. */
+/** The five prayers, locked at their times (Subuh is before most days out). */
 export function lockedPrayers(p: DayPrayers | null): LockedPrayer[] {
   if (!p) return [];
-  return ORDER.slice(1).map((key) => {
+  return ORDER.map((key) => {
     const start = ceil5(p.times[key]);
     return { key, start, end: start + PRAYER_BLOCK_MIN };
   });
@@ -474,15 +479,21 @@ export function prayerBreaks(
   base?: GeoPoint,
   /** Time spent travelling (airport → landing): prayers then are covered by the journey's own guidance. */
   journeys: Block[] = [],
+  /**
+   * The whole day is planned (the timeline): every prayer while the group is
+   * at the destination gets its block, stops or not. Without it, only the
+   * prayers while the group is out (between the first and last stop).
+   */
+  inTrip?: [number, number],
 ): { prayers: PrayerSlot[]; clashes: PrayerClash[] } {
   const clashes: PrayerClash[] = [];
-  if (!prayers || !stops.length) return { prayers: [], clashes };
+  if (!prayers || (!stops.length && !inTrip)) return { prayers: [], clashes };
   const sorted = [...stops].sort((a, b) => a.start - b.start);
-  const first = sorted[0].start;
-  const last = Math.max(...sorted.map((s) => s.end));
+  const first = inTrip ? inTrip[0] : sorted[0].start;
+  const last = inTrip ? inTrip[1] : Math.max(...sorted.map((s) => s.end));
   const out: PrayerSlot[] = [];
   for (const p of lockedPrayers(prayers)) {
-    if (p.end <= first || p.start >= last) continue; // prayed before leaving / after getting back
+    if (inTrip ? p.start < first || p.start >= last : p.end <= first || p.start >= last) continue; // not there yet / already gone (or prayed before leaving / after getting back)
     if (journeys.some((j) => p.start < j.end && p.end > j.start)) continue; // at the airport / on board
     const isLong = (x: GapStop) => x.end - x.start >= LONG_VISIT_MIN;
     const inside = sorted.find((x) => x.start <= p.start && x.end > p.start && isLong(x));
@@ -492,7 +503,9 @@ export function prayerBreaks(
     }
     const before = [...sorted].reverse().find((x) => x.end <= p.start);
     const near = inside ?? before ?? sorted[0];
-    out.push({ key: p.key, start: p.start, end: p.end, afterId: inside || before ? near.id : null, at: near.loc ?? base ?? { lat: 0, lng: 0 } });
+    // Before the day's first stop (whole-day mode) you're still at the hotel / where you arrived.
+    const at = !inside && !before && inTrip && base ? base : (near?.loc ?? base ?? { lat: 0, lng: 0 });
+    out.push({ key: p.key, start: p.start, end: p.end, afterId: near && (inside || before) ? near.id : null, at });
   }
   return { prayers: out, clashes };
 }
@@ -540,6 +553,8 @@ export function nearestDestination<D extends Pick<Destination, 'location'>>(dest
 
 /** Same-day journeys longer than this change city: the day starts after arriving (or ends before leaving). */
 const CITY_CHANGE_M = 30_000;
+/** A place further than this from every destination is outside the trip (home, a stopover). */
+const IN_TRIP_M = 100_000;
 
 /**
  * Each day's usable window and base from the bookings:
@@ -562,8 +577,12 @@ export function dayFrames(
   return days.map((day) => {
     let start = DAY_START;
     let end = PACE[opts.pace].end;
+    // At the destination from landing (arrival day) until leaving (last day).
+    let inFrom = 0;
+    let inTo = 24 * 60;
     const blocks: Block[] = [];
     let arrivedAt: GeoPoint | undefined;
+    const outside = (p: GeoPoint) => toTrip(p) > IN_TRIP_M;
     for (const b of moves) {
       const [sDay, sTime] = b.startLocal.split('T');
       const [eDay, eTime] = b.endLocal.split('T');
@@ -577,16 +596,26 @@ export function dayFrames(
           // Arriving in (or moving between) trip cities: plan only after landing.
           start = Math.max(start, toMin(eTime) + (flight ? 60 : 30));
           arrivedAt = b.to.location;
+          if (outside(from)) inFrom = Math.max(inFrom, toMin(eTime));
         } else {
           // Leaving the trip: plan only before heading to the airport / station.
           end = Math.min(end, toMin(sTime) - (flight ? 150 : 45));
+          if (outside(b.to.location)) inTo = Math.min(inTo, toMin(sTime));
         }
         continue;
       }
-      if (sDay === day) end = Math.min(end, toMin(sTime) - (flight ? 150 : 45));
+      if (sDay === day) {
+        end = Math.min(end, toMin(sTime) - (flight ? 150 : 45));
+        if (outside(b.to.location)) inTo = Math.min(inTo, toMin(sTime));
+        // Setting off from home: not at the destination before (or during) it.
+        if (b.from && outside(b.from.location)) inFrom = Math.max(inFrom, toMin(sTime));
+      }
       if (eDay === day) {
         start = Math.max(start, toMin(eTime) + (flight ? 60 : 30));
         arrivedAt = b.to.location;
+        if (b.from && outside(b.from.location)) inFrom = Math.max(inFrom, toMin(eTime));
+        // Landing back home: the trip is over.
+        if (outside(b.to.location)) inTo = Math.min(inTo, toMin(eTime));
       }
     }
     const hotel = hotels.find((h) => h.startLocal.slice(0, 10) <= day && day <= h.endLocal.slice(0, 10));
@@ -601,6 +630,7 @@ export function dayFrames(
       baseKnown: !!known,
       blocks,
       prayers: opts.praying ? prayerTimesOn(day, base, dest.timezone, dest.countryCode) : null,
+      inTrip: [inFrom, inTo],
     };
   });
 }
@@ -661,13 +691,20 @@ const fmtHm = (min: number) => {
 
 // ─── Where to pray: the place on the way ────────────────────────────────────
 
+/** A prayer place this close (straight line, ~15 min on foot) to the stop before or after is walkable within the break. */
+export const PRAYER_REACH_M = 1100;
+
 /**
  * The prayer place that adds the least detour between the stop before the
- * prayer (`from`) and the stop after it (`to`): shortest from → place → to,
- * straight line. With only one side known, the nearest to it. Ties → nearer `from`.
+ * prayer (`from`) and the stop after it (`to`) — shortest from → place → to,
+ * straight line — among places within walking reach of either stop (the break
+ * is only ~30 min). None in reach → the one nearest either stop. Ties → nearer `from`.
  */
 export function prayerPlaceOnRoute<P extends { location: GeoPoint }>(candidates: P[], from?: GeoPoint, to?: GeoPoint): P | undefined {
   if (!candidates.length) return undefined;
   const d = (a: GeoPoint | undefined, b: GeoPoint) => (a ? metersBetween(a, b) : 0);
-  return [...candidates].sort((a, b) => d(from, a.location) + d(to, a.location) - (d(from, b.location) + d(to, b.location)) || d(from, a.location) - d(from, b.location))[0];
+  const reach = (c: P) => Math.min(from ? d(from, c.location) : Infinity, to ? d(to, c.location) : Infinity);
+  const walkable = candidates.filter((c) => reach(c) <= PRAYER_REACH_M);
+  if (!walkable.length) return [...candidates].sort((a, b) => reach(a) - reach(b))[0];
+  return walkable.sort((a, b) => d(from, a.location) + d(to, a.location) - (d(from, b.location) + d(to, b.location)) || d(from, a.location) - d(from, b.location))[0];
 }

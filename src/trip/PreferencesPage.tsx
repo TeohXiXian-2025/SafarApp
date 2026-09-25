@@ -25,7 +25,7 @@ export function PreferencesPage() {
   const [daily, setDaily] = useState(p?.dailyBudget !== undefined ? String(p.dailyBudget) : '');
   const [halalRequired, setHalalRequired] = useState(p?.halalRequired ?? false);
   const [halalTier, setHalalTier] = useState<HalalTier>(p?.halalTier ?? 'certified');
-  const [prayerReminders, setPrayerReminders] = useState(p?.prayerReminders ?? false);
+  const [prayerReminders, setPrayerReminders] = useState(p?.prayerReminders ?? true);
   const [pace, setPace] = useState<MemberPrefs['pace']>(p?.pace ?? 'moderate');
   const [interests, setInterests] = useState<string[]>(p?.interests ?? []);
   const [priorities, setPriorities] = useState<MemberPrefs['hotelPriorities']>(p?.hotelPriorities ?? []);

@@ -39,6 +39,7 @@ import {
   nearestDestination,
   PRAYER_LABEL,
   prayerBreaks,
+  prays,
   journeySpans,
   rebaseFrame,
   Split,
@@ -239,7 +240,7 @@ export function TimelinePage() {
 
   const loading = schedule.loading || ideas.loading || bookings.loading;
   const ideaMap = useMemo(() => new Map(ideas.data.map((i) => [i.id, i])), [ideas.data]);
-  const prayingUids = useMemo(() => new Set(members.filter((m) => m.prefs?.prayerReminders).map((m) => m.uid)), [members]);
+  const prayingUids = useMemo(() => new Set(members.filter(prays).map((m) => m.uid)), [members]);
   const bookingMap = useMemo(() => new Map(bookings.data.map((b) => [b.id, b])), [bookings.data]);
   const rowsByDay = useMemo(() => {
     const out = new Map<string, Row[]>();
@@ -316,7 +317,7 @@ export function TimelinePage() {
   const frame = useMemo(
     () =>
       rebaseFrame(
-        dayFrames([day], bookings.data, trip.destinations, { pace: mergePrefs(members).pace ?? 'moderate', praying: members.some((m) => m.prefs?.prayerReminders) })[0],
+        dayFrames([day], bookings.data, trip.destinations, { pace: mergePrefs(members).pace ?? 'moderate', praying: members.some(prays) })[0],
         firstStop,
         trip.destinations,
       ),
@@ -339,6 +340,7 @@ export function TimelinePage() {
             return b ? [{ start: toMin(r.item.start), end: toMin(r.item.end), event: ref.event, bookingId: b.id, flight: b.kind === 'flight' }] : [];
           }),
         ),
+        frame.inTrip,
       ).prayers.map((p) => `${PRAYER_LABEL[p.key]}@${toClock(p.start)}`).sort().join(),
     [frame, rows, bookingMap],
   );

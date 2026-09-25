@@ -171,6 +171,25 @@ describe('prayerBreaks', () => {
   });
 });
 
+describe('prayerBreaks for the whole day (timeline)', () => {
+  it('gives every prayer a block while at the destination, stops or not', () => {
+    const r = prayerBreaks(PRAYERS, [], HOTEL, [], [0, 24 * 60]);
+    expect(r.prayers.map((p) => [p.key, clock(p.start)])).toEqual([
+      ['fajr', '05:50'],
+      ['dhuhr', '13:05'],
+      ['asr', '16:25'],
+      ['maghrib', '19:10'],
+      ['isha', '20:25'],
+    ]);
+    expect(r.prayers.every((p) => p.at === HOTEL)).toBe(true);
+  });
+
+  it('skips prayers before landing and while travelling', () => {
+    const r = prayerBreaks(PRAYERS, [], HOTEL, [{ start: h('15:00'), end: h('17:00') }], [h('12:00'), 24 * 60]);
+    expect(r.prayers.map((p) => p.key)).toEqual(['dhuhr', 'maghrib', 'isha']);
+  });
+});
+
 describe('dayFrames', () => {
   const KL = { location: { lat: 3.139, lng: 101.6869 }, timezone: 'Asia/Kuala_Lumpur', countryCode: 'MY' };
   const TOKYO = { location: { lat: 35.6764, lng: 139.65 }, timezone: 'Asia/Tokyo', countryCode: 'JP' };
@@ -204,6 +223,15 @@ describe('dayFrames', () => {
     const home = { kind: 'flight' as const, startLocal: '2026-09-30T18:00', endLocal: '2026-09-30T23:30', from: { location: { lat: 37.46, lng: 126.44 } }, to: { location: KL.location } };
     const [f] = dayFrames(['2026-09-30'], [home], [SEOUL], { pace: 'moderate', praying: false });
     expect(clock(f.end)).toBe('15:30');
+  });
+
+  it('knows when the group is at the destination (landing day, leaving day)', () => {
+    // A Tokyo-only trip from KL: day 1 is at home until the 23:30 flight; Tokyo from landing 07:40; home at 18:00 on day 4.
+    const f = dayFrames(['2026-12-01', '2026-12-02', '2026-12-03', '2026-12-04'], [flight, hotel, home], [TOKYO], { pace: 'moderate', praying: true });
+    expect(f[0].inTrip?.[0]).toBe(h('23:30'));
+    expect(f[1].inTrip).toEqual([h('07:40'), 24 * 60]);
+    expect(f[2].inTrip).toEqual([0, 24 * 60]);
+    expect(f[3].inTrip).toEqual([0, h('18:00')]);
   });
 
   it('has no prayer times when nobody asked for prayer breaks', () => {
@@ -288,9 +316,17 @@ describe('prayerPlaceOnRoute', () => {
     const from = near(0);
     const to = near(0.03);
     const behind = { name: 'behind', location: near(-0.004) }; // closest to `from`, wrong way
-    const onWay = { name: 'onWay', location: near(0.012) };
+    const onWay = { name: 'onWay', location: near(0.008) };
     expect(prayerPlaceOnRoute([behind, onWay], from, to)?.name).toBe('onWay');
     expect(prayerPlaceOnRoute([behind, onWay], from)?.name).toBe('behind');
     expect(prayerPlaceOnRoute([], from, to)).toBeUndefined();
+  });
+
+  it('never picks a place far from both stops just because it is on the line between them', () => {
+    const from = near(0);
+    const to = near(0.08); // ~9 km away
+    const middle = { name: 'middle', location: near(0.04) }; // ~4.4 km from each — too far to walk in a break
+    const byTo = { name: 'byTo', location: near(0.078) };
+    expect(prayerPlaceOnRoute([middle, byTo], from, to)?.name).toBe('byTo');
   });
 });

@@ -366,7 +366,7 @@ export const scheduleRoutes: RouteTable = {
       await refreshDay(tripId, day);
       return json({ ok: true });
     },
-    { perMinute: 10 },
+    { perMinute: 40 },
   ),
 
   /**

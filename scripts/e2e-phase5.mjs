@@ -129,7 +129,7 @@ try {
   const re = await alice.call('schedule/reorder', { day: '2026-12-07', order: [`idea_${B}`, `idea_${A}`, `idea_${C}`] }, q);
   assert.equal(re.status, 200, JSON.stringify(re.body));
   const day1 = await dayItems(tripId, '2026-12-07');
-  const order = day1.filter((i) => !i.locked).map((i) => i.id);
+  const order = day1.filter((i) => !i.locked && !i.prayer).map((i) => i.id);
   assert.deepEqual(order, [`idea_${B}`, `idea_${A}`, `idea_${C}`]);
   // Packed from the day's first start, but never before a place opens (Aquaria opens at 10:00).
   const b2 = day1.find((i) => i.id === `idea_${B}`);

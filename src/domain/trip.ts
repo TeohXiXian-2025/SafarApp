@@ -41,6 +41,13 @@ export const Member = z.object({
 });
 export type Member = z.infer<typeof Member>;
 
+/**
+ * Whether a member gets prayer breaks. Until someone sets their preferences
+ * they count as praying (Safar plans Muslim-friendly trips by default); after
+ * that it's their "prayer breaks" choice.
+ */
+export const prays = (m: { prefs?: { prayerReminders: boolean } | null }) => (m.prefs ? m.prefs.prayerReminders : true);
+
 export const Destination = PlaceRef.extend({
   /** IANA timezone, e.g. "Asia/Tokyo" — needed for prayer times & schedule. */
   timezone: z.string().max(64),

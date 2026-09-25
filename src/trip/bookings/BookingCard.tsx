@@ -2,7 +2,7 @@
 // clock, travellers, and edit / delete / "delayed or cancelled?" actions.
 import { ArrowRight, FileText, Pencil, Siren, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { Booking, journeyPrayers, type BookingDraft } from '../../domain';
+import { Booking, journeyPrayers, prays, type BookingDraft } from '../../domain';
 import { JourneyPrayerList } from '../JourneyPrayerList';
 import { api, ApiError } from '../../lib/api';
 import { fileUrl } from '../../lib/storage';
@@ -79,7 +79,7 @@ export function BookingCard({ booking: b, canEdit, isMine, onEdit }: { booking: 
         </div>
       </div>
 
-      {b.kind !== 'hotel' && travellers.some((m) => m.prefs?.prayerReminders) && (() => {
+      {b.kind !== 'hotel' && travellers.some(prays) && (() => {
         const list = journeyPrayers(b);
         return list.length ? <JourneyPrayerList list={list} /> : null;
       })()}

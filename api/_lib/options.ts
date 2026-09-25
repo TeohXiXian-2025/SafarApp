@@ -15,6 +15,7 @@ import {
   type MiddleOption,
   type Trip,
   type VoteReasonTag,
+  prays,
 } from '../../src/domain/index.js';
 import { searchNearby } from './places.js';
 
@@ -100,7 +101,7 @@ export async function buildOptions(opts: {
   const out: MiddleOption[] = [...alternatives];
   const timingKept = opts.keep.find((o) => o.type === 'timing');
   if (timingKept) out.push(timingKept);
-  else if (tags.has('timing') || choosers.some((m) => m.prefs?.prayerReminders)) {
+  else if (tags.has('timing') || choosers.some(prays)) {
     const w = visitPlan(idea, opts.trip).windows[0];
     if (w) {
       const label = w.after === 'sunrise' ? 'in the morning' : `after ${w.after[0].toUpperCase()}${w.after.slice(1)}`;

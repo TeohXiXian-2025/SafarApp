@@ -19,6 +19,8 @@ import {
   planDay,
   journeySpans,
   prayerPlaceOnRoute,
+  PRAYER_REACH_M,
+  prays,
   prayerBreaks,
   rebaseFrame,
   ScheduleItem,
@@ -43,7 +45,9 @@ const LEG_TTL = 30 * 86_400_000;
 /** Routes API calls per day refresh — a day rarely has more new legs than this. */
 const MAX_NEW_LEGS = 12;
 /** Mosque lookups per day refresh (most stops already know their nearest prayer space). */
-const MAX_MOSQUE_LOOKUPS = 4;
+const MAX_MOSQUE_LOOKUPS = 6;
+/** Beyond this (straight line, ~30 min on foot) a prayer place isn't worth suggesting for a break. */
+const MAX_PRAYER_WALK_M = 2200;
 
 export const itemRef = (tripId: string, id: string) => adminDb().doc(`${paths.schedule(tripId)}/${id}`);
 export const ideaDocRef = (tripId: string, id: string) => adminDb().doc(paths.idea(tripId, id));
@@ -87,7 +91,7 @@ export async function loadTripData(tripId: string): Promise<TripData> {
   };
 }
 
-export const prayingUids = (members: Member[]) => members.filter((m) => m.prefs?.prayerReminders).map((m) => m.uid);
+export const prayingUids = (members: Member[]) => members.filter(prays).map((m) => m.uid);
 
 export function framesFor(data: TripData, days: string[]): DayFrame[] {
   return dayFrames(days, [...data.bookings.values()], data.trip.destinations, {
@@ -278,13 +282,23 @@ async function facilityFor(data: TripData, slot: PrayerSlot, stops: ScheduleItem
     const f = i.prayer?.facility;
     if (f && [from, to].some((p) => p && metersBetween(p, f.location) < 2000)) add(f);
   }
-  if (!cands.length && lookups.n++ < MAX_MOSQUE_LOOKUPS) {
+  // Nothing known within walking reach of either stop → one lookup on the way.
+  const inReach = cands.some((c) => [from, to].some((p) => p && metersBetween(p, c.location) <= PRAYER_REACH_M));
+  if (!inReach && lookups.n++ < MAX_MOSQUE_LOOKUPS) {
     const mid = to ? { lat: (from.lat + to.lat) / 2, lng: (from.lng + to.lng) / 2 } : from;
     for (const p of (await searchNearby(mid, ['mosque'], 2000, 3).catch(() => null)) ?? []) add({ name: p.name, location: p.location, placeId: p.placeId, type: facilityType(p.name) });
   }
-  const best = prayerPlaceOnRoute(cands, from, to);
-  if (!best) return undefined;
-  return { ...best, walkMin: Math.round((metersBetween(from, best.location) * 1.3) / 80) };
+  const reachOf = (c: Facility) => Math.min(metersBetween(from, c.location), to ? metersBetween(to, c.location) : Infinity);
+  let best = prayerPlaceOnRoute(cands, from, to);
+  // Still nothing within ~30 min on foot: look right where the group is (once more if allowed).
+  if ((!best || reachOf(best) > MAX_PRAYER_WALK_M) && lookups.n++ < MAX_MOSQUE_LOOKUPS) {
+    for (const p of (await searchNearby(from, ['mosque'], 2000, 3).catch(() => null)) ?? []) add({ name: p.name, location: p.location, placeId: p.placeId, type: facilityType(p.name) });
+    best = prayerPlaceOnRoute(cands, from, to);
+  }
+  // Better to say "any clean, quiet spot works" than send people on a long walk.
+  if (!best || reachOf(best) > MAX_PRAYER_WALK_M) return undefined;
+  // Walk from whichever end it's nearer (you may pray on arriving at the next stop).
+  return { ...best, walkMin: Math.round((reachOf(best) * 1.3) / 80) };
 }
 
 /** How far (straight line) a filler for the people not praying may be from the prayer place. */
@@ -296,7 +310,7 @@ const FILLER_M = 700;
  * against (liked ones first, then nearest). Not already on the timeline.
  */
 function fillerFor(data: TripData, near: GeoPoint, used: Set<string>, onDay: Set<string>): Idea | undefined {
-  const others = data.members.filter((m) => !m.prefs?.prayerReminders).map((m) => m.uid);
+  const others = data.members.filter((m) => !prays(m)).map((m) => m.uid);
   if (!others.length) return undefined;
   return [...data.ideas.values()]
     .filter((i) => (i.status === 'backlog' || i.status === 'backup') && !used.has(i.id) && !onDay.has(i.id) && !isAltOfSplit(data, i))
@@ -326,6 +340,7 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
     stops.map((i) => ({ id: i.id, start: toMin(i.start), end: Math.max(toMin(i.end), toMin(i.start)), loc: ends.get(i.id)?.out, prayerWalkMin: walkOf(i) })),
     frame.base,
     journeysOf(data, stops),
+    frame.inTrip,
   );
   const batch = adminDb().batch();
   const keep = new Set(prayers.map((p) => prayerItemId(day, p.key)));
@@ -333,10 +348,13 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
   const lookups = { n: 0 };
   const praying = prayingUids(data.members);
   const used = new Set<string>();
+  // Places found for earlier breaks in this refresh (a day without stops needs just one lookup).
+  const found: ScheduleItem[] = [];
   // Ideas already on this day (their status may not be updated in `data` yet).
   const onDay = new Set(all.flatMap((i) => (i.ref.kind === 'idea' ? [i.ref.ideaId] : [])));
   for (const slot of prayers) {
-    const facility = await facilityFor(data, slot, stops, ends, previous, lookups);
+    const facility = await facilityFor(data, slot, stops, ends, [...previous, ...found], lookups);
+    if (facility) found.push({ prayer: { prayer: PRAYER_LABEL[slot.key], at: toClock(slot.start), facility } } as ScheduleItem);
     const filler = fillerFor(data, facility?.location ?? slot.at, used, onDay);
     if (filler) used.add(filler.id);
     const id = prayerItemId(day, slot.key);

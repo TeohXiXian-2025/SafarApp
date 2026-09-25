@@ -146,7 +146,7 @@ try {
   }
   ok(`preview in ${((Date.now() - t0) / 1000).toFixed(1)}s: ${plan.days.map((d) => `${d.day}: ${d.stops.length} stops + ${d.prayers.map((p) => `${p.key} ${p.start}`).join(', ')}`).join(' | ')}; unplaced ${plan.unplaced.length}`);
   plan.days.forEach((d) => d.note && console.log(`     ${d.day}: ${d.note}`));
-  assert.equal((await schedule(tripId)).filter((i) => !i.locked).length, 0);
+  assert.equal((await schedule(tripId)).filter((i) => !i.locked && !i.prayer).length, 0);
   ok('preview changes nothing');
 
   const ap = await alice.call('schedule/apply', { jobId: ar.body.id }, q);
@@ -199,7 +199,7 @@ try {
   const un = await alice.call('schedule/undo', { jobId: ar.body.id }, q);
   assert.equal(un.status, 200, JSON.stringify(un.body));
   items = await schedule(tripId);
-  assert.equal(items.filter((i) => !i.locked).length, 0);
+  assert.equal(items.filter((i) => !i.locked && !i.prayer).length, 0);
   assert.equal((await ideaDoc(tripId, dtfId)).status, 'backlog');
   ok('undo restores the timeline as it was (empty) and the ideas to the backlog');
 
