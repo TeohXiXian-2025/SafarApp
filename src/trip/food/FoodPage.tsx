@@ -1,12 +1,14 @@
 // Food tab — Halal Radar near you. Search around your location, a stop on the
 // timeline, or a trip city; results are grouped Halal / Pork-free / Not
-// checked with where each verdict comes from. "Check" runs the full Halal
-// Radar on a place; "Add" puts it on the Idea Board; people can report the
-// queue (gone after an hour).
-import { Clock, ExternalLink, LocateFixed, MapPin, Phone, Plus, ShieldCheck, Star, UtensilsCrossed } from 'lucide-react';
+// checked with where each verdict comes from. After a search an AI pre-screen
+// sorts unchecked places by name & cuisine ("Likely halal — not verified")
+// and the nearest few get the full Halal Radar automatically (app-wide daily
+// cap); "Check these" does a whole tab; "Eaten here?" adds a community report.
+// "Add" puts a place on the Idea Board; people can report the queue.
+import { Clock, ExternalLink, Loader2, LocateFixed, MapPin, Phone, Plus, ShieldCheck, Star, UtensilsCrossed } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { FOOD_TABS, fmtClock, Idea, paths, planningDate, ScheduleItem, toMin, type FoodVerdict, type GeoPoint } from '../../domain';
+import { FOOD_TABS, fmtClock, foodVerdict, Idea, nearestDestination, paths, planningDate, ScheduleItem, toMin, type FoodGuess, type FoodVerdict, type GeoPoint } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Badge, Button, Card, Chip, cx, ErrorBanner, Select, Spinner } from '../../ui';
@@ -32,13 +34,22 @@ interface FoodItem {
   wait?: { minutes: number; agoMin: number };
   ideaId?: string;
   checked: boolean;
+  types?: string[];
   photo?: string;
   photoName?: string;
+  guessed?: boolean;
+  /** I reported it just now. */
+  reported?: boolean;
 }
+
+/** Nearest unchecked places given the full Halal Radar right after a search. */
+const AUTO_NEAREST = 5;
+const TAB_BATCH = 10;
 
 const TONE: Record<FoodVerdict['bucket'], string> = {
   certified: 'bg-[#E3F4EC] text-[#0B6B45] border-[#B7E1CB]',
   halal: 'bg-[#EAF4F3] text-[#00685F] border-[#C4E0DD]',
+  likely: 'bg-[#F1F7F6] text-[#2F6E66] border-dashed border-[#9CC9C2]',
   pork_free: 'bg-[#FDF3E1] text-[#96590B] border-[#F0C987]',
   not_halal: 'bg-[#FDECEA] text-[#B3261E] border-[#F2B8B5]',
   unknown: 'bg-[#F3EFE9] text-[#6D7A77] border-[#E7DFD5]',
@@ -88,11 +99,53 @@ export function FoodPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const [checking, setChecking] = useState<{ n: number } | null>(null);
+  const [checkNote, setCheckNote] = useState('');
+  const country = (at: GeoPoint) => nearestDestination(trip.destinations, at).countryCode;
+
+  /** Full Halal Radar on some places (shared daily allowance); cards update as results come back. */
+  const autocheck = async (list: FoodItem[]) => {
+    if (!list.length) return;
+    setChecking({ n: list.length });
+    setCheckNote('');
+    try {
+      const r = await api.post<{ results: { placeId: string; verdict: FoodVerdict; pork?: boolean; alcohol?: boolean }[]; limitReached: boolean }>(
+        'food/autocheck',
+        { placeIds: list.map((i) => i.placeId) },
+        q,
+      );
+      const by = new Map(r.results.map((x) => [x.placeId, x]));
+      setItems((xs) => xs?.map((x) => (by.has(x.placeId) ? { ...x, verdict: by.get(x.placeId)!.verdict, checked: true, pork: by.get(x.placeId)!.pork, alcohol: by.get(x.placeId)!.alcohol } : x)) ?? null);
+      if (r.limitReached) setCheckNote("Today's automatic checks for the app are used up — tap “Check halal” on a place, or report it after eating there.");
+    } catch {
+      /* the list still works */
+    } finally {
+      setChecking(null);
+    }
+  };
+
   const search = async (at: GeoPoint) => {
     setLoading(true);
     setError('');
     try {
-      setItems((await api.post<{ items: FoodItem[] }>('food/nearby', at, q)).items);
+      const found = (await api.post<{ items: FoodItem[] }>('food/nearby', at, q)).items;
+      setItems(found);
+      setLoading(false);
+      // 1) AI pre-screen of everything nobody has checked (one request, cached for everyone).
+      const unknown = found.filter((i) => i.verdict.bucket === 'unknown' && !i.checked);
+      const toGuess = unknown.filter((i) => !i.guessed);
+      if (toGuess.length) {
+        void api
+          .post<{ guesses: Record<string, FoodGuess> }>('food/prescreen', { country: country(at), items: toGuess.map((i) => ({ placeKey: i.placeKey, name: i.name, ...(i.typeLabel ? { typeLabel: i.typeLabel } : {}), types: i.types ?? [] })) }, q)
+          .then((r) =>
+            setItems((xs) =>
+              xs?.map((x) => (!x.checked && x.verdict.bucket === 'unknown' && r.guesses[x.placeKey] ? { ...x, guessed: true, verdict: foodVerdict({ guess: r.guesses[x.placeKey] }) } : x)) ?? null,
+            ),
+          )
+          .catch(() => {});
+      }
+      // 2) The nearest few unchecked get the full Halal Radar straight away.
+      void autocheck(unknown.sort((a, b) => a.distanceM - b.distanceM).slice(0, AUTO_NEAREST));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not search right now.');
     } finally {
@@ -177,6 +230,23 @@ export function FoodPage() {
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
       {loading && <Spinner label="Searching nearby…" />}
+      {tab === 'likely' && !loading && !!shown.length && (
+        <p className="text-xs text-[#6D7A77] -mt-1">An AI guess from each place's name and cuisine — not verified. Tap “Check halal”, or ask the restaurant.</p>
+      )}
+      {checking && (
+        <p className="flex items-center gap-2 text-xs text-[#00685F]">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking {checking.n} restaurant{checking.n > 1 ? 's' : ''} with the Halal Radar…
+        </p>
+      )}
+      {checkNote && <p className="text-xs text-[#8A5A00]">{checkNote}</p>}
+      {(tab === 'unknown' || tab === 'likely') && !loading && !checking && (() => {
+        const batch = shown.filter((i) => !i.checked).slice(0, TAB_BATCH);
+        return batch.length ? (
+          <Button variant="secondary" className="!min-h-9 text-sm" onClick={() => void autocheck(batch)}>
+            <ShieldCheck className="w-4 h-4" /> Check these {batch.length} with the Halal Radar
+          </Button>
+        ) : null;
+      })()}
       {!loading && items && !shown.length && (
         <Card className="p-5 text-sm text-[#6D7A77]">
           {tab === 'halal' ? 'No halal-listed places within ~2 km. Try “Not checked” and tap Check, or search near another stop.' : 'Nothing here.'}
@@ -251,6 +321,36 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
           </p>
         )}
       </div>
+
+      {/* Been there? One tap adds a community report (shared by every Safar trip). */}
+      {['unknown', 'likely', 'pork_free'].includes(i.verdict.bucket) && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-[#6D7A77]">Eaten here? It was</span>
+          {(
+            [
+              ['muslim_owned', 'Halal ✓'],
+              ['pork_free', 'Pork-free'],
+              ['not_halal', 'Not halal'],
+            ] as const
+          ).map(([tier, label]) => (
+            <button
+              key={tier}
+              type="button"
+              disabled={!!busy}
+              className="rounded-full border border-[#E7DFD5] px-2 py-0.5 font-semibold text-[#161C23] hover:border-[#00685F] disabled:opacity-50"
+              onClick={() =>
+                act(`r${tier}`, async () => {
+                  const r = await api.post<{ verdict: FoodVerdict; summary: { reportCount: number } }>('food/report', { placeId: i.placeId, name: i.name, tier }, q);
+                  onUpdate(r.verdict.bucket === 'unknown' ? { reported: true } : { verdict: r.verdict, reported: true });
+                })
+              }
+            >
+              {busy === `r${tier}` ? '…' : label}
+            </button>
+          ))}
+          {i.reported && <span className="text-[#0B6B45]">Thanks — it counts once a second traveller agrees.</span>}
+        </div>
+      )}
 
       <div className="flex items-center gap-2 text-xs text-[#6D7A77]">
         <Clock className="w-3.5 h-3.5" />

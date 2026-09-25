@@ -19,6 +19,7 @@ interface Usage {
   instagramTiktok: Cap;
   xiaohongshu: Cap;
   flightStatus: Cap;
+  halalAutoChecks: Cap;
   ai: { last7Days: { day: string; gemini: number; groq: number; failed: number }[]; models: { model: string; resting: boolean }[]; note: string };
 }
 
@@ -27,6 +28,7 @@ const ROWS: [keyof Omit<Usage, 'month' | 'ai'>, string][] = [
   ['instagramTiktok', 'Instagram / TikTok links'],
   ['xiaohongshu', 'Xiaohongshu links'],
   ['flightStatus', 'Flight status checks'],
+  ['halalAutoChecks', 'Auto halal checks (today)'],
 ];
 
 export function UsageCard() {

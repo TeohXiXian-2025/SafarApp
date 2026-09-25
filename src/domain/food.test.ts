@@ -29,3 +29,13 @@ describe('foodVerdict', () => {
     expect(nameSaysHalal('Halalan Cafe')).toBe(false);
   });
 });
+
+describe('AI pre-screen guesses', () => {
+  it('a likely-halal guess never counts as Halal, and any real check wins', () => {
+    const g = { verdict: 'likely_halal' as const, reason: 'Nasi kandar (Malaysian Muslim cuisine)' };
+    expect(foodVerdict({ guess: g }).bucket).toBe('likely');
+    expect(foodVerdict({ guess: g, listed: 'google' }).bucket).toBe('halal');
+    expect(foodVerdict({ guess: { verdict: 'likely_pork', reason: 'Char siu' } }).bucket).toBe('not_halal');
+    expect(foodVerdict({ guess: { verdict: 'unknown', reason: '' } }).bucket).toBe('unknown');
+  });
+});

@@ -1,12 +1,14 @@
 // The Food tab (Halal Radar near you): which bucket a restaurant goes in and
 // the label to show, trust-ordered — community reports > photographed
-// certificate > halal listings (Google / OpenStreetMap / name) > AI estimate.
+// certificate > halal listings (Google / OpenStreetMap / name) > Halal Radar
+// check > AI pre-screen guess from the name & cuisine (never shown as "Halal").
 import type { HalalAssessment, HalalSummary } from './idea.js';
 
-export type FoodBucket = 'certified' | 'halal' | 'pork_free' | 'not_halal' | 'unknown';
+export type FoodBucket = 'certified' | 'halal' | 'likely' | 'pork_free' | 'not_halal' | 'unknown';
 
-export const FOOD_TABS: { key: 'halal' | 'pork_free' | 'unknown'; label: string; buckets: FoodBucket[] }[] = [
+export const FOOD_TABS: { key: 'halal' | 'likely' | 'pork_free' | 'unknown'; label: string; buckets: FoodBucket[] }[] = [
   { key: 'halal', label: 'Halal', buckets: ['certified', 'halal'] },
+  { key: 'likely', label: 'Likely halal', buckets: ['likely'] },
   { key: 'pork_free', label: 'Pork-free', buckets: ['pork_free'] },
   { key: 'unknown', label: 'Not checked', buckets: ['unknown'] },
 ];
@@ -18,13 +20,20 @@ export interface FoodVerdict {
   basis: string;
 }
 
+/** The AI pre-screen: a guess from a place's name and cuisine, before anyone checks it. */
+export interface FoodGuess {
+  verdict: 'likely_halal' | 'likely_pork' | 'unknown';
+  reason: string;
+}
+
 export function foodVerdict(opts: {
   community?: Pick<HalalSummary, 'tier' | 'reportCount' | 'certificate' | 'flags'> | null;
   analysis?: Pick<HalalAssessment, 'tier' | 'verdict' | 'flags' | 'source'> | null;
   /** Google halal_restaurant type, OSM diet:halal, or "halal" in the name. */
   listed?: 'google' | 'osm' | 'name' | null;
+  guess?: FoodGuess | null;
 }): FoodVerdict {
-  const { community: c, analysis: a, listed } = opts;
+  const { community: c, analysis: a, listed, guess: g } = opts;
   const reports = c ? `${c.reportCount} traveller report${c.reportCount === 1 ? '' : 's'} (all Safar trips)` : '';
   if (c?.tier === 'certified') return { bucket: 'certified', text: c.certificate ? `Certified · ${c.certificate.certifier}` : 'Certified halal', basis: c.certificate ? `Certificate photo + ${reports}` : reports };
   if (c?.tier === 'muslim_owned') return { bucket: 'halal', text: 'Muslim-owned / fully halal', basis: reports };
@@ -35,6 +44,8 @@ export function foodVerdict(opts: {
   if (listed) return { bucket: 'halal', text: 'Listed as halal', basis: listed === 'google' ? 'Google Maps' : listed === 'osm' ? 'OpenStreetMap' : 'Name says halal' };
   if (a?.tier === 'muslim_owned') return { bucket: 'halal', text: 'Likely Muslim-owned', basis: 'Halal Radar (AI estimate)' };
   if (a?.tier === 'pork_free' || a?.flags.servesPork === false) return { bucket: 'pork_free', text: 'No pork reported', basis: 'Halal Radar (AI estimate)' };
+  if (!a && g?.verdict === 'likely_halal') return { bucket: 'likely', text: 'Likely halal — not verified', basis: `AI guess from name & cuisine: ${g.reason}` };
+  if (!a && g?.verdict === 'likely_pork') return { bucket: 'not_halal', text: 'Likely serves pork', basis: `AI guess from name & cuisine: ${g.reason}` };
   return { bucket: 'unknown', text: a ? 'Halal not confirmed' : 'Not checked yet', basis: a ? 'Halal Radar found no listing' : 'Tap “Check” to run the Halal Radar' };
 }
 

@@ -51,7 +51,8 @@ async function loadIdea(tripId: string, id: string): Promise<Idea> {
 const canManage = (idea: Idea, m: Member) => idea.createdBy === m.uid || m.role === 'admin';
 
 /** Community consensus for a place from every traveller's report (+ the best valid certificate photo). */
-async function recomputeSummary(idea: Idea): Promise<HalalSummary> {
+/** Re-aggregates a place's community reports into its worldwide summary (also used by the Food tab). */
+export async function recomputeSummary(idea: Pick<Idea, 'placeKey'> & { place: Pick<Idea['place'], 'name'> }): Promise<HalalSummary> {
   const db = adminDb();
   const reports = (await db.collection(paths.halalReports(idea.placeKey)).get()).docs.map((d) => HalalReport.parse(d.data()));
   const trustRefs = reports.map((r) => db.doc(`halalTrust/${r.uid}`));
