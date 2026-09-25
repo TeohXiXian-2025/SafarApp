@@ -7,3 +7,7 @@ coverage/
 .env*
 !.env.example
 .vercel
+
+# Private working docs (kept locally, not on GitHub)
+docs/BUILD_PLAN.md
+docs/SYSTEM_AND_TEST_GUIDE.md
