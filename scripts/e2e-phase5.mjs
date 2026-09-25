@@ -1,0 +1,182 @@
+// End-to-end test for Phase 5 (timeline + manual arrange) against the REAL
+// Firebase, Google Places and Routes API, through a running API
+// (npm run dev, or E2E_BASE_URL=https://…). Cleans up after itself.
+// Usage: npm run e2e:phase5
+import assert from 'node:assert/strict';
+import { config } from 'dotenv';
+import { cert, initializeApp as initAdmin } from 'firebase-admin/app';
+import { getAuth as adminAuth } from 'firebase-admin/auth';
+import { getFirestore as adminFs } from 'firebase-admin/firestore';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken } from 'firebase/auth';
+
+config({ path: '.env.local', quiet: true });
+const env = process.env;
+const BASE = env.E2E_BASE_URL ?? 'http://localhost:5173';
+const sa = JSON.parse(Buffer.from(env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8'));
+const admin = initAdmin({ credential: cert(sa) }, 'admin');
+const db = adminFs(admin);
+const webConfig = { apiKey: env.VITE_FIREBASE_API_KEY, authDomain: env.VITE_FIREBASE_AUTH_DOMAIN, projectId: env.VITE_FIREBASE_PROJECT_ID, appId: env.VITE_FIREBASE_APP_ID };
+
+const run = Date.now().toString(36);
+const created = { uids: [], tripIds: [] };
+let passed = 0;
+const ok = (m) => (passed++, console.log(`  ✅ ${m}`));
+
+async function makeUser(name) {
+  const u = await adminAuth(admin).createUser({ email: `e2e5-${run}-${name}@safar.test`, displayName: name });
+  created.uids.push(u.uid);
+  const app = initializeApp(webConfig, `${name}-${run}`);
+  await signInWithCustomToken(getAuth(app), await adminAuth(admin).createCustomToken(u.uid));
+  const idToken = await getAuth(app).currentUser.getIdToken();
+  const call = async (path, body, query) => {
+    const url = new URL(`/api/${path}`, BASE);
+    Object.entries(query ?? {}).forEach(([k, v]) => url.searchParams.set(k, v));
+    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+    return { status: res.status, body: await res.json().catch(() => ({})) };
+  };
+  return { uid: u.uid, call };
+}
+
+async function placeId(query) {
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'X-Goog-Api-Key': env.GOOGLE_MAPS_SERVER_KEY, 'X-Goog-FieldMask': 'places.id' },
+    body: JSON.stringify({ textQuery: query, pageSize: 1 }),
+  });
+  return (await res.json()).places[0].id;
+}
+
+const item = async (tripId, id) => (await db.doc(`trips/${tripId}/schedule/${id}`).get()).data();
+const ideaDoc = async (tripId, id) => (await db.doc(`trips/${tripId}/ideas/${id}`).get()).data();
+const dayItems = async (tripId, day) =>
+  (await db.collection(`trips/${tripId}/schedule`).where('day', '==', day).get()).docs.map((d) => d.data()).sort((a, b) => a.start.localeCompare(b.start));
+
+try {
+  console.log(`\nPhase 5 e2e against ${BASE}`);
+  const alice = await makeUser('Alice');
+  const t = await alice.call('trips/create', {
+    name: 'E2E KL Timeline',
+    destinations: [{ name: 'Kuala Lumpur', placeId: 'ChIJ5-rvAcdJzDERfSgcL1uO2fQ', location: { lat: 3.139, lng: 101.6869 }, countryCode: 'MY' }],
+    startDate: '2026-12-07', endDate: '2026-12-09', currency: 'MYR',
+  });
+  assert.equal(t.status, 201, JSON.stringify(t.body));
+  const tripId = t.body.tripId;
+  created.tripIds.push(tripId);
+  const q = { tripId };
+  ok('trip created (one member, so one 👍 approves)');
+
+  // Hotel check-in at 15:00 on day 1 → a locked anchor.
+  const hotel = await alice.call('bookings/create', {
+    source: 'manual',
+    draft: {
+      kind: 'hotel', carrier: 'E2E Hotel', travellerUids: [alice.uid],
+      to: { name: 'Hotel Stripes Kuala Lumpur', location: { lat: 3.1579, lng: 101.6995 } },
+      startLocal: '2026-12-07T15:00', endLocal: '2026-12-09T12:00',
+    },
+  }, q);
+  assert.equal(hotel.status, 201, JSON.stringify(hotel.body));
+  const checkinId = `bk_${hotel.body.id}_0`;
+  assert.equal((await item(tripId, checkinId)).locked, true);
+  ok('hotel booking → locked check-in anchor');
+
+  const [towers, aquaria, market] = await Promise.all([
+    placeId('Petronas Twin Towers Kuala Lumpur'),
+    placeId('Aquaria KLCC'),
+    placeId('Central Market Kuala Lumpur'),
+  ]);
+  const ids = [];
+  for (const p of [towers, aquaria, market]) {
+    const r = await alice.call('ideas/add', { placeId: p }, q);
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    ids.push(r.body.id);
+  }
+  const [A, B, C] = ids;
+
+  const early = await alice.call('schedule/add', { ideaId: A, day: '2026-12-07' }, q);
+  assert.equal(early.status, 409);
+  ok('ideas still being voted on can’t go on the timeline');
+
+  for (const id of ids) assert.equal((await alice.call('ideas/vote', { ideaId: id, value: 1 }, q)).body.status, 'backlog');
+  ok('3 ideas approved → backlog');
+
+  assert.equal((await alice.call('schedule/add', { ideaId: A, day: '2026-12-10' }, q)).status, 400);
+  ok('days outside the trip rejected');
+
+  assert.equal((await alice.call('schedule/add', { ideaId: A, day: '2026-12-07' }, q)).status, 201);
+  assert.equal((await alice.call('schedule/add', { ideaId: B, day: '2026-12-07' }, q)).status, 201);
+  const a1 = await item(tripId, `idea_${A}`);
+  const b1 = await item(tripId, `idea_${B}`);
+  assert.equal(a1.start, '09:00');
+  assert.ok(b1.start >= a1.end, `${b1.start} after ${a1.end}`);
+  assert.equal((await ideaDoc(tripId, A)).status, 'scheduled');
+  ok(`added without a time → packed: ${a1.start}–${a1.end}, then ${b1.start}–${b1.end}; idea marked scheduled`);
+
+  assert.equal((await alice.call('schedule/add', { ideaId: A, day: '2026-12-08' }, q)).status, 409);
+  ok('an idea can only be on the timeline once');
+
+  assert.equal(b1.transitFromPrev.fromId, `idea_${A}`);
+  assert.equal(b1.transitFromPrev.mode, 'walk'); // Aquaria is next to the towers
+  assert.ok(b1.transitFromPrev.minutes > 0 && b1.transitFromPrev.minutes < 20);
+  ok(`Routes API leg Petronas → Aquaria: ${b1.transitFromPrev.minutes} min ${b1.transitFromPrev.mode}, ${b1.transitFromPrev.meters} m`);
+
+  const c = await alice.call('schedule/add', { ideaId: C, day: '2026-12-07', start: '14:30' }, q);
+  assert.equal(c.status, 201);
+  const checkin = await item(tripId, checkinId);
+  assert.ok(checkin.transitFromPrev, 'leg into the hotel check-in');
+  ok(`explicit start time kept; leg Central Market → hotel: ${checkin.transitFromPrev.minutes} min ${checkin.transitFromPrev.mode}`);
+
+  const re = await alice.call('schedule/reorder', { day: '2026-12-07', order: [`idea_${B}`, `idea_${A}`, `idea_${C}`] }, q);
+  assert.equal(re.status, 200, JSON.stringify(re.body));
+  const day1 = await dayItems(tripId, '2026-12-07');
+  const order = day1.filter((i) => !i.locked).map((i) => i.id);
+  assert.deepEqual(order, [`idea_${B}`, `idea_${A}`, `idea_${C}`]);
+  assert.equal(day1.find((i) => i.id === `idea_${B}`).start, '09:00');
+  assert.equal((await item(tripId, checkinId)).start, '15:00');
+  const a2 = await item(tripId, `idea_${A}`);
+  assert.equal(a2.transitFromPrev.fromId, `idea_${B}`);
+  ok(`reorder re-times the day (${day1.map((i) => `${i.start}${i.locked ? '🔒' : ''}`).join(', ')}); booking untouched; legs follow the new order`);
+
+  assert.equal((await alice.call('schedule/update', { id: checkinId, start: '10:00' }, q)).status, 409);
+  ok('bookings can’t be moved from the timeline');
+
+  const mv = await alice.call('schedule/update', { id: `idea_${C}`, day: '2026-12-08' }, q);
+  assert.equal(mv.status, 200, JSON.stringify(mv.body));
+  const c2 = await item(tripId, `idea_${C}`);
+  assert.equal(c2.day, '2026-12-08');
+  assert.equal(c2.start, '09:00');
+  assert.equal(c2.transitFromPrev, undefined);
+  const ck = await item(tripId, checkinId);
+  assert.equal(ck.transitFromPrev.fromId, `idea_${A}`);
+  ok('moved to another day → first stop there; the old day’s legs are recomputed');
+
+  const dur = await alice.call('schedule/update', { id: `idea_${C}`, start: '10:15', durationMin: 45 }, q);
+  assert.equal(dur.status, 200);
+  const c3 = await item(tripId, `idea_${C}`);
+  assert.deepEqual([c3.start, c3.end], ['10:15', '11:00']);
+  ok('re-timed and shortened');
+
+  assert.equal((await alice.call('ideas/decide', { ideaId: A, action: 'reject' }, q)).status, 409);
+  ok('admin can’t reject an idea that’s on the timeline');
+
+  assert.equal((await alice.call('schedule/remove', { id: `idea_${A}` }, q)).status, 200);
+  assert.equal(await item(tripId, `idea_${A}`), undefined);
+  assert.equal((await ideaDoc(tripId, A)).status, 'backlog');
+  ok('taken off the timeline → back in the backlog');
+
+  assert.equal((await alice.call('ideas/delete', { ideaId: B }, q)).status, 200);
+  assert.equal(await item(tripId, `idea_${B}`), undefined);
+  ok('deleting an idea also removes its timeline slot');
+
+  console.log(`\n${passed} checks passed.\n`);
+} catch (err) {
+  console.error(`\n  ❌ ${err.stack ?? err}\n`);
+  process.exitCode = 1;
+} finally {
+  for (const id of created.tripIds) await db.recursiveDelete(db.doc(`trips/${id}`)).catch(() => {});
+  for (const uid of created.uids) {
+    await db.doc(`users/${uid}`).delete().catch(() => {});
+    await adminAuth(admin).deleteUser(uid).catch(() => {});
+  }
+  process.exit(process.exitCode ?? 0);
+}

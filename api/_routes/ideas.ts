@@ -11,6 +11,7 @@ import {
   summarizeReports,
   tallyVotes,
   placeIsStale,
+  ideaItemId,
   conflictKey,
   ideaConflicts,
   visitPlan,
@@ -437,6 +438,7 @@ Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMember
         const snap = await tx.get(ideaRef(tripId, ideaId));
         if (!snap.exists) throw new HttpError(404, 'Idea not found');
         const idea = Idea.parse(snap.data());
+        if (idea.status === 'scheduled') throw new HttpError(409, `${idea.place.name} is on the timeline — take it off first`);
         const tally = tallyVotes(idea.votes, trip.memberIds);
         const next =
           action === 'close' ? ideaStatusFromVotes(tally, true) : action === 'backlog' ? 'backlog' : action === 'reject' ? 'rejected' : ideaStatusFromVotes(tally);
@@ -462,6 +464,7 @@ Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMember
       if (!canManage(idea, member)) throw new HttpError(403, 'Only the person who suggested this, or the admin, can remove it');
       const batch = adminDb().batch();
       batch.delete(ideaRef(tripId, ideaId));
+      batch.delete(adminDb().doc(`${paths.schedule(tripId)}/${ideaItemId(ideaId)}`)); // and its timeline slot
       logActivity(batch, tripId, member.uid, `${member.displayName} removed ${idea.place.name}`);
       await batch.commit();
       return json({ ok: true });

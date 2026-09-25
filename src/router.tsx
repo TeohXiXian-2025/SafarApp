@@ -8,6 +8,7 @@ import { SharePage } from './pages/SharePage';
 import { TripsPage } from './pages/TripsPage';
 import { BookingsPage } from './trip/bookings/BookingsPage';
 import { IdeasPage } from './trip/ideas/IdeasPage';
+import { TimelinePage } from './trip/timeline/TimelinePage';
 import { MembersPage } from './trip/MembersPage';
 import { PreferencesPage } from './trip/PreferencesPage';
 import { OverviewPage } from './trip/OverviewPage';
@@ -25,7 +26,7 @@ function Root() {
 }
 
 // URL map (see docs/BUILD_PLAN.md). Later phases add tabs under /t/:tripId:
-//   ideas (4) · timeline (5) · food, hotels (8) · vault, expenses (9)
+//   food, hotels (8) · vault, expenses (9)
 // /pitch is a separate HTML entry served by Vercel, not a route here.
 export const router = createBrowserRouter([
   {
@@ -47,6 +48,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <OverviewPage /> },
           { path: 'ideas', element: <IdeasPage /> },
+          { path: 'timeline', element: <TimelinePage /> },
           { path: 'bookings', element: <BookingsPage /> },
           { path: 'members', element: <MembersPage /> },
           { path: 'preferences', element: <PreferencesPage /> },

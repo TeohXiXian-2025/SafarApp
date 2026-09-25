@@ -16,11 +16,13 @@
     "deploy:rules": "node scripts/deploy-rules.mjs",
     "e2e:phase1": "node scripts/e2e-phase1.mjs",
     "e2e:phase3": "node scripts/e2e-phase3.mjs",
-    "e2e:phase4": "node scripts/e2e-phase4.mjs"
+    "e2e:phase4": "node scripts/e2e-phase4.mjs",
+    "e2e:phase5": "node scripts/e2e-phase5.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@google/genai": "^2.4.0",
     "@sentry/react": "^11.0.0",
     "@tailwindcss/vite": "^4.1.14",

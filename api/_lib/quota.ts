@@ -9,6 +9,7 @@ export const DAILY_LIMITS = {
   analyze: { limit: 80, label: 'halal & review checks' },
   bookingParse: { limit: 20, label: 'ticket readings' },
   addIdea: { limit: 150, label: 'ideas added' },
+  arrange: { limit: 400, label: 'timeline changes' },
 } as const;
 export type QuotaKind = keyof typeof DAILY_LIMITS;
 

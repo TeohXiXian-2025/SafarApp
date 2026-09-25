@@ -78,7 +78,11 @@ export const TransitLeg = z.object({
   mode: z.enum(['walk', 'transit', 'drive']),
   minutes: z.number().int().nonnegative(),
   meters: z.number().int().nonnegative(),
+  /** The item this leg starts from — recomputed only when that changes (or after 30 days). */
+  fromId: Id.optional(),
+  at: Millis.optional(),
 });
+export type TransitLeg = z.infer<typeof TransitLeg>;
 
 export const PrayerPairing = z.object({
   prayer: PrayerName,

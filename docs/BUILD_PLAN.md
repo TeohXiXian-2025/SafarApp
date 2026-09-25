@@ -309,11 +309,11 @@ Every "city preset" in the prototype (Tokyo/Kyoto astronomical tables, mapX/mapY
 Estimates assume 3 people working part-time. Each phase ends with something usable and deployed.
 
 ### Phase 0 — Foundations (week 1)
-- [ ] Create your own Firebase project(s). ✅ project + keys created · ⏳ enable Auth (Google + email), create Firestore, enable Storage (Blaze + budget alert). Verify with `npm run check:keys`.
+- [x] Create your own Firebase project(s): Auth (Google + email), Firestore, Storage (Blaze + budget alert). Verified with `npm run check:keys` (21/21).
 - [x] Move Firebase config from `firebase-applet-config.json` → `VITE_FIREBASE_*` env vars. Delete the JSON.
 - [x] Google Cloud: enable Maps JS, Places API (New), Routes API. Create a **browser key** (referrer-restricted) and a **server key** (API-restricted). Set quotas.
 - [x] Get a Gemini API key (+ LiteAPI, SerpApi, Foursquare, AviationStack, Sentry, Upstash — all verified by `npm run check:keys`).
-- [ ] Add all `.env.local` values to Vercel → Settings → Environment Variables (Production + Preview).
+- [x] Add all `.env.local` values to Vercel → Settings → Environment Variables (Production + Preview). Verified: production `/api/health` reports every server integration configured.
 - [x] Add deps: `react-router`, `zod`, `zustand`, `@dnd-kit/core`, `vite-plugin-pwa`, `firebase-admin` (api only), `vitest`, `@sentry/react`. (`@playwright/test` comes in Phase 10.)
 - [x] Set up an `/api` folder with a shared `withAuth(handler, {tripRole})` helper (verify ID token + membership).
 - [x] Replace `deploy.yml` with a CI workflow (typecheck + test).
@@ -367,14 +367,16 @@ Estimates assume 3 people working part-time. Each phase ends with something usab
 - [x] Board with Voting / Backlog / Split votes / Rejected filters, "waiting for …", live updates, Google attribution + photo credits.
 - [x] AI reliability: Gemini model chain (Flash-Lite first, `GEMINI_MODELS`), then **Groq** as a free backup (text: gpt-oss-120b; images: qwen3.8-27b vision; PDFs converted to text). Per-attempt/total time budgets, SDK retries off, rate-limited models skipped instantly. Verified: all Phase 3/4 e2e checks + image parsing pass with Gemini switched off.
 - [ ] Deferred to Phase 8: certificate photo upload + moderator verification, reporter trust scores.
-- [ ] Places content refresh: re-fetch place details older than 30 days (Google caching terms).
+- [x] Places content refresh: `POST ideas/refresh` re-fetches place details older than 30 days (Google caching terms), triggered once per Idea Board visit (≤ 8 places per call).
 
 ### Phase 5 — Timeline + manual arrange (week 7)
-- [ ] Day-by-day timeline from `schedule/` (rework `ItineraryFeed` to read the real model).
-- [ ] dnd-kit drag from backlog → day/time. Reorder within a day. Mobile "Move to…" sheet.
-- [ ] Transit time between consecutive items (Routes API, cached).
-- [ ] Opening-hours conflict warnings.
-- [ ] Map shows the day's route (reuse `GoogleMapPane`).
+- [x] Day-by-day timeline from `schedule/` (new `/t/:tripId/timeline` page on the real model; the prototype `ItineraryFeed` stays in `/demo`). Day chips, bookings shown as locked anchors.
+- [x] dnd-kit: drag from backlog → the day list or any day chip; reorder within a day (re-timed back to back around bookings by the pure `reflowDay()`). Phones: tap "Add" / tap a stop for a "Move to…" sheet (day, start, length, take off). Server routes `schedule/{add,update,reorder,remove}`; idea status follows (`backlog` ⇄ `scheduled`).
+- [x] Transit time between consecutive items (Routes API: walk ≤ 1.5 km, else transit, else drive). Cached on the item (reused while the previous stop is unchanged, ≤ 30 days).
+- [x] Opening-hours conflict warnings (+ overlaps, too-tight transfers, closed that day) via `dayWarnings()`.
+- [x] Map shows the day's route (numbered pins + line, `DayMap`).
+- [x] Verified: `npm run e2e:phase5` (16 checks, real Firebase/Places/Routes) + unit tests for the timeline maths.
+- [ ] Check the page on a real phone (drag with touch, sheets) — manual.
 
 ### Phase 6 — AI Arrange + prayer pairing (weeks 8–9)
 - [ ] Job pattern (`jobs/` + progress UI replacing the fake `GeneratingScreen` countdown).
