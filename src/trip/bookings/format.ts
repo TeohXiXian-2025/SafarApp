@@ -16,6 +16,7 @@ export const tzCity = (tz: string) => tz.split('/').pop()!.replace(/_/g, ' ');
 export const localParts = (iso: string) => ({ date: iso.slice(0, 10), time: iso.slice(11, 16) });
 
 export function formatDay(date: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
   return new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(
     new Date(`${date}T12:00:00Z`),
   );

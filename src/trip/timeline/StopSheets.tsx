@@ -1,7 +1,7 @@
 // Tap-friendly alternatives to dragging: edit a stop (day, time, length,
 // remove) and add a backlog idea to a day — the "Move to…" sheet on phones.
 import { ExternalLink } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { fmtClock, openingRanges, toClock, toMin, type Idea, type ScheduleItem } from '../../domain';
 import { Button, ErrorBanner, Field, Input, Select, Sheet } from '../../ui';
 import { formatDay } from '../bookings/format';
@@ -37,8 +37,17 @@ function DaySelect({ days, value, onChange }: { days: string[]; value: string; o
 function HoursHint({ idea, day }: { idea?: Idea; day: string }) {
   const open = openingRanges(idea?.place.openingHours, day);
   if (!idea?.place.openingHours) return null;
-  const text = open === null ? 'Open all day (or hours unclear)' : open.length === 0 ? 'Closed this day' : open.map(([o, c]) => `${fmtClock(o)}–${fmtClock(c)}`).join(', ');
-  return <p className="text-xs text-[#6D7A77]">Opening hours on {formatDay(day)}: {text}</p>;
+  const text =
+    open === null
+      ? 'Open all day (or hours unclear)'
+      : open.length === 0
+        ? 'Closed this day'
+        : open.map(([o, c]) => `${fmtClock(o)}–${fmtClock(c)}`).join(', ');
+  return (
+    <p className="text-xs text-[#6D7A77]">
+      Opening hours on {formatDay(day)}: {text}
+    </p>
+  );
 }
 
 const mapsLink = (idea: Idea) =>
@@ -46,12 +55,9 @@ const mapsLink = (idea: Idea) =>
 
 export function EditStopSheet({
   item,
-  idea,
   title,
-  days,
   onClose,
-  onSave,
-  onRemove,
+  ...rest
 }: {
   item: ScheduleItem | null;
   idea?: Idea;
@@ -61,19 +67,34 @@ export function EditStopSheet({
   onSave: (patch: { day: string; start: string; durationMin: number }) => Promise<void>;
   onRemove: () => Promise<void>;
 }) {
-  const [day, setDay] = useState('');
-  const [start, setStart] = useState('');
-  const [duration, setDuration] = useState(60);
+  return (
+    <Sheet open={!!item} onClose={onClose} title={title}>
+      {/* Keyed per stop so the form starts from that stop's values on the first render. */}
+      {item && <EditStopForm key={item.id} item={item} onClose={onClose} {...rest} />}
+    </Sheet>
+  );
+}
+
+function EditStopForm({
+  item,
+  idea,
+  days,
+  onClose,
+  onSave,
+  onRemove,
+}: {
+  item: ScheduleItem;
+  idea?: Idea;
+  days: string[];
+  onClose: () => void;
+  onSave: (patch: { day: string; start: string; durationMin: number }) => Promise<void>;
+  onRemove: () => Promise<void>;
+}) {
+  const [day, setDay] = useState(item.day);
+  const [start, setStart] = useState(item.start);
+  const [duration, setDuration] = useState(Math.max(5, toMin(item.end) - toMin(item.start)));
   const [busy, setBusy] = useState<'save' | 'remove' | null>(null);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!item) return;
-    setDay(item.day);
-    setStart(item.start);
-    setDuration(Math.max(5, toMin(item.end) - toMin(item.start)));
-    setError('');
-  }, [item]);
 
   const run = async (kind: 'save' | 'remove', fn: () => Promise<void>) => {
     setBusy(kind);
@@ -89,51 +110,78 @@ export function EditStopSheet({
   };
 
   return (
-    <Sheet open={!!item} onClose={onClose} title={title}>
-      <div className="space-y-4">
-        {idea && (
-          <div className="text-sm text-[#6D7A77] space-y-1">
-            {idea.place.address && <p>{idea.place.address}</p>}
-            <a href={mapsLink(idea)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-[#00685F]">
-              Open in Google Maps <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          </div>
-        )}
-        <Field label="Day">
-          <DaySelect days={days} value={day} onChange={setDay} />
+    <div className="space-y-4">
+      {idea && (
+        <div className="text-sm text-[#6D7A77] space-y-1">
+          {idea.place.address && <p>{idea.place.address}</p>}
+          <a href={mapsLink(idea)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-[#00685F]">
+            Open in Google Maps <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
+      )}
+      <Field label="Day">
+        <DaySelect days={days} value={day} onChange={setDay} />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Start">
+          <Input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} required />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Start">
-            <Input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} required />
-          </Field>
-          <Field label="How long">
-            <DurationSelect value={duration} onChange={setDuration} />
-          </Field>
-        </div>
-        {start && <p className="text-xs text-[#6D7A77]">Ends at {fmtClock(Math.min(toMin(start) + duration, 24 * 60 - 1))}</p>}
-        <HoursHint idea={idea} day={day} />
-        {error && <ErrorBanner>{error}</ErrorBanner>}
-        <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-between">
-          <Button variant="secondary" disabled={!!busy} onClick={() => run('remove', onRemove)}>
-            {busy === 'remove' ? 'Removing…' : 'Take off timeline'}
-          </Button>
-          <Button disabled={!!busy || !/^\d{2}:\d{2}$/.test(start)} onClick={() => run('save', () => onSave({ day, start: toClock(toMin(start)), durationMin: duration }))}>
-            {busy === 'save' ? 'Saving…' : 'Save'}
-          </Button>
-        </div>
+        <Field label="How long">
+          <DurationSelect value={duration} onChange={setDuration} />
+        </Field>
       </div>
-    </Sheet>
+      {start && <p className="text-xs text-[#6D7A77]">Ends at {fmtClock(Math.min(toMin(start) + duration, 24 * 60 - 1))}</p>}
+      <HoursHint idea={idea} day={day} />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
+      <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-between">
+        <Button variant="secondary" disabled={!!busy} onClick={() => run('remove', onRemove)}>
+          {busy === 'remove' ? 'Removing…' : 'Take off timeline'}
+        </Button>
+        <Button
+          disabled={!!busy || !/^\d{2}:\d{2}$/.test(start)}
+          onClick={() =>
+            run('save', () =>
+              onSave({
+                day,
+                start: toClock(toMin(start)),
+                durationMin: duration,
+              }),
+            )
+          }
+        >
+          {busy === 'save' ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </div>
   );
 }
 
 export function AddStopSheet({
+  idea,
+  onClose,
+  ...rest
+}: {
+  idea: Idea | null;
+  days: string[];
+  defaultDay: string;
+  onClose: () => void;
+  onAdd: (day: string, start?: string) => Promise<void>;
+}) {
+  return (
+    <Sheet open={!!idea} onClose={onClose} title={idea ? `Add ${idea.place.name}` : 'Add'}>
+      {idea && <AddStopForm key={idea.id} idea={idea} onClose={onClose} {...rest} />}
+    </Sheet>
+  );
+}
+
+function AddStopForm({
   idea,
   days,
   defaultDay,
   onClose,
   onAdd,
 }: {
-  idea: Idea | null;
+  idea: Idea;
   days: string[];
   defaultDay: string;
   onClose: () => void;
@@ -143,13 +191,6 @@ export function AddStopSheet({
   const [start, setStart] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!idea) return;
-    setDay(defaultDay);
-    setStart('');
-    setError('');
-  }, [idea, defaultDay]);
 
   const add = async () => {
     setBusy(true);
@@ -165,21 +206,19 @@ export function AddStopSheet({
   };
 
   return (
-    <Sheet open={!!idea} onClose={onClose} title={idea ? `Add ${idea.place.name}` : 'Add'}>
-      <div className="space-y-4">
-        <Field label="Day">
-          <DaySelect days={days} value={day} onChange={setDay} />
-        </Field>
-        <Field label="Start" hint="Leave empty to go after the day's last stop.">
-          <Input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} />
-        </Field>
-        {idea && <p className="text-xs text-[#6D7A77]">Planned for {durLabel(idea.estDurationMin)} — change it after adding.</p>}
-        <HoursHint idea={idea ?? undefined} day={day} />
-        {error && <ErrorBanner>{error}</ErrorBanner>}
-        <Button className="w-full" disabled={busy} onClick={add}>
-          {busy ? 'Adding…' : `Add to ${formatDay(day)}`}
-        </Button>
-      </div>
-    </Sheet>
+    <div className="space-y-4">
+      <Field label="Day">
+        <DaySelect days={days} value={day} onChange={setDay} />
+      </Field>
+      <Field label="Start" hint="Leave empty to go after the day's last stop.">
+        <Input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} />
+      </Field>
+      <p className="text-xs text-[#6D7A77]">Planned for {durLabel(idea.estDurationMin)} — change it after adding.</p>
+      <HoursHint idea={idea} day={day} />
+      {error && <ErrorBanner>{error}</ErrorBanner>}
+      <Button className="w-full" disabled={busy} onClick={add}>
+        {busy ? 'Adding…' : `Add to ${formatDay(day)}`}
+      </Button>
+    </div>
   );
 }
