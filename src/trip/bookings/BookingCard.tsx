@@ -9,7 +9,7 @@ import { fileUrl } from '../../lib/storage';
 import { Avatar, Badge, Button, Card, ErrorBanner, Sheet } from '../../ui';
 import { useTrip } from '../TripLayout';
 import { BookingEditor, draftProblem, type EditableDraft } from './BookingEditor';
-import { bookingTitle, dayDiff, formatDay, KIND, localParts, tzCity } from './format';
+import { bookingTitle, clockName, dayDiff, formatDay, KIND, localParts } from './format';
 import { ResyncSheet } from './ResyncSheet';
 
 export function BookingCard({ booking: b, canEdit, isMine, onEdit }: { booking: Booking; canEdit: boolean; isMine: boolean; onEdit: () => void }) {
@@ -64,7 +64,7 @@ export function BookingCard({ booking: b, canEdit, isMine, onEdit }: { booking: 
           <p className="text-[11px] font-bold uppercase tracking-wider text-[#6D7A77]">{b.kind === 'hotel' ? 'Check-in' : 'Depart'}</p>
           <p className="text-lg font-extrabold text-[#161C23]">{start.time}</p>
           <p className="text-xs text-[#6D7A77]">
-            {formatDay(start.date)} · {tzCity((b.from ?? b.to).timezone)} time
+            {formatDay(start.date)} · {clockName((b.from ?? b.to).timezone, (b.from ?? b.to).location, trip.destinations)} time
           </p>
         </div>
         <div>
@@ -74,7 +74,7 @@ export function BookingCard({ booking: b, canEdit, isMine, onEdit }: { booking: 
             {plusDays > 0 && b.kind !== 'hotel' && <sup className="text-xs text-[#96590B] ml-0.5">+{plusDays}</sup>}
           </p>
           <p className="text-xs text-[#6D7A77]">
-            {formatDay(end.date)} · {tzCity(b.to.timezone)} time
+            {formatDay(end.date)} · {clockName(b.to.timezone, b.to.location, trip.destinations)} time
           </p>
         </div>
       </div>

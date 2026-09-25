@@ -1,5 +1,5 @@
 import { BedDouble, Bus, Plane, Ship, TrainFront, type LucideIcon } from 'lucide-react';
-import type { Booking, BookingKind } from '../../domain';
+import { metersBetween, type Booking, type BookingKind, type GeoPoint } from '../../domain';
 
 export const KIND: Record<BookingKind, { label: string; icon: LucideIcon; carrier: string; number: string }> = {
   flight: { label: 'Flight', icon: Plane, carrier: 'Airline', number: 'Flight no.' },
@@ -11,6 +11,16 @@ export const KIND: Record<BookingKind, { label: string; icon: LucideIcon; carrie
 
 /** "Asia/Kuala_Lumpur" → "Kuala Lumpur" */
 export const tzCity = (tz: string) => tz.split('/').pop()!.replace(/_/g, ' ');
+
+/**
+ * What to call a place's clock: the trip city near it that shares its timezone
+ * ("Osaka time", not "Tokyo time"), else the timezone's own city.
+ */
+export function clockName(tz: string, at: GeoPoint | undefined, destinations: { name: string; timezone: string; location: GeoPoint }[]): string {
+  const same = destinations.filter((d) => d.timezone === tz && (!at || metersBetween(d.location, at) < 200_000));
+  if (!same.length) return tzCity(tz);
+  return (at ? [...same].sort((a, b) => metersBetween(a.location, at) - metersBetween(b.location, at)) : same)[0].name;
+}
 
 /** Local wall-clock parts of an ISO instant, exactly as stored for that place. */
 export const localParts = (iso: string) => ({ date: iso.slice(0, 10), time: iso.slice(11, 16) });

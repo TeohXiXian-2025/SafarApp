@@ -67,7 +67,7 @@ import { db } from '../../firebase/config';
 import { api } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Badge, Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
-import { bookingTitle, formatDay, KIND, tzCity } from '../bookings/format';
+import { bookingTitle, clockName, formatDay, KIND, tzCity } from '../bookings/format';
 import { placePhotoUrl } from '../ideas/halalLabel';
 import { useTrip } from '../TripLayout';
 import { TRACK_COLOR, trackKeyOf } from '../trackColors';
@@ -91,6 +91,8 @@ interface Row {
   prayer?: boolean;
   /** Timezone the row's clock times are in (bookings: the station / airport's own). */
   zone?: string;
+  /** How to name that clock ("Osaka"). */
+  zoneName?: string;
   /** An extra line that must not be cut off (e.g. when to be at the airport). */
   note?: string;
   /** Where to pray around this journey (departure rows, when someone prays). */
@@ -183,7 +185,9 @@ function tripEnd(b: Booking | undefined, event: 'span' | 'depart' | 'arrive' | '
   return toIn ? b.to.location : fromIn ? b.from.location : null;
 }
 
-function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<string, Booking>): Row | null {
+type Dest = { name: string; timezone: string; location: GeoPoint };
+
+function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<string, Booking>, destinations: Dest[]): Row | null {
   const r = item.ref;
   if (r.kind === 'idea') {
     const idea = ideas.get(r.ideaId);
@@ -199,9 +203,10 @@ function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<strin
     const where = { span: [from, b.to.location], depart: [from, from], arrive: [b.to.location, b.to.location] } as Record<string, GeoPoint[]>;
     const [inAt, outAt] = where[r.event] ?? [b.to.location, b.to.location];
     const zone = r.event === 'depart' ? (b.from?.timezone ?? b.to.timezone) : b.to.timezone;
+    const zoneAt = r.event === 'depart' ? (b.from?.location ?? b.to.location) : b.to.location;
     // When to be at the airport / station, on that place's clock.
     const leave = (r.event === 'depart' || r.event === 'span') && b.kind !== 'hotel'
-      ? `Be at ${b.from?.name ?? 'the station'} by ${fmtClock(toMin(item.start) - leaveBeforeMin(b.kind))} (${tzCity(b.from?.timezone ?? zone)} time)`
+      ? `Be at ${b.from?.name ?? 'the station'} by ${fmtClock(toMin(item.start) - leaveBeforeMin(b.kind))} (${clockName(b.from?.timezone ?? zone, b.from?.location, destinations)} time)`
       : '';
     return {
       item,
@@ -212,6 +217,7 @@ function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<strin
       in: inAt,
       out: outAt,
       zone,
+      zoneName: clockName(zone, zoneAt, destinations),
     };
   }
   return { item, title: r.title, icon: <MapPin className="w-4 h-4" />, in: r.place?.location, out: r.place?.location, prayer: !!item.prayer };
@@ -238,7 +244,7 @@ export function TimelinePage() {
   const rowsByDay = useMemo(() => {
     const out = new Map<string, Row[]>();
     for (const it of [...schedule.data].sort(byTime)) {
-      const row = toRow(it, ideaMap, bookingMap);
+      const row = toRow(it, ideaMap, bookingMap, trip.destinations);
       if (!row) continue;
       // Prayer guidance for journeys of anyone who prays (on the departure row).
       if (it.ref.kind === 'booking' && (it.ref.event === 'depart' || it.ref.event === 'span')) {
@@ -259,7 +265,7 @@ export function TimelinePage() {
       out.set(d, main);
     }
     return out;
-  }, [schedule.data, ideaMap, bookingMap, prayingUids]);
+  }, [schedule.data, ideaMap, bookingMap, prayingUids, trip.destinations]);
   const approved = useMemo(() => splits.data.filter((s) => s.status === 'approved'), [splits.data]);
   // A split's alternatives are added together with its main idea (one grouped backlog card).
   const altIds = useMemo(() => new Set(approved.flatMap((s) => s.tracks.filter((t) => t.key !== 'A' && t.ideaId).map((t) => t.ideaId!))), [approved]);
@@ -775,7 +781,7 @@ function StopRow({
           <p>{fmtClock(toMin(item.start))}</p>
           {!moment && <p className="text-[#6D7A77] font-semibold">{fmtClock(toMin(item.end))}</p>}
           {row.zone && (row.zone !== dayZone || item.ref.kind === 'booking') && (
-            <p className={cx('mt-0.5 text-[10px] leading-tight font-semibold', row.zone !== dayZone ? 'text-[#8A5A00]' : 'text-[#9AA5A3]')}>{tzCity(row.zone)} time</p>
+            <p className={cx('mt-0.5 text-[10px] leading-tight font-semibold', row.zone !== dayZone ? 'text-[#8A5A00]' : 'text-[#9AA5A3]')}>{row.zoneName ?? tzCity(row.zone)} time</p>
           )}
         </div>
         <button type="button" onClick={onSelect} aria-pressed={selected} className="flex-1 min-w-0 py-3 pr-2 text-left">
