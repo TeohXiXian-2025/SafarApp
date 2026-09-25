@@ -265,6 +265,12 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
               <ChevronDown className={cx('w-4 h-4 ml-auto transition-transform', details && 'rotate-180')} />
             </span>
             <span className="block text-[11px] opacity-80 mt-0.5">{label.basis}</span>
+            {label.axes && (
+              <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-semibold">
+                <span>{label.axes.pork === 'none' ? '🐖 No pork reported' : label.axes.pork === 'served' ? '🐖 Serves pork' : '🐖 Pork: not known'}</span>
+                {label.axes.alcohol !== undefined && <span>{label.axes.alcohol ? '🍺 Serves alcohol' : '🍺 No alcohol'}</span>}
+              </span>
+            )}
           </button>
         ) : idea.analysis?.status === 'error' ? (
           <p className="text-xs text-[#96590B]">Couldn't check this place yet. Use ⋯ → Re-check.</p>

@@ -1,4 +1,4 @@
-import { CalendarDays, LayoutDashboard, Lightbulb, Settings, Ticket, Users } from 'lucide-react';
+import { CalendarDays, LayoutDashboard, Lightbulb, Settings, Ticket, Users, UtensilsCrossed } from 'lucide-react';
 import { useMemo } from 'react';
 import { Link, NavLink, Outlet, useOutletContext, useParams } from 'react-router';
 import { useAuth } from '../auth/auth';
@@ -22,9 +22,11 @@ const TABS = [
   { to: '', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: 'ideas', label: 'Ideas', icon: Lightbulb },
   { to: 'timeline', label: 'Timeline', icon: CalendarDays },
+  { to: 'food', label: 'Food', icon: UtensilsCrossed },
   { to: 'bookings', label: 'Bookings', icon: Ticket },
   { to: 'members', label: 'Group', icon: Users },
-  { to: 'settings', label: 'Settings', icon: Settings },
+  // On phones Settings is reached from the Group page (keeps the bar at 6).
+  { to: 'settings', label: 'Settings', icon: Settings, desktopOnly: true },
 ];
 
 export function TripLayout() {
@@ -105,7 +107,7 @@ export function TripLayout() {
       {/* Phone bottom tab bar */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-[#E7DFD5] pb-[env(safe-area-inset-bottom)]">
         <div className="grid grid-cols-6">
-          {TABS.map((t) => (
+          {TABS.filter((t) => !t.desktopOnly).map((t) => (
             <NavLink
               key={t.label}
               to={t.to}

@@ -9,6 +9,7 @@ import { TripsPage } from './pages/TripsPage';
 import { BookingsPage } from './trip/bookings/BookingsPage';
 import { IdeasPage } from './trip/ideas/IdeasPage';
 import { TimelinePage } from './trip/timeline/TimelinePage';
+import { FoodPage } from './trip/food/FoodPage';
 import { MembersPage } from './trip/MembersPage';
 import { PreferencesPage } from './trip/PreferencesPage';
 import { OverviewPage } from './trip/OverviewPage';
@@ -49,6 +50,7 @@ export const router = createBrowserRouter([
           { index: true, element: <OverviewPage /> },
           { path: 'ideas', element: <IdeasPage /> },
           { path: 'timeline', element: <TimelinePage /> },
+          { path: 'food', element: <FoodPage /> },
           { path: 'bookings', element: <BookingsPage /> },
           { path: 'members', element: <MembersPage /> },
           { path: 'preferences', element: <PreferencesPage /> },

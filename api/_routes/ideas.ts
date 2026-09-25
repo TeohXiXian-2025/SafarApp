@@ -23,7 +23,8 @@ import { Type } from '@google/genai';
 import { extractJson } from '../_lib/gemini.js';
 import { withTrip } from '../_lib/auth.js';
 import { adminBucket, adminDb } from '../_lib/firebaseAdmin.js';
-import { analyzePlace } from '../_lib/halal.js';
+import { cachedAnalysis, runAnalysis } from '../_lib/analysis.js';
+import { similarName } from '../_lib/halal.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
 import { DEFAULT_DURATION, photoUrl, placeDetails } from '../_lib/places.js';
 import type { RouteTable } from '../_lib/routes.js';
@@ -36,9 +37,6 @@ import { useDailyQuota } from '../_lib/quota.js';
 import { notify } from '../_lib/push.js';
 import { applyMove, dissolve } from '../_lib/splits.js';
 
-const ANALYSIS_TTL = 14 * 86_400_000;
-/** Bump when the analysis format changes so cached results are redone. */
-const ANALYSIS_VERSION = 4; // 4: OSM halal eateries no longer counted as prayer spaces
 const ideaRef = (tripId: string, id: string) => adminDb().doc(paths.idea(tripId, id));
 
 async function loadIdea(tripId: string, id: string): Promise<Idea> {
@@ -48,6 +46,38 @@ async function loadIdea(tripId: string, id: string): Promise<Idea> {
 }
 
 const canManage = (idea: Idea, m: Member) => idea.createdBy === m.uid || m.role === 'admin';
+
+/** Community consensus for a place from every traveller's report (+ the best valid certificate photo). */
+async function recomputeSummary(idea: Idea): Promise<HalalSummary> {
+  const db = adminDb();
+  const reports = (await db.collection(paths.halalReports(idea.placeKey)).get()).docs.map((d) => HalalReport.parse(d.data()));
+  const today = new Date().toISOString().slice(0, 10);
+  const cert = reports.find((r) => r.photo?.kind === 'certificate' && r.photo.certifier && r.photo.nameMatches !== false && (!r.photo.expiresOn || r.photo.expiresOn >= today))?.photo;
+  const summary = HalalSummary.parse({
+    placeKey: idea.placeKey,
+    name: idea.place.name,
+    ...summarizeReports(reports),
+    ...(cert ? { certificate: { certifier: cert.certifier!, ...(cert.expiresOn ? { expiresOn: cert.expiresOn } : {}) } } : {}),
+    updatedAt: Date.now(),
+  });
+  await db.doc(paths.halalSummary(idea.placeKey)).set(summary);
+  return summary;
+}
+
+const PhotoRead = z.object({
+  isCertificate: z.boolean(),
+  certifier: z.string().max(120).catch(''),
+  number: z.string().max(80).catch(''),
+  expiresOn: z.string().max(10).catch(''),
+  establishmentName: z.string().max(200).catch(''),
+  porkItems: z.array(z.string().max(80)).max(10).catch([]),
+  alcoholItems: z.array(z.string().max(80)).max(10).catch([]),
+  summary: z.string().max(300).catch(''),
+});
+const PHOTO_SYSTEM = `You read a photo a traveller took at a restaurant: either a halal CERTIFICATE (or halal logo/sticker) or the MENU.
+Certificate: isCertificate true; certifier = the certifying body exactly as printed (e.g. "JAKIM", "JAIS", "MUIS", "Korea Muslim Federation"); number; expiresOn as YYYY-MM-DD if printed; establishmentName as printed.
+Menu: isCertificate false; list items that contain pork (pork, babi, bacon, ham, lard, char siu, 豬/猪, 돼지, 豚) in porkItems and alcoholic drinks in alcoholItems (max 10 each, as printed).
+summary: one short sentence of what the photo shows. Never guess — leave fields empty if not visible.`;
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
@@ -302,23 +332,12 @@ export const ideaRoutes: RouteTable = {
     async (req, { tripId, user }) => {
       const { ideaId, force } = await readJson(req, z.object({ ideaId: Id, force: z.boolean().default(false) }));
       const idea = await loadIdea(tripId, ideaId);
-      const cacheRef = adminDb().doc(`placesCache/${idea.placeKey}`);
-
-      const cached = force ? null : (await cacheRef.get()).data();
-      let result: { halal: Idea['halal']; sentiment?: Idea['sentiment'] };
-      // Picked up on analysis so ideas added before phone numbers were fetched get one too.
-      let phone: string | undefined;
-      if (cached && cached.v === ANALYSIS_VERSION && Date.now() - Number(cached.at) < ANALYSIS_TTL) {
-        result = { halal: cached.halal, ...(cached.sentiment ? { sentiment: cached.sentiment } : {}) };
-        phone = cached.phone;
-      } else {
+      let result = force ? null : await cachedAnalysis(idea.placeKey);
+      if (!result) {
         await useDailyQuota(user.uid, 'analyze');
         await ideaRef(tripId, ideaId).update({ analysis: { status: 'pending', at: Date.now() } });
         try {
-          const details = await placeDetails(idea.place.placeId!, { forAnalysis: true });
-          result = await analyzePlace(details);
-          phone = details.place.phone;
-          await cacheRef.set({ ...result, ...(phone ? { phone } : {}), v: ANALYSIS_VERSION, at: Date.now() });
+          result = await runAnalysis(idea.place.placeId!, idea.placeKey);
         } catch (err) {
           const message = err instanceof HttpError ? err.message : 'Analysis failed';
           await ideaRef(tripId, ideaId).update({ analysis: { status: 'error', at: Date.now(), error: message.slice(0, 300) } });
@@ -328,11 +347,11 @@ export const ideaRoutes: RouteTable = {
       await ideaRef(tripId, ideaId).update({
         halal: result.halal,
         ...(result.sentiment ? { sentiment: result.sentiment } : {}),
-        ...(phone && !idea.place.phone ? { 'place.phone': phone } : {}),
+        ...(result.phone && !idea.place.phone ? { 'place.phone': result.phone } : {}),
         analysis: { status: 'done', at: Date.now() },
         updatedAt: Date.now(),
       });
-      return json(result);
+      return json({ halal: result.halal, ...(result.sentiment ? { sentiment: result.sentiment } : {}) });
     },
     { perMinute: 20 },
   ),
@@ -440,6 +459,90 @@ Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMember
     { perMinute: 30 },
   ),
 
+  /** A photo of the halal certificate or the menu → the AI reads it → it becomes (part of) my report. */
+  'POST halal/photo': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ ideaId: Id, storagePath: z.string().max(300), kind: z.enum(['certificate', 'menu']) }));
+      if (!body.storagePath.startsWith(`trips/${tripId}/users/${member.uid}/`) || body.storagePath.includes('..')) throw new HttpError(403, 'You can only use your own uploads');
+      await useDailyQuota(member.uid, 'analyze');
+      const idea = await loadIdea(tripId, body.ideaId);
+      const file = adminBucket().file(body.storagePath);
+      const [meta] = await file.getMetadata().catch(() => {
+        throw new HttpError(404, 'Upload not found — please upload it again');
+      });
+      const type = String(meta.contentType ?? '');
+      if (!/^image\//.test(type)) throw new HttpError(415, 'Upload a photo (JPG, PNG, HEIC)');
+      const [buf] = await file.download();
+      const read = await extractJson({
+        system: PHOTO_SYSTEM,
+        parts: [{ inlineData: { mimeType: type, data: buf.toString('base64') } }, { text: `Restaurant: ${idea.place.name}. This should be its ${body.kind}.` }],
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            isCertificate: { type: Type.BOOLEAN },
+            certifier: { type: Type.STRING },
+            number: { type: Type.STRING },
+            expiresOn: { type: Type.STRING },
+            establishmentName: { type: Type.STRING },
+            porkItems: { type: Type.ARRAY, items: { type: Type.STRING } },
+            alcoholItems: { type: Type.ARRAY, items: { type: Type.STRING } },
+            summary: { type: Type.STRING },
+          },
+          required: ['isCertificate', 'summary'],
+        },
+        validate: PhotoRead,
+      });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const expiresOn = /^\d{4}-\d{2}-\d{2}$/.test(read.expiresOn) ? read.expiresOn : undefined;
+      const nameMatches = read.establishmentName ? similarName(read.establishmentName, idea.place.name) : undefined;
+      const certOk = body.kind === 'certificate' && read.isCertificate && !!read.certifier && nameMatches !== false && (!expiresOn || expiresOn >= today);
+      const problems = [
+        body.kind === 'certificate' && !read.isCertificate && "This doesn't look like a halal certificate.",
+        body.kind === 'certificate' && read.isCertificate && !read.certifier && "Couldn't read who issued it.",
+        nameMatches === false && `The certificate is for “${read.establishmentName}”, not ${idea.place.name}.`,
+        expiresOn && expiresOn < today && `The certificate expired on ${expiresOn}.`,
+      ].filter(Boolean) as string[];
+
+      // Photo → my report: a valid certificate says certified; a menu with pork says not halal; a menu without pork, pork-free.
+      const db = adminDb();
+      const ref = db.doc(paths.halalReport(idea.placeKey, member.uid));
+      const prev = (await ref.get()).data() as HalalReport | undefined;
+      const tier: HalalTier | undefined = certOk ? 'certified' : body.kind === 'menu' ? (read.porkItems.length ? 'not_halal' : (prev?.tier ?? 'pork_free')) : prev?.tier;
+      const photo = {
+        kind: body.kind,
+        ...(read.certifier ? { certifier: read.certifier } : {}),
+        ...(read.number ? { number: read.number } : {}),
+        ...(expiresOn ? { expiresOn } : {}),
+        ...(nameMatches !== undefined ? { nameMatches } : {}),
+        porkItems: read.porkItems,
+        alcoholItems: read.alcoholItems,
+        summary: read.summary || (body.kind === 'certificate' ? 'Halal certificate' : 'Menu'),
+      };
+      if (tier) {
+        const now = Date.now();
+        await ref.set(
+          HalalReport.parse({
+            uid: member.uid,
+            tier,
+            flags: {
+              ...(prev?.flags ?? {}),
+              ...(body.kind === 'menu' ? { servesPork: read.porkItems.length > 0, servesAlcohol: read.alcoholItems.length > 0 } : {}),
+            },
+            ...(prev?.note ? { note: prev.note } : {}),
+            [body.kind === 'certificate' ? 'certificatePhotoPath' : 'menuPhotoPath']: body.storagePath,
+            photo,
+            createdAt: prev?.createdAt ?? now,
+            updatedAt: now,
+          }),
+        );
+      }
+      const summary = tier ? await recomputeSummary(idea) : null;
+      return json({ read: photo, saved: !!tier, tier: tier ?? null, problems, summary });
+    },
+    { perMinute: 6 },
+  ),
+
   /** Community halal report for a place on this trip's board. One per user per place; updates replace. */
   'POST halal/report': withTrip(
     async (req, { tripId, member }) => {
@@ -468,14 +571,7 @@ Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMember
         }),
       );
 
-      const all = await db.collection(paths.halalReports(idea.placeKey)).get();
-      const summary = HalalSummary.parse({
-        placeKey: idea.placeKey,
-        name: idea.place.name,
-        ...summarizeReports(all.docs.map((d) => HalalReport.parse(d.data()))),
-        updatedAt: now,
-      });
-      await db.doc(paths.halalSummary(idea.placeKey)).set(summary);
+      const summary = await recomputeSummary(idea);
       return json(summary);
     },
     { perMinute: 10 },

@@ -10,6 +10,7 @@ import type { EvidenceSource, GeoPoint, HalalAssessment, HalalSource, NearbyPlac
 import { optionalEnv } from './env.js';
 import { extractJson } from './gemini.js';
 import { distanceKm, searchNearby, type PlaceDetails } from './places.js';
+import { websiteSnippets } from './website.js';
 
 interface Signal {
   source: Extract<HalalSource, 'google' | 'foursquare' | 'osm'>;
@@ -19,7 +20,7 @@ type Evidence = HalalAssessment['evidence'][number];
 
 const HALAL_WORD = /\bhalal\b|حلال|ハラル|할랄|清真|halaal/i;
 const nameTokens = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 2);
-const similarName = (a: string, b: string) => {
+export const similarName = (a: string, b: string) => {
   const bt = new Set(nameTokens(b));
   return nameTokens(a).some((t) => bt.has(t));
 };
@@ -57,14 +58,14 @@ async function foursquareSignal(d: PlaceDetails): Promise<Signal | null> {
 
 // ─── OpenStreetMap (one Overpass call for everything) ──────────────────────
 
-interface OsmElement {
+export interface OsmElement {
   lat?: number;
   lon?: number;
   center?: { lat: number; lon: number };
   tags?: Record<string, string>;
 }
 
-async function overpass(at: GeoPoint): Promise<OsmElement[] | null> {
+export async function overpass(at: GeoPoint): Promise<OsmElement[] | null> {
   const { lat, lng } = at;
   const q = `[out:json][timeout:8];(
 nwr(around:${PRAYER_RADIUS_M},${lat},${lng})["amenity"="place_of_worship"]["religion"="muslim"];
@@ -82,7 +83,7 @@ nwr(around:${FOOD_RADIUS_M},${lat},${lng})["diet:halal"~"yes|only"]["name"]["ame
   return body?.elements ?? null;
 }
 
-const osmPoint = (e: OsmElement): GeoPoint | null => {
+export const osmPoint = (e: OsmElement): GeoPoint | null => {
   const lat = e.lat ?? e.center?.lat;
   const lon = e.lon ?? e.center?.lon;
   return lat === undefined || lon === undefined ? null : { lat, lng: lon };
@@ -179,6 +180,7 @@ const SYSTEM = `You help Muslim travellers judge places. You get a place's detai
      No filler and no "absence" points like "no pork is advertised" / "no certification is listed". A non-food place with no concerns needs at most 1 point.
    - confidence: 0..1.
 2) reviews: from the reviews and rating, is it worth visiting? verdict "highly_recommended", "mixed" or "skip"; score 0..1; up to 3 pros and 3 cons, each under 12 words, specific (food, queues, price, staff, cleanliness, crowding, views…).
+websiteSnippets are lines from the place's OWN website: strong evidence (source "website") — e.g. a named certifier → certified; "no pork no lard" → servesPork "no"; pork dishes on the menu → servesPork "yes".
 Never invent facts. "unknown" is fine.`;
 
 const tri = { type: Type.STRING, enum: ['yes', 'no', 'unknown'] };
@@ -256,7 +258,7 @@ const SIGNAL_SOURCE: Record<Signal['source'], EvidenceSource> = { google: 'googl
 
 export async function analyzePlace(d: PlaceDetails): Promise<{ halal: HalalAssessment; sentiment?: Sentiment }> {
   const isFood = d.place.category === 'food';
-  const [nearby, fsq] = await Promise.all([nearbySpots(d, isFood), isFood ? foursquareSignal(d) : null]);
+  const [nearby, fsq, site] = await Promise.all([nearbySpots(d, isFood), isFood ? foursquareSignal(d) : null, isFood ? websiteSnippets(d.place.website) : []]);
   const signals = [googleSignal(d), fsq, isFood ? osmSignal(d, nearby.osm) : null].filter((s): s is Signal => !!s);
   const { prayer, halalFood } = nearby;
 
@@ -266,6 +268,7 @@ export async function analyzePlace(d: PlaceDetails): Promise<{ halal: HalalAsses
     types: d.place.types,
     isFood,
     website: d.place.website,
+    websiteSnippets: site,
     summary: d.editorialSummary,
     servesBeer: d.servesBeer,
     servesWine: d.servesWine,

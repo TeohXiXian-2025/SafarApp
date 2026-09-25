@@ -214,3 +214,54 @@ export async function searchNearby(
       types: p.types ?? [],
     }));
 }
+
+export interface NearbyFood {
+  placeId: string;
+  name: string;
+  location: GeoPoint;
+  types: string[];
+  typeLabel?: string;
+  rating?: number;
+  ratingCount?: number;
+  priceLevel?: number;
+  openNow?: boolean;
+  phone?: string;
+  photoName?: string;
+}
+
+/** Places to eat around a point, with what a food list needs (rating, price, open now, phone). null = lookup failed. */
+export async function searchNearbyFood(center: GeoPoint, includedTypes: string[], radiusM: number, max = 20): Promise<NearbyFood[] | null> {
+  const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'X-Goog-Api-Key': requireEnv('GOOGLE_MAPS_SERVER_KEY'),
+      'X-Goog-FieldMask':
+        'places.id,places.displayName,places.location,places.types,places.primaryTypeDisplayName,places.rating,places.userRatingCount,places.priceLevel,places.currentOpeningHours.openNow,places.internationalPhoneNumber,places.photos',
+    },
+    body: JSON.stringify({
+      includedTypes,
+      maxResultCount: max,
+      rankPreference: 'DISTANCE',
+      locationRestriction: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius: radiusM } },
+    }),
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!res?.ok) return null;
+  const places = ((await res.json()) as { places?: (RawPlace & { currentOpeningHours?: { openNow?: boolean } })[] }).places ?? [];
+  return places
+    .filter((p) => p.location && p.displayName?.text)
+    .map((p) => ({
+      placeId: p.id,
+      name: p.displayName!.text.slice(0, 200),
+      location: { lat: p.location!.latitude, lng: p.location!.longitude },
+      types: p.types ?? [],
+      ...(p.primaryTypeDisplayName?.text ? { typeLabel: p.primaryTypeDisplayName.text.slice(0, 80) } : {}),
+      ...(p.rating !== undefined ? { rating: p.rating } : {}),
+      ...(p.userRatingCount !== undefined ? { ratingCount: p.userRatingCount } : {}),
+      ...(p.priceLevel && p.priceLevel in PRICE ? { priceLevel: PRICE[p.priceLevel as keyof typeof PRICE] } : {}),
+      ...(p.currentOpeningHours?.openNow !== undefined ? { openNow: p.currentOpeningHours.openNow } : {}),
+      ...(p.internationalPhoneNumber ? { phone: p.internationalPhoneNumber.slice(0, 40) } : {}),
+      ...(p.photos?.[0]?.name ? { photoName: p.photos[0].name } : {}),
+    }));
+}

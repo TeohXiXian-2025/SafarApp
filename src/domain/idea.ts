@@ -64,6 +64,20 @@ export const HalalReport = z.object({
   note: z.string().max(500).optional(),
   certificatePhotoPath: z.string().max(300).optional(),
   menuPhotoPath: z.string().max(300).optional(),
+  /** What the AI read from the reporter's photo of a halal certificate or the menu. */
+  photo: z
+    .object({
+      kind: z.enum(['certificate', 'menu']),
+      certifier: z.string().max(120).optional(),
+      number: z.string().max(80).optional(),
+      /** YYYY-MM-DD */
+      expiresOn: z.string().max(10).optional(),
+      nameMatches: z.boolean().optional(),
+      porkItems: z.array(z.string().max(80)).max(10).default([]),
+      alcoholItems: z.array(z.string().max(80)).max(10).default([]),
+      summary: z.string().max(300),
+    })
+    .optional(),
   visitedAt: Millis.optional(),
   createdAt: Millis,
   updatedAt: Millis,
@@ -80,6 +94,8 @@ export const HalalSummary = z.object({
   tier: HalalTier.optional(),
   disputed: z.boolean(),
   flags: HalalAssessment.shape.flags,
+  /** A valid certificate someone photographed (name matched, not expired). */
+  certificate: z.object({ certifier: z.string().max(120), expiresOn: z.string().max(10).optional() }).optional(),
   updatedAt: Millis,
 });
 export type HalalSummary = z.infer<typeof HalalSummary>;

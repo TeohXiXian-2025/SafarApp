@@ -1,6 +1,6 @@
-import { Check, Copy, Crown, Link2, LogOut, MessageCircle, Share2, Trash2, UserMinus } from 'lucide-react';
+import { Check, Copy, Crown, Link2, LogOut, MessageCircle, Share2, Trash2, UserMinus, Settings as SettingsIcon } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams, Link } from 'react-router';
 import type { Invite, Member } from '../domain';
 import { api, ApiError } from '../lib/api';
 import { shareUrl } from '../config';
@@ -46,6 +46,12 @@ export function MembersPage() {
   return (
     <div className="grid gap-4 md:grid-cols-[1fr_360px] items-start">
       <div className="space-y-4">
+        <Link to="../settings" relative="path" className="md:hidden flex items-center justify-between rounded-2xl border border-[#E7DFD5] bg-white px-4 py-3 text-sm font-semibold text-[#161C23]">
+          <span className="flex items-center gap-2">
+            <SettingsIcon className="w-4 h-4 text-[#00685F]" /> Settings & notifications
+          </span>
+          <span aria-hidden className="text-[#9AA5A3]">›</span>
+        </Link>
         {params.get('welcome') && isAdmin && (
           <Card className="p-4 border-[#00685F]/30 bg-[#00685F]/5">
             <p className="font-bold text-[#00685F]">Trip created 🎉</p>

@@ -12,6 +12,7 @@ export const DAILY_LIMITS = {
   arrange: { limit: 400, label: 'timeline changes' },
   options: { limit: 60, label: 'middle-ground searches' },
   comment: { limit: 200, label: 'comments' },
+  food: { limit: 60, label: 'restaurant searches' },
 } as const;
 export type QuotaKind = keyof typeof DAILY_LIMITS;
 
