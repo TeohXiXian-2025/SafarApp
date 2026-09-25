@@ -14,8 +14,6 @@ import {
   LocalTime,
   nextSlot,
   PACE,
-  planDay,
-  estimateTravelMin,
   PRAYER_LABEL,
   mergePrefs,
   paths,
@@ -26,7 +24,6 @@ import {
   tripDays,
   type Idea,
   type Trip,
-  type GeoPoint,
   type Unit,
 } from '../../src/domain/index.js';
 import { withTrip } from '../_lib/auth.js';
@@ -48,7 +45,9 @@ import {
   itemRef,
   loadTripData,
   pairIds,
+  planFixDay,
   refreshDay,
+  writeFixPlan,
   unitFor,
   writeStops,
   type TripData,
@@ -327,46 +326,11 @@ export const scheduleRoutes: RouteTable = {
       const body = await readJson(req, z.object({ day: LocalDate, apply: z.boolean().default(false) }));
       const data = await loadTripData(tripId);
       const items = await dayItems(tripId, body.day);
-      const movable = items.filter((i) => !i.locked && !isPrayerItem(i) && !isTrackB(i));
-      if (!movable.length) return json({ stops: [], removed: [] });
-      const ends = itemEnds(data, items);
-      const units: Unit[] = movable.flatMap((it) => {
-        const idea = ideaOf(data, it);
-        if (!idea) return [];
-        return [{ ...unitFor(idea, approvedSplit(data, idea)), id: it.id, loc: ends.get(it.id)?.in ?? idea.place.location }];
-      });
-      const locked = items.filter((i) => i.locked && toMin(i.end) > toMin(i.start));
-      const frame = { ...framesFor(data, [body.day])[0], blocks: locked.map((l) => ({ start: toMin(l.start), end: toMin(l.end) })) };
-      // Real travel times where the Routes API already measured them (+20% on estimates elsewhere).
-      const known = new Map(items.flatMap((i) => (i.transitFromPrev?.fromId ? [[`${i.transitFromPrev.fromId}>${i.id}`, i.transitFromPrev.minutes] as const] : [])));
-      const locIndex = new Map(units.map((u) => [`${u.loc.lat},${u.loc.lng}`, u.id]));
-      const travel = (a: GeoPoint, b: GeoPoint) => {
-        const from = locIndex.get(`${a.lat},${a.lng}`);
-        const to = locIndex.get(`${b.lat},${b.lng}`);
-        const k = from && to ? known.get(`${from}>${to}`) : undefined;
-        return k ?? Math.round(estimateTravelMin(a, b) * 1.2);
-      };
-      const { timing } = planDay(frame, units, travel);
-      const stops = timing.placed.map((p) => ({ id: p.id, start: toClock(p.start), end: toClock(p.end) }));
-      const removed = timing.unfit.map((u) => ({ id: u.id, reason: u.reason }));
-      if (!body.apply) return json({ stops, removed });
+      const { stops, removed } = planFixDay(data, body.day, items);
+      if (!body.apply || (!stops.length && !removed.length)) return json({ stops, removed });
 
       const batch = adminDb().batch();
-      timing.placed.forEach((p, orderIndex) => {
-        const it = movable.find((m) => m.id === p.id)!;
-        const shift = p.start - toMin(it.start);
-        for (const g of pairIds(it, items)) {
-          batch.update(itemRef(tripId, g.id), { start: toClock(toMin(g.start) + shift), end: toClock(toMin(g.end) + shift), orderIndex, updatedBy: member.uid, updatedAt: Date.now() });
-        }
-      });
-      for (const r of removed) {
-        const it = movable.find((m) => m.id === r.id)!;
-        for (const g of pairIds(it, items)) {
-          batch.delete(itemRef(tripId, g.id));
-          const idea = ideaOf(data, g);
-          if (idea) batch.update(ideaDocRef(tripId, idea.id), { status: 'backlog', updatedAt: Date.now() });
-        }
-      }
+      writeFixPlan(batch, tripId, data, items, { stops, removed }, member.uid);
       logActivity(batch, tripId, member.uid, `${member.displayName} fixed ${body.day}${removed.length ? ` (${removed.length} stop${removed.length > 1 ? 's' : ''} back to the backlog)` : ''}`);
       await batch.commit();
       await refreshDay(tripId, body.day, data);

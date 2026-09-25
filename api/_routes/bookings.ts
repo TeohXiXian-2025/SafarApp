@@ -235,6 +235,27 @@ export async function addBooking(
   return id;
 }
 
+/** New local times for a booking (a delay): timezones and timeline anchors follow. */
+export async function rescheduleBooking(tripId: string, booking: Booking, startLocal: string, endLocal: string, actor: { uid: string; displayName: string }, activity: string) {
+  const draft = { ...booking, startLocal, endLocal } as BookingDraft;
+  const next: Booking = { ...booking, startLocal, endLocal, ...(await withTimezones(draft)), updatedAt: Date.now() };
+  await saveBooking(tripId, next, actor.uid, `${actor.displayName} ${activity}`);
+  return next;
+}
+
+/** Removes a booking and its timeline anchors (a cancellation). */
+export async function removeBooking(tripId: string, booking: Booking, actor: { uid: string; displayName: string }, activity: string) {
+  const db = adminDb();
+  const anchors = await db.collection(paths.schedule(tripId)).where('ref.bookingId', '==', booking.id).get();
+  const batch = db.batch();
+  batch.delete(db.doc(`${paths.bookings(tripId)}/${booking.id}`));
+  anchors.docs.forEach((d) => batch.delete(d.ref));
+  logActivity(batch, tripId, actor.uid, `${actor.displayName} ${activity}`);
+  await batch.commit();
+}
+
+export const describeBooking = (b: Pick<Booking, 'kind' | 'carrier' | 'number' | 'from' | 'to'>) => describe(b);
+
 function describe(b: Pick<Booking, 'kind' | 'carrier' | 'number' | 'from' | 'to'>) {
   if (b.kind === 'hotel') return `hotel stay at ${b.to.name}`;
   const code = [b.carrier, b.number].filter(Boolean).join(' ');
@@ -335,13 +356,7 @@ export const bookingRoutes: RouteTable = {
       if (current.createdBy !== member.uid && member.role !== 'admin') {
         throw new HttpError(403, 'Only the person who added this booking, or the admin, can delete it');
       }
-      const db = adminDb();
-      const anchors = await db.collection(paths.schedule(tripId)).where('ref.bookingId', '==', id).get();
-      const batch = db.batch();
-      batch.delete(db.doc(`${paths.bookings(tripId)}/${id}`));
-      anchors.docs.forEach((d) => batch.delete(d.ref));
-      logActivity(batch, tripId, member.uid, `${member.displayName} removed the ${describe(current)}`);
-      await batch.commit();
+      await removeBooking(tripId, current, member, `removed the ${describe(current)}`);
       return json({ ok: true });
     },
     { perMinute: 30 },

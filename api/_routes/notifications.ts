@@ -2,6 +2,7 @@
 // reminders job: closes votes that ran past 24 h and sends "12 h left"
 // reminders. The job runs daily from Vercel Cron; point an hourly QStash
 // schedule at it (header Authorization: Bearer CRON_SECRET) for exact timing.
+// It also checks flights leaving within 6 h for delays (Emergency Resync).
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { NotifyPrefs, readyForAdmin, REMIND_BEFORE_MS } from '../../src/domain/index.js';
@@ -13,6 +14,7 @@ import { loadPrefs, notify, prefsPath, subsPath } from '../_lib/push.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { ideaDocRef, loadTripData } from '../_lib/schedule.js';
 import { closeOverdue, onReadyForAdmin, stillToChoose, stillToVote } from '../_lib/tally.js';
+import { checkFlights } from '../_lib/flightStatus.js';
 
 const subId = (endpoint: string) => createHash('sha256').update(endpoint).digest('hex').slice(0, 32);
 
@@ -29,11 +31,13 @@ async function reminders(req: Request): Promise<Response> {
   const trips = await db.collection('trips').where('status', 'in', ['planning', 'active']).get();
   let closed = 0;
   let reminded = 0;
+  let flights = 0;
   for (const t of trips.docs) {
     try {
       closed += await closeOverdue(t.id);
       const data = await loadTripData(t.id);
       const timeZone = data.trip.destinations[0].timezone;
+      flights += await checkFlights(t.id, data, now).catch((e) => (console.error('[reminders] flights', t.id, e), 0));
       const url = (f: string) => `/t/${t.id}/ideas?filter=${f}`;
       for (const idea of data.ideas.values()) {
         const mark = (k: 'vote' | 'choose' | 'decide') => ideaDocRef(t.id, idea.id).update({ [`reminded.${k}`]: now });
@@ -55,7 +59,7 @@ async function reminders(req: Request): Promise<Response> {
       console.error('[reminders] trip', t.id, err);
     }
   }
-  return json({ trips: trips.size, closed, reminded });
+  return json({ trips: trips.size, closed, reminded, flights });
 }
 
 export const notificationRoutes: RouteTable = {

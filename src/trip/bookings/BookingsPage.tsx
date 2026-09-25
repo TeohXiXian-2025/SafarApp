@@ -1,4 +1,4 @@
-import { ArrowRight, FileText, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowRight, FileText, Pencil, Plus, Siren, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Booking, paths, type BookingDraft } from '../../domain';
@@ -12,6 +12,7 @@ import { BookingEditor, draftProblem, type EditableDraft } from './BookingEditor
 import { bookingTitle, dayDiff, formatDay, KIND, localParts, tzCity } from './format';
 import { StaysSection } from './StaysSection';
 import { VaultSection } from './VaultSection';
+import { IncidentBanner, ResyncSheet } from './ResyncSheet';
 
 export function BookingsPage() {
   const { trip, members, me } = useTrip();
@@ -74,7 +75,9 @@ export function BookingsPage() {
         <StaysSection bookings={bookings.data} onUpload={() => setAdding(true)} />
       ) : bookings.loading ? (
         <Spinner />
-      ) : byDay.length === 0 ? (
+      ) : null}
+      {tab === 'tickets' && !bookings.loading && <IncidentBanner bookings={bookings.data} />}
+      {tab !== 'tickets' || bookings.loading ? null : byDay.length === 0 ? (
         <Card className="p-6 text-center space-y-3">
           <p className="font-bold text-[#161C23]">No bookings yet</p>
           <p className="text-sm text-[#6D7A77]">Upload an e-ticket or screenshot and AI fills in the details — or type them in.</p>
@@ -106,9 +109,10 @@ export function BookingsPage() {
 }
 
 function BookingCard({ booking: b, canEdit, isMine, onEdit }: { booking: Booking; canEdit: boolean; isMine: boolean; onEdit: () => void }) {
-  const { trip, members } = useTrip();
+  const { trip, members, me } = useTrip();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [resync, setResync] = useState(false);
   const k = KIND[b.kind];
   const Icon = k.icon;
   const start = localParts(b.startAt);
@@ -183,6 +187,11 @@ function BookingCard({ booking: b, canEdit, isMine, onEdit }: { booking: Booking
           <span className="text-xs text-[#6D7A77] truncate">{travellers.map((m) => m.displayName).join(', ')}</span>
         </div>
         <div className="flex gap-1 shrink-0">
+          {b.kind !== 'hotel' && (canEdit || b.travellerUids.includes(me.uid)) && (
+            <IconBtn label="Delayed or cancelled?" onClick={() => setResync(true)}>
+              <Siren className="w-4 h-4" />
+            </IconBtn>
+          )}
           {isMine && b.fileRef && (
             <IconBtn label="View original ticket" onClick={() => void fileUrl(b.fileRef!).then((u) => window.open(u, '_blank', 'noopener'))}>
               <FileText className="w-4 h-4" />
@@ -201,6 +210,7 @@ function BookingCard({ booking: b, canEdit, isMine, onEdit }: { booking: Booking
         </div>
       </div>
       <ErrorBanner>{error}</ErrorBanner>
+      {resync && <ResyncSheet booking={b} onClose={() => setResync(false)} />}
     </Card>
   );
 }

@@ -6,12 +6,14 @@ import {
   Booking,
   byTime,
   dayFrames,
+  estimateTravelMin,
   Idea,
   ideaItemId,
   Member,
   mergePrefs,
   paths,
   PRAYER_LABEL,
+  planDay,
   prayersInGaps,
   ScheduleItem,
   Split,
@@ -335,4 +337,63 @@ export async function refreshDay(tripId: string, day: string, data?: TripData) {
   const d = data ?? (await loadTripData(tripId));
   await refreshPrayers(tripId, day, d);
   await refreshLegs(tripId, day, d);
+}
+
+// ─── "Fix this day" (also used by Emergency Resync) ──────────────────────────
+
+export interface FixPlan {
+  stops: { id: string; start: string; end: string }[];
+  removed: { id: string; reason: string }[];
+}
+
+/**
+ * Re-orders and re-times a day's movable stops so nothing is outside opening
+ * hours or unreachable (travel + buffer, around bookings and prayer times).
+ * Pure: `data` and `items` may be hypothetical (e.g. a delayed flight).
+ */
+export function planFixDay(data: TripData, day: string, items: ScheduleItem[]): FixPlan {
+  const movable = items.filter((i) => !i.locked && !isPrayerItem(i) && !isTrackB(i));
+  if (!movable.length) return { stops: [], removed: [] };
+  const ends = itemEnds(data, items);
+  const units: Unit[] = movable.flatMap((it) => {
+    const idea = it.ref.kind === 'idea' ? data.ideas.get(it.ref.ideaId) : undefined;
+    if (!idea) return [];
+    return [{ ...unitFor(idea, approvedSplit(data, idea)), id: it.id, loc: ends.get(it.id)?.in ?? idea.place.location }];
+  });
+  const locked = items.filter((i) => i.locked && toMin(i.end) > toMin(i.start));
+  const frame = { ...framesFor(data, [day])[0], blocks: locked.map((l) => ({ start: toMin(l.start), end: toMin(l.end) })) };
+  // Real travel times where the Routes API already measured them (+20% on estimates elsewhere).
+  const known = new Map(items.flatMap((i) => (i.transitFromPrev?.fromId ? [[`${i.transitFromPrev.fromId}>${i.id}`, i.transitFromPrev.minutes] as const] : [])));
+  const locIndex = new Map(units.map((u) => [`${u.loc.lat},${u.loc.lng}`, u.id]));
+  const travel = (a: GeoPoint, b: GeoPoint) => {
+    const from = locIndex.get(`${a.lat},${a.lng}`);
+    const to = locIndex.get(`${b.lat},${b.lng}`);
+    const k = from && to ? known.get(`${from}>${to}`) : undefined;
+    return k ?? Math.round(estimateTravelMin(a, b) * 1.2);
+  };
+  const { timing } = planDay(frame, units, travel);
+  return {
+    stops: timing.placed.map((p) => ({ id: p.id, start: toClock(p.start), end: toClock(p.end) })),
+    removed: timing.unfit.map((u) => ({ id: u.id, reason: u.reason })),
+  };
+}
+
+/** Writes a FixPlan into `batch`: stops (with their split partners) re-timed, unfit ones back to the backlog. */
+export function writeFixPlan(batch: WriteBatch, tripId: string, data: TripData, items: ScheduleItem[], plan: FixPlan, actorUid: string) {
+  plan.stops.forEach((p, orderIndex) => {
+    const it = items.find((m) => m.id === p.id);
+    if (!it) return;
+    const shift = toMin(p.start) - toMin(it.start);
+    for (const g of pairIds(it, items)) {
+      batch.update(itemRef(tripId, g.id), { start: toClock(toMin(g.start) + shift), end: toClock(toMin(g.end) + shift), orderIndex, updatedBy: actorUid, updatedAt: Date.now() });
+    }
+  });
+  for (const r of plan.removed) {
+    const it = items.find((m) => m.id === r.id);
+    if (!it) continue;
+    for (const g of pairIds(it, items)) {
+      batch.delete(itemRef(tripId, g.id));
+      if (g.ref.kind === 'idea' && data.ideas.has(g.ref.ideaId)) batch.update(ideaDocRef(tripId, g.ref.ideaId), { status: 'backlog', updatedAt: Date.now() });
+    }
+  }
 }

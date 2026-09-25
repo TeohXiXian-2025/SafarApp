@@ -17,6 +17,15 @@ export const Incident = z.object({
   createdAt: Millis,
   status: z.enum(['open', 'resyncing', 'proposed', 'applied', 'dismissed']),
   resyncJobId: Id.optional(),
+  /** The booking it's about, and the reported change (new local times, or cancelled). */
+  bookingId: Id.optional(),
+  change: z
+    .discriminatedUnion('type', [
+      z.object({ type: z.literal('delay'), startLocal: z.string().max(16), endLocal: z.string().max(16) }),
+      z.object({ type: z.literal('cancel') }),
+    ])
+    .optional(),
+  resolvedBy: Id.optional(),
 });
 export type Incident = z.infer<typeof Incident>;
 

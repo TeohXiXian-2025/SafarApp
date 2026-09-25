@@ -24,7 +24,8 @@
     "e2e:food": "node scripts/e2e-food.mjs",
     "e2e:expenses": "node scripts/e2e-expenses.mjs",
     "e2e:stays": "node scripts/e2e-stays.mjs",
-    "e2e:vault": "node scripts/e2e-vault.mjs"
+    "e2e:vault": "node scripts/e2e-vault.mjs",
+    "e2e:resync": "node scripts/e2e-resync.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
