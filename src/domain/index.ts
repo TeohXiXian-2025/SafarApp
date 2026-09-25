@@ -13,3 +13,4 @@ export * from './split.js';
 export * from './voting.js';
 export * from './notify.js';
 export * from './food.js';
+export * from './expenses.js';

@@ -1,26 +1,8 @@
-// Expenses, document vault, emergency incidents, background jobs, activity feed.
+// Document vault, emergency incidents, background jobs, activity feed.
 import { z } from 'zod';
-import { CurrencyCode, Id, Millis } from './common.js';
+import { Id, Millis } from './common.js';
 
-// ─── Expenses ───────────────────────────────────────────────────────────────
-
-export const Expense = z.object({
-  id: Id,
-  title: z.string().min(1).max(120),
-  amount: z.number().positive(),
-  currency: CurrencyCode,
-  /** Rate used to convert `amount` into the trip currency at entry time. */
-  fxRateToTrip: z.number().positive(),
-  paidByUid: Id,
-  splitMode: z.enum(['equal', 'shares', 'exact']),
-  /** For 'equal' share=1 each; 'shares' = weights; 'exact' = amount in `currency`. */
-  splits: z.array(z.object({ uid: Id, share: z.number().nonnegative() })).min(1).max(50),
-  category: z.enum(['food', 'transport', 'lodging', 'activity', 'shopping', 'other']),
-  scheduleItemId: Id.optional(),
-  at: Millis,
-  createdBy: Id,
-});
-export type Expense = z.infer<typeof Expense>;
+// Expenses live in expenses.ts.
 
 // ─── Document vault ─────────────────────────────────────────────────────────
 

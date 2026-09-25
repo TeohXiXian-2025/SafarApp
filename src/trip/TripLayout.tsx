@@ -1,4 +1,4 @@
-import { CalendarDays, LayoutDashboard, Lightbulb, Settings, Ticket, Users, UtensilsCrossed } from 'lucide-react';
+import { CalendarDays, LayoutDashboard, Lightbulb, Settings, Ticket, Users, UtensilsCrossed, Wallet } from 'lucide-react';
 import { useMemo } from 'react';
 import { Link, NavLink, Outlet, useOutletContext, useParams } from 'react-router';
 import { useAuth } from '../auth/auth';
@@ -23,9 +23,10 @@ const TABS = [
   { to: 'ideas', label: 'Ideas', icon: Lightbulb },
   { to: 'timeline', label: 'Timeline', icon: CalendarDays },
   { to: 'food', label: 'Food', icon: UtensilsCrossed },
+  { to: 'money', label: 'Money', icon: Wallet },
   { to: 'bookings', label: 'Bookings', icon: Ticket },
   { to: 'members', label: 'Group', icon: Users },
-  // On phones Settings is reached from the Group page (keeps the bar at 6).
+  // On phones Settings is reached from the Group page (keeps the phone bar to 7 tabs).
   { to: 'settings', label: 'Settings', icon: Settings, desktopOnly: true },
 ];
 
@@ -106,21 +107,21 @@ export function TripLayout() {
 
       {/* Phone bottom tab bar */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-[#E7DFD5] pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-6">
+        <div className="grid grid-cols-7">
           {TABS.filter((t) => !t.desktopOnly).map((t) => (
             <NavLink
               key={t.label}
               to={t.to}
               end={t.end}
               className={({ isActive }) =>
-                cx('flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold', isActive ? 'text-[#00685F]' : 'text-[#6D7A77]')
+                cx('flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold min-w-0', isActive ? 'text-[#00685F]' : 'text-[#6D7A77]')
               }
             >
               <span className="relative">
                 <t.icon className="w-5 h-5" />
                 {t.to === 'ideas' && badge > 0 && <Badge count={badge} floating />}
               </span>
-              {t.label}
+              <span className="max-w-full truncate px-0.5">{t.label}</span>
             </NavLink>
           ))}
         </div>

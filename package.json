@@ -21,7 +21,8 @@
     "e2e:phase6": "node scripts/e2e-phase6.mjs",
     "e2e:voting": "node scripts/e2e-voting.mjs",
     "e2e:notify": "node scripts/e2e-notify.mjs",
-    "e2e:food": "node scripts/e2e-food.mjs"
+    "e2e:food": "node scripts/e2e-food.mjs",
+    "e2e:expenses": "node scripts/e2e-expenses.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
