@@ -160,7 +160,6 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
     // Prayers that come due before we'd get there: pray first, near the last stop.
     while (pending[0] && pending[0].t <= cursor + move) pray(pending.shift()!, prev);
 
-    let start = ceil5(cursor + move);
     const hoursOpen = openingRanges(u.hours, frame.day);
     // A required window narrows the opening hours (or stands in for them).
     const open = u.window
@@ -170,24 +169,53 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
       out.unfit.push({ id: u.id, reason: 'closed' });
       continue;
     }
-    if (open?.length) {
-      const range = open.find(([o, c]) => Math.max(start, o) + u.duration <= c);
-      if (range) start = ceil5(Math.max(start, range[0]));
-      else if (opts.strict) {
+    /**
+     * Earliest start ≥ from that is inside opening hours AND clear of locked
+     * bookings — re-checked after every shift, so stepping around a train
+     * can never push a visit past closing time. null = it doesn't fit.
+     */
+    const fit = (from: number): number | null => {
+      let s = ceil5(from);
+      for (let guard = 0; guard < 8; guard++) {
+        if (open?.length) {
+          const range = open.find(([o, c]) => Math.max(s, o) + u.duration <= c);
+          if (!range) return null;
+          s = ceil5(Math.max(s, range[0]));
+        }
+        const moved = avoidBlocks(s, u.duration, frame.blocks);
+        if (moved === s) return s;
+        s = moved;
+      }
+      return null;
+    };
+
+    let start = fit(cursor + move);
+    if (start === null) {
+      if (opts.strict) {
         out.unfit.push({ id: u.id, reason: 'hours' });
         continue;
       }
+      start = avoidBlocks(ceil5(cursor + move), u.duration, frame.blocks); // by hand: keep it, the timeline warns
     }
-    start = avoidBlocks(start, u.duration, frame.blocks);
 
     // A prayer starting mid-visit whose time runs out before we'd be done: pray on arrival first.
     const walk = u.prayerWalkMin ?? PRAYER_WALK_DEFAULT;
     const due = pending[0];
     if (due && due.t < start + u.duration && due.by < start + u.duration + walk + PRAY_MIN) {
+      const before = { cursor, prayers: out.prayers.length };
       pending.shift();
       cursor = Math.max(cursor, start);
       pray(due, { id: prev.id, loc: u.loc, walk });
-      start = avoidBlocks(cursor, u.duration, frame.blocks);
+      const after = fit(cursor);
+      if (after !== null) start = after;
+      else if (opts.strict) {
+        // Praying first leaves no time before closing: undo the prayer and leave this stop out.
+        out.prayers.length = before.prayers;
+        cursor = before.cursor;
+        pending.unshift(due);
+        out.unfit.push({ id: u.id, reason: 'hours' });
+        continue;
+      } else start = avoidBlocks(cursor, u.duration, frame.blocks);
     }
 
     const end = start + u.duration;
@@ -262,6 +290,11 @@ function improveOrder(frame: DayFrame, order: Unit[], travel: Travel): { order: 
     if (!improved) break;
   }
   return { order: best, timing: bestT };
+}
+
+/** Best order + times for one day's stops (nearest neighbour + 2-opt, then meal/prayer/hours-aware tweaks). */
+export function planDay(frame: DayFrame, units: Unit[], travel: Travel = estimateTravelMin): { order: Unit[]; timing: DayTiming } {
+  return improveOrder(frame, orderByDistance(frame.base, units), travel);
 }
 
 // ─── Whole trip ─────────────────────────────────────────────────────────────

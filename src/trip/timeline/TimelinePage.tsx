@@ -36,6 +36,8 @@ import {
   Split,
   type Member,
   dayWarnings,
+  findSlot,
+  toClock,
   estimateTravelMin,
   fmtClock,
   Idea,
@@ -58,7 +60,8 @@ import { useTrip } from '../TripLayout';
 import { TRACK_COLOR, trackKeyOf } from '../trackColors';
 import { DayMap, type MapLink, type MapStop } from './DayMap';
 import { ArrangeSheet } from './ArrangeSheet';
-import { AddStopSheet, EditStopSheet } from './StopSheets';
+import { AddStopSheet, CANDIDATE, EditStopSheet, type Checker } from './StopSheets';
+import { FixDaySheet } from './FixDaySheet';
 
 interface Row {
   item: ScheduleItem;
@@ -77,6 +80,58 @@ interface Row {
 
 /** A split group other than the main one. */
 const isSide = (track: string) => track !== 'all' && !track.endsWith(':A');
+
+/**
+ * Conflicts on a day. Travel comes from the Routes API leg when it's been
+ * measured, otherwise a straight-line estimate — so a stop is checked the
+ * moment it's placed.
+ */
+function warningsFor(day: string, rows: Row[]): DayWarning[] {
+  const all = rows.flatMap((r) => [r, ...(r.sides ?? [])]);
+  const chain = rows.filter((r) => !r.prayer).sort((a, b) => a.item.start.localeCompare(b.item.start));
+  const travel = (r: Row) => {
+    const i = chain.indexOf(r);
+    const prev = i > 0 ? chain[i - 1] : undefined;
+    if (r.item.transitFromPrev && r.item.transitFromPrev.fromId === prev?.item.id) return r.item.transitFromPrev.minutes;
+    return prev?.out && r.in ? estimateTravelMin(prev.out, r.in) : undefined;
+  };
+  return dayWarnings(
+    day,
+    all.map((r) => ({ ...r.item, ...(r.prayer ? { kind: 'prayer' as const } : isSide(r.item.track) ? { kind: 'side' as const } : { transitMin: travel(r) }) })),
+    (id) => all.find((r) => r.item.id === id)?.idea?.place.openingHours,
+  );
+}
+
+/** Checks / suggests a time for one stop (new or moved) against the rest of that day. */
+function makeChecker(rowsByDay: Map<string, Row[]>, idea: Idea | undefined, movingIds: string[]): Checker | undefined {
+  if (!idea) return undefined;
+  const others = (d: string) => (rowsByDay.get(d) ?? []).filter((r) => !movingIds.includes(r.item.id));
+  const keyOf = (w: DayWarning) => `${w.itemId}:${w.kind}`;
+  return {
+    check: (d, start, duration) => {
+      const base = others(d);
+      const before = new Set(warningsFor(d, base).map(keyOf));
+      const candidate: Row = {
+        item: {
+          id: CANDIDATE, day: d, start: toClock(start), end: toClock(start + duration), ref: { kind: 'idea', ideaId: idea.id },
+          track: 'all', memberUids: [], locked: false, orderIndex: 999, updatedBy: 'me', updatedAt: 0,
+        },
+        title: idea.place.name, icon: null, idea, in: idea.place.location, out: idea.place.location,
+      };
+      // Only what this placement adds: its own problems + the ones it causes for the next stop.
+      return warningsFor(d, [...base, candidate]).filter((w) => w.itemId === CANDIDATE || !before.has(keyOf(w)));
+    },
+    suggest: (d, duration) =>
+      findSlot({
+        day: d,
+        items: others(d).filter((r) => !r.prayer).map((r) => ({ start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), loc: r.out ?? r.in })),
+        duration,
+        hours: idea.place.openingHours,
+        loc: idea.place.location,
+        after: 8 * 60,
+      }),
+  };
+}
 
 const prayerWalkOf = (idea?: Idea) => (idea?.halal?.prayer ? (idea.halal.prayer.access === 'onsite' ? 0 : idea.halal.prayer.places[0]?.walkMin) : undefined);
 
@@ -167,17 +222,26 @@ export function TimelinePage() {
     return base.map((r) => (r.item.locked ? r : queue.shift() ?? r));
   }, [rowsByDay, day, pending]);
 
+  const dayList = useMemo(() => warningsFor(day, rows), [rows, day]);
   const warnings = useMemo(() => {
     const byItem = new Map<string, DayWarning[]>();
-    const all = rows.flatMap((r) => [r, ...(r.sides ?? [])]);
-    const list = dayWarnings(
-      day,
-      all.map((r) => ({ ...r.item, transitMin: r.item.transitFromPrev?.minutes, ...(r.prayer ? { kind: 'prayer' as const } : isSide(r.item.track) ? { kind: 'side' as const } : {}) })),
-      (id) => all.find((r) => r.item.id === id)?.idea?.place.openingHours,
-    );
-    for (const w of list) byItem.set(w.itemId, [...(byItem.get(w.itemId) ?? []), w]);
+    for (const w of dayList) byItem.set(w.itemId, [...(byItem.get(w.itemId) ?? []), w]);
     return byItem;
-  }, [rows, day]);
+  }, [dayList]);
+  // A dot on each day chip: red if something doesn't work, amber if something's tight.
+  const dayStatus = useMemo(
+    () =>
+      new Map(
+        days.map((d) => {
+          const w = warningsFor(d, rowsByDay.get(d) ?? []);
+          return [d, w.some((x) => x.severity === 'block') ? 'block' : w.length ? 'risk' : null] as const;
+        }),
+      ),
+    [days, rowsByDay],
+  );
+  const blocks = dayList.filter((w) => w.severity === 'block').length;
+  const risks = dayList.length - blocks;
+  const [fixing, setFixing] = useState(false);
 
   // Prayer times and the day's local timezone (from where the group is that day).
   const frame = useMemo(
@@ -312,7 +376,7 @@ export function TimelinePage() {
         <div className="-mx-4 px-4 overflow-x-auto">
           <div className="flex gap-2 w-max pb-1">
             {days.map((d, i) => (
-              <DayChip key={d} day={d} index={i} selected={d === day} count={rowsByDay.get(d)?.filter((r) => !r.prayer).length ?? 0} onClick={() => setDay(d)} />
+              <DayChip key={d} day={d} index={i} selected={d === day} status={dayStatus.get(d) ?? null} count={rowsByDay.get(d)?.filter((r) => !r.prayer).length ?? 0} onClick={() => setDay(d)} />
             ))}
           </div>
         </div>
@@ -325,6 +389,19 @@ export function TimelinePage() {
           </p>
           {frame.prayers && <p>Prayer times: {(['dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => `${PRAYER_LABEL[k]} ${fmtClock(frame.prayers!.times[k])}`).join(' · ')}</p>}
         </div>
+        {(blocks > 0 || risks > 0) && (
+          <div className={cx('flex items-center gap-3 rounded-2xl border px-4 py-3', blocks ? 'border-[#F2B8B5] bg-[#FDECEA]' : 'border-[#F2D8B0] bg-[#FFF8EC]')}>
+            <AlertTriangle className={cx('w-5 h-5 shrink-0', blocks ? 'text-[#B3261E]' : 'text-[#8A5A00]')} />
+            <p className="flex-1 text-sm text-[#161C23]">
+              {blocks ? `🔴 ${blocks} thing${blocks > 1 ? 's' : ''} won't work` : ''}
+              {blocks && risks ? ' · ' : ''}
+              {risks ? `🟡 ${risks} tight` : ''} on this day — see the stops below.
+            </p>
+            <Button variant={blocks ? 'primary' : 'secondary'} className="shrink-0 min-h-9" onClick={() => setFixing(true)}>
+              Fix this day
+            </Button>
+          </div>
+        )}
         {missed.map((m) => (
           <p key={m.key} className="flex items-start gap-1.5 rounded-xl bg-[#FFF8EC] border border-[#F2D8B0] px-3 py-2 text-xs text-[#8A5A00]">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" /> No free 30 min for {PRAYER_LABEL[m.key]} between {fmtClock(m.from)} and {fmtClock(m.to)} — shorten or move a stop.
@@ -386,6 +463,7 @@ export function TimelinePage() {
         title={editing?.sides?.length ? `Split: ${[editing.title, ...editing.sides.map((s) => s.title)].join(' / ')}` : (editing?.title ?? '')}
         fixedLength={!!editing?.sides?.length}
         days={days}
+        checker={editing ? makeChecker(rowsByDay, editing.idea, [editing.item.id, ...(editing.sides ?? []).map((s) => s.item.id)]) : undefined}
         onClose={() => setEditing(null)}
         onSave={async (patch) => {
           await api.post('schedule/update', { id: editing!.item.id, ...patch }, { tripId: trip.id });
@@ -393,6 +471,7 @@ export function TimelinePage() {
         }}
         onRemove={() => api.post('schedule/remove', { id: editing!.item.id }, { tripId: trip.id })}
       />
+      {fixing && <FixDaySheet day={day} tripId={trip.id} rows={rows} onClose={() => setFixing(false)} />}
       {preview && (
         <ArrangeSheet
           job={preview}
@@ -410,6 +489,7 @@ export function TimelinePage() {
         idea={adding}
         days={days}
         defaultDay={day}
+        checker={adding ? makeChecker(rowsByDay, adding, []) : undefined}
         onClose={() => setAdding(null)}
         onAdd={async (toDay, start) => {
           await addIdea(adding!.id, toDay, start);
@@ -420,7 +500,7 @@ export function TimelinePage() {
   );
 }
 
-function DayChip({ day, index, selected, count, onClick }: { day: string; index: number; selected: boolean; count: number; onClick: () => void }) {
+function DayChip({ day, index, selected, status, count, onClick }: { day: string; index: number; selected: boolean; status: 'block' | 'risk' | null; count: number; onClick: () => void }) {
   const { setNodeRef, isOver } = useDroppable({ id: `chip:${day}` });
   return (
     <button
@@ -434,7 +514,10 @@ function DayChip({ day, index, selected, count, onClick }: { day: string; index:
         isOver && !selected && 'border-[#00685F] ring-2 ring-[#00685F]/30',
       )}
     >
-      <span className={cx('block text-[11px] font-bold uppercase tracking-wider', selected ? 'text-white/80' : 'text-[#6D7A77]')}>Day {index + 1}</span>
+      <span className={cx('flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider', selected ? 'text-white/80' : 'text-[#6D7A77]')}>
+        Day {index + 1}
+        {status && <span aria-label={status === 'block' ? 'Has problems' : 'Something is tight'} className={cx('w-2 h-2 rounded-full', status === 'block' ? 'bg-[#E5484D]' : 'bg-[#F2B544]')} />}
+      </span>
       <span className="block text-sm font-semibold whitespace-nowrap">{formatDay(day)}</span>
       <span className={cx('block text-[11px]', selected ? 'text-white/80' : 'text-[#6D7A77]')}>{count ? `${count} stop${count > 1 ? 's' : ''}` : 'Free'}</span>
     </button>
@@ -492,7 +575,7 @@ function StopRow({
           {row.subtitle && !row.sides?.length && <p className="text-xs text-[#6D7A77] truncate">{row.subtitle}</p>}
           {!!row.sides?.length && <SplitGroups a={row} sides={row.sides} people={people} me={me} />}
           {warnings.map((w) => (
-            <p key={`${w.itemId}-${w.kind}`} className="mt-1 flex items-start gap-1 text-xs text-[#8A5A00]">
+            <p key={`${w.itemId}-${w.kind}`} className={cx('mt-1 flex items-start gap-1 text-xs', w.severity === 'block' ? 'text-[#B3261E] font-semibold' : 'text-[#8A5A00]')}>
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" /> {w.text}
             </p>
           ))}

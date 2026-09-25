@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayWarnings, estimateTravelMin, nextSlot, toClock, toMin, tripDays } from './timeline';
+import { dayWarnings, estimateTravelMin, findSlot, nextSlot, toClock, toMin, tripDays } from './timeline';
 
 const item = (id: string, start: string, end: string, locked = false, orderIndex = 0) => ({ id, start, end, locked, orderIndex });
 const HOURS = ['Monday: 9:00 AM – 5:00 PM', 'Tuesday: Closed'];
@@ -47,7 +47,9 @@ describe('estimateTravelMin', () => {
 });
 
 describe('dayWarnings', () => {
-  it('flags overlaps, tight transfers and opening hours', () => {
+  const kinds = (w: { itemId: string; kind: string; severity: string }[]) => w.map((x) => [x.itemId, x.kind, x.severity]);
+
+  it('flags outside-hours, overlaps and transfers you cannot make', () => {
     const w = dayWarnings(
       '2026-12-07', // a Monday
       [
@@ -57,33 +59,59 @@ describe('dayWarnings', () => {
       ],
       (id) => (id === 'a' ? HOURS : undefined),
     );
-    expect(w.map((x) => [x.itemId, x.kind])).toEqual([
-      ['a', 'hours'],
-      ['b', 'overlap'],
-      ['c', 'tight'],
+    expect(kinds(w)).toEqual([
+      ['a', 'hours', 'block'],
+      ['b', 'overlap', 'block'],
+      ['c', 'unreachable', 'block'],
     ]);
+  });
+
+  it('warns (without blocking) when there is little time to spare or it is about to close', () => {
+    const w = dayWarnings(
+      '2026-12-07',
+      [item('a', '12:00', '13:00'), { ...item('b', '13:30', '16:50'), transitMin: 25 }],
+      (id) => (id === 'b' ? HOURS : undefined),
+    );
+    expect(kinds(w)).toEqual([
+      ['b', 'tight', 'risk'],
+      ['b', 'closing', 'risk'],
+    ]);
+    expect(w[0].text).toBe('Only 5 min to spare after the ~25 min trip.');
   });
 
   it('counts a prayer break between two stops against the transfer', () => {
     const w = dayWarnings(
       '2026-12-07',
-      [
-        item('a', '10:00', '12:00'),
-        { ...item('pr', '12:00', '12:25'), kind: 'prayer' as const },
-        { ...item('b', '12:30', '13:30'), transitMin: 15 },
-      ],
+      [item('a', '10:00', '12:00'), { ...item('pr', '12:00', '12:25'), kind: 'prayer' as const }, { ...item('b', '12:30', '13:30'), transitMin: 15 }],
       () => undefined,
     );
-    expect(w).toEqual([{ itemId: 'b', kind: 'tight', text: 'Only 5 min to get here after the prayer break — the trip takes about 15 min.' }]);
+    expect(w).toEqual([{ itemId: 'b', kind: 'unreachable', severity: 'block', text: "Can't get here in time: the trip takes ~15 min but there's only 5 min after the prayer break." }]);
   });
 
-  it('ignores the parallel half of a split when checking overlaps', () => {
+  it('ignores the parallel groups of a split when checking overlaps', () => {
     const w = dayWarnings('2026-12-07', [item('a', '12:00', '13:30'), { ...item('b', '12:05', '13:15'), kind: 'side' as const }], () => undefined);
     expect(w).toEqual([]);
   });
 
   it('flags a place closed that day', () => {
     const w = dayWarnings('2026-12-08', [item('a', '10:00', '11:00')], () => HOURS);
-    expect(w).toEqual([{ itemId: 'a', kind: 'closed', text: 'Closed on this day.' }]);
+    expect(w).toEqual([{ itemId: 'a', kind: 'closed', severity: 'block', text: 'Closed on this day.' }]);
+  });
+});
+
+describe('findSlot', () => {
+  const at = (dLat: number) => ({ lat: 3.15 + dLat, lng: 101.7 });
+  const flat = () => 20;
+
+  it('finds the first time inside opening hours with travel both ways', () => {
+    // Busy 9–10 and 12–13; a 60-min stop 20 min away each way needs 10:30 (10 + 20 travel + 10 buffer).
+    const items = [{ start: 540, end: 600, loc: at(0) }, { start: 720, end: 780, loc: at(0.01) }];
+    expect(findSlot({ day: '2026-12-07', items, duration: 60, loc: at(0.02), after: 540, travel: flat })).toBe(630);
+  });
+
+  it('respects opening hours and says when nothing fits', () => {
+    expect(findSlot({ day: '2026-12-07', items: [], duration: 60, hours: HOURS, after: 480 })).toBe(540);
+    expect(findSlot({ day: '2026-12-08', items: [], duration: 60, hours: HOURS })).toBeNull(); // closed Tuesday
+    expect(findSlot({ day: '2026-12-07', items: [], duration: 600, hours: HOURS })).toBeNull(); // 10 h won't fit 9–5
   });
 });

@@ -78,17 +78,37 @@ export function estimateTravelMin(a: GeoPoint, b: GeoPoint): number {
 
 // ─── Warnings ───────────────────────────────────────────────────────────────
 
+/** Minutes kept free on top of the travel time (finding the entrance, parking, queues). */
+export const BUFFER_MIN = 10;
+
+export type WarningKind = 'overlap' | 'unreachable' | 'closed' | 'hours' | 'tight' | 'closing' | 'late';
+/** block = the plan doesn't work as is; risk = it works, but only just. */
+export const SEVERITY: Record<WarningKind, 'block' | 'risk'> = {
+  overlap: 'block',
+  unreachable: 'block',
+  closed: 'block',
+  hours: 'block',
+  tight: 'risk',
+  closing: 'risk',
+  late: 'risk',
+};
+
 export interface DayWarning {
   itemId: string;
-  kind: 'overlap' | 'tight' | 'closed' | 'hours' | 'late';
+  kind: WarningKind;
+  severity: 'block' | 'risk';
   text: string;
 }
 
+const warn = (itemId: string, kind: WarningKind, text: string): DayWarning => ({ itemId, kind, severity: SEVERITY[kind], text });
+
 /**
  * Problems on one day, in time order. `hours` gives Google's weekday
- * descriptions for an item's place (undefined when unknown). Prayer breaks
- * and the parallel half of a split (`side`) aren't part of the chain of
- * stops; time spent praying between two stops counts against the transfer.
+ * descriptions for an item's place (undefined when unknown); `transitMin`
+ * is the travel time from the previous stop (real Routes time, or an
+ * estimate). Prayer breaks and the parallel groups of a split (`side`)
+ * aren't part of the chain of stops; time spent praying between two stops
+ * counts against the transfer.
  */
 export function dayWarnings(
   day: string,
@@ -105,21 +125,55 @@ export function dayWarnings(
     const e = toMin(it.end);
     const i = chain.indexOf(it);
     const prev = i > 0 ? chain[i - 1] : undefined;
-    if (prev && s < toMin(prev.end)) out.push({ itemId: it.id, kind: 'overlap', text: 'Overlaps the previous stop.' });
+    if (prev && s < toMin(prev.end)) out.push(warn(it.id, 'overlap', 'Overlaps the stop or booking before it.'));
     else if (prev && it.transitMin) {
       const praying = prayers.filter((p) => toMin(p.start) >= toMin(prev.end) && toMin(p.end) <= s).reduce((m, p) => m + toMin(p.end) - toMin(p.start), 0);
       const free = s - toMin(prev.end) - praying;
-      if (free < it.transitMin) {
-        out.push({ itemId: it.id, kind: 'tight', text: `Only ${free} min to get here${praying ? ' after the prayer break' : ''} — the trip takes about ${it.transitMin} min.` });
-      }
+      const after = praying ? ' after the prayer break' : '';
+      if (free < it.transitMin) out.push(warn(it.id, 'unreachable', `Can't get here in time: the trip takes ~${it.transitMin} min but there's only ${Math.max(0, free)} min${after}.`));
+      else if (free < it.transitMin + BUFFER_MIN) out.push(warn(it.id, 'tight', `Only ${free - it.transitMin} min to spare after the ~${it.transitMin} min trip${after}.`));
     }
-    if (e >= DAY_END) out.push({ itemId: it.id, kind: 'late', text: 'Runs past midnight.' });
+    if (e >= DAY_END) out.push(warn(it.id, 'late', 'Runs past midnight.'));
 
     const open = openingRanges(hours(it.id), day);
-    if (open?.length === 0) out.push({ itemId: it.id, kind: 'closed', text: 'Closed on this day.' });
-    else if (open && !open.some(([o, c]) => s >= o && e <= c)) {
-      out.push({ itemId: it.id, kind: 'hours', text: `Outside opening hours (${open.map(([o, c]) => `${toClock(o)}–${toClock(c)}`).join(', ')}).` });
+    if (open?.length === 0) out.push(warn(it.id, 'closed', 'Closed on this day.'));
+    else if (open) {
+      const range = open.find(([o, c]) => s >= o && e <= c);
+      if (!range) out.push(warn(it.id, 'hours', `Outside opening hours (${open.map(([o, c]) => `${toClock(o)}–${toClock(c)}`).join(', ')}).`));
+      else if (range[1] < 24 * 60 && range[1] - e < 15) out.push(warn(it.id, 'closing', `Ends ${range[1] - e} min before it closes at ${toClock(range[1])} — last entry is often earlier.`));
     }
   }
   return out;
+}
+
+/**
+ * The first start (≥ `after`, 5-min steps) where a stop fits: inside its
+ * opening hours, not overlapping anything, with travel time + buffer to the
+ * stop before and after. null if nothing fits that day.
+ */
+export function findSlot(opts: {
+  day: string;
+  /** The day's other stops (not the one being placed; no prayer breaks). */
+  items: { start: number; end: number; loc?: GeoPoint }[];
+  duration: number;
+  hours?: string[];
+  loc?: GeoPoint;
+  after?: number;
+  travel?: (a: GeoPoint, b: GeoPoint) => number;
+}): number | null {
+  const travel = opts.travel ?? estimateTravelMin;
+  const open = openingRanges(opts.hours, opts.day) ?? [[0, DAY_END] as [number, number]];
+  if (!open.length) return null;
+  const items = [...opts.items].sort((a, b) => a.start - b.start);
+  for (let s = ceil5(opts.after ?? 8 * 60); s + opts.duration <= DAY_END; s += 5) {
+    const e = s + opts.duration;
+    if (!open.some(([o, c]) => s >= o && e <= c)) continue;
+    if (items.some((x) => x.start < e && Math.max(x.end, x.start + 1) > s)) continue;
+    const prev = [...items].reverse().find((x) => x.end <= s);
+    const next = items.find((x) => x.start >= e);
+    if (prev?.loc && opts.loc && s - prev.end < travel(prev.loc, opts.loc) + BUFFER_MIN) continue;
+    if (next?.loc && opts.loc && next.start - e < travel(opts.loc, next.loc) + BUFFER_MIN) continue;
+    return s;
+  }
+  return null;
 }

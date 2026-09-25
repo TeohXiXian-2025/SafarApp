@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { arrangeTrip, dayFrames, orderByDistance, prayersInGaps, timeSequence, type DayFrame, type Unit } from './arrange';
 import type { DayPrayers } from './prayer';
+import { dayWarnings, estimateTravelMin } from './timeline';
 
 const h = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
 const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -193,5 +194,54 @@ describe('dayFrames', () => {
 
   it('has no prayer times when nobody asked for prayer breaks', () => {
     expect(dayFrames(['2026-12-02'], [], [KL], { pace: 'relaxed', praying: false })[0]).toMatchObject({ prayers: null, end: h('18:30') });
+  });
+});
+
+describe('AI Arrange never creates a blocking conflict', () => {
+  // Small seeded PRNG so failures are reproducible.
+  const rng = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
+  const DAYNAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  it('holds for 300 random trips (hours, closures, trains, prayers, meals)', () => {
+    const failures: string[] = [];
+    for (let seed = 1; seed <= 300; seed++) {
+      const r = rng(seed);
+      const days = ['2026-12-07', '2026-12-08', '2026-12-09'].slice(0, 1 + Math.floor(r() * 3));
+      const frames = days.map((day) =>
+        frame({
+          day,
+          start: h('09:00') + Math.floor(r() * 4) * 30,
+          end: h('18:30') + Math.floor(r() * 5) * 30,
+          blocks: r() < 0.3 ? [((t) => ({ start: t, end: t + 60 + Math.floor(r() * 4) * 30 }))(h('11:00') + Math.floor(r() * 8) * 30)] : [],
+          prayers: r() < 0.6 ? PRAYERS : null,
+        }),
+      );
+      const units = Array.from({ length: 3 + Math.floor(r() * 7) }, (_, i) => {
+        const open = 8 + Math.floor(r() * 4);
+        const close = 16 + Math.floor(r() * 7);
+        const hours = r() < 0.7 ? DAYNAMES.map((d) => (r() < 0.12 ? `${d}: Closed` : `${d}: ${open}:00 AM – ${close - 12}:00 PM`)) : undefined;
+        return unit(`u${i}`, 30 + Math.floor(r() * 6) * 30, { loc: near((r() - 0.5) * 0.06, (r() - 0.5) * 0.06), food: r() < 0.3, ...(hours ? { hours } : {}), ...(r() < 0.5 ? { prayerWalkMin: Math.floor(r() * 12) } : {}) });
+      });
+      const result = arrangeTrip(frames, units, { maxStops: 5 });
+      for (const d of result.days) {
+        const f = frames.find((x) => x.day === d.day)!;
+        const placed = d.timing.placed.map((p) => ({ ...p, unit: units.find((u) => u.id === p.id)! }));
+        const items = [
+          ...placed.map((p, k) => ({
+            id: p.id,
+            start: clock(p.start),
+            end: clock(p.end),
+            orderIndex: k,
+            transitMin: k > 0 ? estimateTravelMin(placed[k - 1].unit.loc, p.unit.loc) : undefined,
+          })),
+          ...d.timing.prayers.map((p, k) => ({ id: `pr${k}`, start: clock(p.start), end: clock(p.end), orderIndex: 0, kind: 'prayer' as const })),
+          ...f.blocks.map((b, k) => ({ id: `blk${k}`, start: clock(b.start), end: clock(b.end), orderIndex: 0 })),
+        ];
+        // Travel is only checked stop→stop (the scheduler routes around trains the same way).
+        const blocking = dayWarnings(d.day, items, (id) => units.find((u) => u.id === id)?.hours).filter((w) => w.severity === 'block' && !(w.kind === 'unreachable' && items.some((x) => x.id.startsWith('blk'))));
+        if (blocking.length) failures.push(`seed ${seed} ${d.day}: ${blocking.map((w) => `${w.itemId} ${w.kind} (${w.text})`).join('; ')}`);
+      }
+    }
+    expect(failures).toEqual([]);
   });
 });

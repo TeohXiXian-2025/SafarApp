@@ -159,6 +159,16 @@ try {
   assert.deepEqual([c3.start, c3.end], ['10:15', '11:00']);
   ok('re-timed and shortened');
 
+  // A conflict on purpose: Central Market opens at 10:00 — put it at 06:00, then "Fix this day".
+  await alice.call('schedule/update', { id: `idea_${C}`, start: '06:00' }, q);
+  const preview = await alice.call('schedule/fixday', { day: '2026-12-08' }, q);
+  assert.equal(preview.status, 200, JSON.stringify(preview.body));
+  assert.equal((await item(tripId, `idea_${C}`)).start, '06:00'); // preview changes nothing
+  const fixed = await alice.call('schedule/fixday', { day: '2026-12-08', apply: true }, q);
+  const c4 = await item(tripId, `idea_${C}`);
+  assert.ok(c4.start >= '10:00', `now ${c4.start}`);
+  ok(`"Fix this day" moves a stop out of closed hours: 06:00 → ${c4.start} (preview first; ${fixed.body.removed.length} removed)`);
+
   assert.equal((await alice.call('ideas/decide', { ideaId: A, action: 'reject' }, q)).status, 409);
   ok('admin can’t reject an idea that’s on the timeline');
 
