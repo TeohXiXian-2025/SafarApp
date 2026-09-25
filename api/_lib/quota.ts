@@ -14,6 +14,7 @@ export const DAILY_LIMITS = {
   comment: { limit: 200, label: 'comments' },
   food: { limit: 60, label: 'restaurant searches' },
   receipt: { limit: 40, label: 'receipt readings' },
+  hotels: { limit: 15, label: 'hotel searches' },
 } as const;
 export type QuotaKind = keyof typeof DAILY_LIMITS;
 

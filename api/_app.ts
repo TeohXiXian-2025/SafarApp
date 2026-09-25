@@ -12,6 +12,7 @@ import { decisionRoutes } from './_routes/decisions.js';
 import { notificationRoutes } from './_routes/notifications.js';
 import { foodRoutes } from './_routes/food.js';
 import { expenseRoutes } from './_routes/expenses.js';
+import { stayRoutes } from './_routes/stays.js';
 
 const table: RouteTable = {
   ...systemRoutes,
@@ -25,6 +26,7 @@ const table: RouteTable = {
   ...notificationRoutes,
   ...foodRoutes,
   ...expenseRoutes,
+  ...stayRoutes,
 };
 
 export async function dispatch(req: Request): Promise<Response> {

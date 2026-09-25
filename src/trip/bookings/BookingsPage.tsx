@@ -1,20 +1,24 @@
 import { ArrowRight, FileText, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { Booking, paths, type BookingDraft } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { fileUrl } from '../../lib/storage';
-import { Avatar, Badge, Button, Card, ErrorBanner, Sheet, Spinner } from '../../ui';
+import { Avatar, Badge, Button, Card, cx, ErrorBanner, Sheet, Spinner } from '../../ui';
 import { useTrip } from '../TripLayout';
 import { AddBookingSheet } from './AddBookingSheet';
 import { BookingEditor, draftProblem, type EditableDraft } from './BookingEditor';
 import { bookingTitle, dayDiff, formatDay, KIND, localParts, tzCity } from './format';
+import { StaysSection } from './StaysSection';
 
 export function BookingsPage() {
   const { trip, members, me } = useTrip();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Booking | null>(null);
   const bookings = useQuery(`bookings:${trip.id}`, () => paths.bookings(trip.id), Booking);
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'stays' ? 'stays' : 'tickets';
 
   const byDay = useMemo(() => {
     const sorted = [...bookings.data].sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt));
@@ -38,9 +42,31 @@ export function BookingsPage() {
         </Button>
       </div>
 
+      <div className="grid grid-cols-2 rounded-xl bg-[#F3EFE9] p-1 text-sm font-semibold" role="tablist">
+        {(
+          [
+            ['tickets', 'All bookings'],
+            ['stays', 'Hotels'],
+          ] as const
+        ).map(([t, label]) => (
+          <button
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            type="button"
+            onClick={() => setParams(t === 'stays' ? { tab: t } : {}, { replace: true })}
+            className={cx('min-h-9 rounded-lg', tab === t ? 'bg-white text-[#00685F] shadow-xs' : 'text-[#6D7A77]')}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {bookings.error && <ErrorBanner>Could not load bookings: {bookings.error.message}</ErrorBanner>}
 
-      {bookings.loading ? (
+      {tab === 'stays' ? (
+        <StaysSection bookings={bookings.data} onUpload={() => setAdding(true)} />
+      ) : bookings.loading ? (
         <Spinner />
       ) : byDay.length === 0 ? (
         <Card className="p-6 text-center space-y-3">

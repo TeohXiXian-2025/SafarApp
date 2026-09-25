@@ -211,6 +211,30 @@ async function saveBooking(tripId: string, booking: Booking, actorUid: string, a
   await batch.commit();
 }
 
+/** Saves a new booking (already validated) with its timeline anchors. Returns its id. */
+export async function addBooking(
+  tripId: string,
+  draft: BookingDraft,
+  actor: { uid: string; displayName: string },
+  extra: { source: Booking['source']; fileRef?: string; parseConfidence?: number },
+): Promise<string> {
+  const now = Date.now();
+  const id = adminDb().collection(paths.bookings(tripId)).doc().id;
+  const booking: Booking = {
+    ...draft,
+    ...(await withTimezones(draft)),
+    id,
+    source: extra.source,
+    ...(extra.fileRef ? { fileRef: extra.fileRef } : {}),
+    ...(extra.parseConfidence !== undefined ? { parseConfidence: extra.parseConfidence } : {}),
+    createdBy: actor.uid,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await saveBooking(tripId, booking, actor.uid, `${actor.displayName} added a ${describe(booking)}`);
+  return id;
+}
+
 function describe(b: Pick<Booking, 'kind' | 'carrier' | 'number' | 'from' | 'to'>) {
   if (b.kind === 'hotel') return `hotel stay at ${b.to.name}`;
   const code = [b.carrier, b.number].filter(Boolean).join(' ');
@@ -281,20 +305,7 @@ export const bookingRoutes: RouteTable = {
         throw new HttpError(403, 'Invalid file reference');
       }
 
-      const now = Date.now();
-      const id = adminDb().collection(paths.bookings(tripId)).doc().id;
-      const booking: Booking = {
-        ...body.draft,
-        ...(await withTimezones(body.draft)),
-        id,
-        source: body.source,
-        ...(body.fileRef ? { fileRef: body.fileRef } : {}),
-        ...(body.parseConfidence !== undefined ? { parseConfidence: body.parseConfidence } : {}),
-        createdBy: member.uid,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await saveBooking(tripId, booking, member.uid, `${member.displayName} added a ${describe(booking)}`);
+      const id = await addBooking(tripId, body.draft, member, body);
       return json({ id }, { status: 201 });
     },
     { perMinute: 30 },
