@@ -629,7 +629,15 @@ export function TimelinePage() {
                     return (
                       <div key={r.item.id}>
                         {r.prayer ? (
-                          <PrayerRow row={r} people={people} me={me.uid} selected={selected === r.item.id} onSelect={() => select(r.item.id)} />
+                          <PrayerRow
+                            row={r}
+                            people={people}
+                            me={me.uid}
+                            selected={selected === r.item.id}
+                            onSelect={() => select(r.item.id)}
+                            before={rows.slice(0, i).reverse().find((x) => !x.prayer)?.title}
+                            after={rows.slice(i + 1).find((x) => !x.prayer)?.title}
+                          />
                         ) : (
                           <>
                             {prev && (sameJourney(prev.item, r.item) ? <OnBoardRow booking={r.item.ref.kind === 'booking' ? bookingMap.get(r.item.ref.bookingId) : undefined} /> : <TravelRow leg={r.item.transitFromPrev} a={prev.out} b={r.in} />)}
@@ -1036,24 +1044,29 @@ function SplitGroups({ a, sides, people, me }: { a: Row; sides: Row[]; people: M
   );
 }
 
-function PrayerRow({ row, people, me, selected, onSelect }: { row: Row; people: Map<string, Member>; me: string; selected: boolean; onSelect: () => void }) {
+/**
+ * A prayer break: its time is fixed like a booking (🔒, can't be dragged);
+ * where to pray follows the plan — the place on the way from the stop before
+ * to the stop after.
+ */
+function PrayerRow({ row, people, me, selected, onSelect, before, after }: { row: Row; people: Map<string, Member>; me: string; selected: boolean; onSelect: () => void; before?: string; after?: string }) {
   const p = row.item.prayer!;
   const f = p.facility;
   const mine = row.item.memberUids.includes(me);
   const who = row.item.memberUids.map((u) => people.get(u)?.displayName ?? '?').join(', ');
+  const route = before && after && before !== after ? `on the way from ${before} to ${after}` : before ? `near ${before}` : after ? `before ${after}` : '';
   return (
-    <button type="button" onClick={onSelect} aria-pressed={selected} className={cx('w-full text-left flex items-stretch rounded-2xl border border-[#CFE7E2] bg-[#EEF7F5] my-1', selected && 'ring-2 ring-[#0F766E]/50')}>
-      <div className="w-[4.75rem] shrink-0 py-2.5 pl-3 text-xs font-bold text-[#00685F] tabular-nums">
+    <Card className={cx('flex items-stretch bg-[#EEF7F5] border-[#CFE7E2] my-1', selected && 'ring-2 ring-[#0F766E]/50')}>
+      <div className="w-[4.75rem] shrink-0 py-3 pl-3 text-xs font-bold text-[#00685F] tabular-nums">
         <p>{fmtClock(toMin(row.item.start))}</p>
         <p className="font-semibold opacity-70">{fmtClock(toMin(row.item.end))}</p>
+        <p className="mt-0.5 text-[10px] leading-tight font-semibold opacity-70">Fixed time</p>
       </div>
-      <div className="flex-1 min-w-0 py-2.5 pr-3">
-        <p className="font-semibold text-[#00685F] truncate flex items-center gap-1">
-          <span className="truncate">🕌 {mine ? `${p.prayer} prayer` : `Free time — ${p.prayer} prayer break`}</span>
-          <Lock className="w-3 h-3 shrink-0 opacity-60" aria-label="Fixed time" />
-        </p>
-        <p className="text-xs text-[#3F6B64] truncate">
+      <button type="button" onClick={onSelect} aria-pressed={selected} className="flex-1 min-w-0 py-3 pr-2 text-left">
+        <p className="font-semibold text-[#00685F] truncate">🕌 {mine ? `${p.prayer} prayer` : `Free time — ${p.prayer} prayer break`}</p>
+        <p className="text-xs text-[#3F6B64]">
           {f ? `${f.name} · ${f.walkMin ? `${f.walkMin} min walk` : 'on site'}` : 'No mosque found nearby — any clean, quiet spot works'}
+          {f && route && <span className="text-[#6D7A77]"> · {route}</span>}
           {!mine && ` · ${who}`}
         </p>
         {p.fillerPlace && (
@@ -1062,8 +1075,11 @@ function PrayerRow({ row, people, me, selected, onSelect }: { row: Row; people: 
           </p>
         )}
         {!p.fillerPlace && !mine && <p className="text-xs text-[#6D7A77] truncate">Free time nearby — or rest and meet back after.</p>}
-      </div>
-    </button>
+      </button>
+      <span className="w-11 shrink-0 flex items-center justify-center text-[#0F766E]/70" title="Prayer time — fixed like a booking; the place follows your plan">
+        <Lock className="w-4 h-4" />
+      </span>
+    </Card>
   );
 }
 

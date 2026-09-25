@@ -658,3 +658,16 @@ const fmtHm = (min: number) => {
   const h = Math.floor(min / 60) % 24;
   return `${h % 12 || 12}:${String(min % 60).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 };
+
+// ─── Where to pray: the place on the way ────────────────────────────────────
+
+/**
+ * The prayer place that adds the least detour between the stop before the
+ * prayer (`from`) and the stop after it (`to`): shortest from → place → to,
+ * straight line. With only one side known, the nearest to it. Ties → nearer `from`.
+ */
+export function prayerPlaceOnRoute<P extends { location: GeoPoint }>(candidates: P[], from?: GeoPoint, to?: GeoPoint): P | undefined {
+  if (!candidates.length) return undefined;
+  const d = (a: GeoPoint | undefined, b: GeoPoint) => (a ? metersBetween(a, b) : 0);
+  return [...candidates].sort((a, b) => d(from, a.location) + d(to, a.location) - (d(from, b.location) + d(to, b.location)) || d(from, a.location) - d(from, b.location))[0];
+}

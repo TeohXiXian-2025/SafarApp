@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arrangeTrip, dayFrames, daySuggestions, orderByDistance, prayerBreaks, timeSequence, type DayFrame, type Unit } from './arrange';
+import { arrangeTrip, dayFrames, daySuggestions, orderByDistance, prayerBreaks, prayerPlaceOnRoute, timeSequence, type DayFrame, type Unit } from './arrange';
 import type { DayPrayers } from './prayer';
 import { dayWarnings, estimateTravelMin } from './timeline';
 
@@ -280,5 +280,17 @@ describe('daySuggestions', () => {
       { id: 'c', start: h('12:00'), end: h('13:00'), loc: near(0.03), name: 'C' },
     ];
     expect(daySuggestions({ base: HOTEL, baseKnown: true }, stops)).toEqual([]);
+  });
+});
+
+describe('prayerPlaceOnRoute', () => {
+  it('picks the mosque on the way to the next stop, not just the nearest to the last one', () => {
+    const from = near(0);
+    const to = near(0.03);
+    const behind = { name: 'behind', location: near(-0.004) }; // closest to `from`, wrong way
+    const onWay = { name: 'onWay', location: near(0.012) };
+    expect(prayerPlaceOnRoute([behind, onWay], from, to)?.name).toBe('onWay');
+    expect(prayerPlaceOnRoute([behind, onWay], from)?.name).toBe('behind');
+    expect(prayerPlaceOnRoute([], from, to)).toBeUndefined();
   });
 });

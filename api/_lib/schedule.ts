@@ -18,6 +18,7 @@ import {
   PRAYER_LABEL,
   planDay,
   journeySpans,
+  prayerPlaceOnRoute,
   prayerBreaks,
   rebaseFrame,
   ScheduleItem,
@@ -245,23 +246,45 @@ export function journeysOf(data: TripData, items: ScheduleItem[]) {
 const facilityType = (name: string): NonNullable<PrayerPairing['facility']>['type'] =>
   /musall?a|surau/i.test(name) ? 'musalla' : /prayer room|prayer space/i.test(name) ? 'prayer_room' : 'mosque';
 
-/** Where to pray for one break: the anchor stop's known nearest prayer space, else a quick lookup. */
-async function facilityFor(data: TripData, slot: PrayerSlot, items: ScheduleItem[], previous: ScheduleItem[], lookups: { n: number }) {
-  const anchor = items.find((i) => i.id === slot.afterId);
-  const idea = anchor?.ref.kind === 'idea' ? data.ideas.get(anchor.ref.ideaId) : undefined;
-  if (idea?.halal?.prayer) {
-    if (idea.halal.prayer.access === 'onsite') return { name: `${idea.place.name} (prayer space on site)`, location: idea.place.location, ...(idea.place.placeId ? { placeId: idea.place.placeId } : {}), type: 'prayer_room' as const, walkMin: 0 };
-    const p = idea.halal.prayer.places[0];
-    if (p) return { name: p.name, location: p.location, ...(p.placeId ? { placeId: p.placeId } : {}), type: facilityType(p.name), walkMin: p.walkMin };
+type Facility = NonNullable<PrayerPairing['facility']>;
+
+/**
+ * Where to pray for one break. The time is fixed; the place follows the plan:
+ * the prayer space that adds the least detour between the stop before the
+ * prayer and the stop after it (inside a long visit: at / next to that place).
+ * Candidates are the prayer spaces the Halal Radar already found around both
+ * stops and places earlier breaks used; only with none, one lookup on the way.
+ */
+async function facilityFor(data: TripData, slot: PrayerSlot, stops: ScheduleItem[], ends: Map<string, Ends>, previous: ScheduleItem[], lookups: { n: number }): Promise<Facility | undefined> {
+  const before = stops.find((i) => i.id === slot.afterId);
+  const inside = !!before && toMin(before.start) <= slot.start && toMin(before.end) > slot.start;
+  const after = inside ? before : stops.find((i) => toMin(i.start) >= slot.end && i.id !== before?.id);
+  const from = (before && ends.get(before.id)?.out) ?? slot.at;
+  const to = after ? ends.get(after.id)?.in : undefined;
+
+  const cands: Facility[] = [];
+  const add = (f: Omit<Facility, 'walkMin'>) => {
+    if (!cands.some((c) => c.name === f.name && metersBetween(c.location, f.location) < 50)) cands.push({ ...f, walkMin: 0 });
+  };
+  for (const it of [before, after]) {
+    const idea = it?.ref.kind === 'idea' ? data.ideas.get(it.ref.ideaId) : undefined;
+    const pr = idea?.halal?.prayer;
+    if (!idea || !pr) continue;
+    if (pr.access === 'onsite') add({ name: `${idea.place.name} (prayer space on site)`, location: idea.place.location, ...(idea.place.placeId ? { placeId: idea.place.placeId } : {}), type: 'prayer_room' });
+    for (const p of pr.places.slice(0, 3)) add({ name: p.name, location: p.location, ...(p.placeId ? { placeId: p.placeId } : {}), type: facilityType(p.name) });
   }
-  // Reuse what an earlier break near the same spot found.
-  const near = previous.find((i) => i.prayer?.facility && Math.abs(i.prayer.facility.location.lat - slot.at.lat) + Math.abs(i.prayer.facility.location.lng - slot.at.lng) < 0.01);
-  if (near?.prayer?.facility) return near.prayer.facility;
-  if (lookups.n++ >= MAX_MOSQUE_LOOKUPS) return undefined;
-  const found = (await searchNearby(slot.at, ['mosque'], 2000, 1).catch(() => null))?.[0];
-  if (!found) return undefined;
-  const meters = Math.hypot((found.location.lat - slot.at.lat) * 111_000, (found.location.lng - slot.at.lng) * 111_000 * Math.cos((slot.at.lat * Math.PI) / 180));
-  return { name: found.name, location: found.location, placeId: found.placeId, type: facilityType(found.name), walkMin: Math.round((meters * 1.3) / 80) };
+  // Places earlier breaks used, if they're around this part of the route.
+  for (const i of previous) {
+    const f = i.prayer?.facility;
+    if (f && [from, to].some((p) => p && metersBetween(p, f.location) < 2000)) add(f);
+  }
+  if (!cands.length && lookups.n++ < MAX_MOSQUE_LOOKUPS) {
+    const mid = to ? { lat: (from.lat + to.lat) / 2, lng: (from.lng + to.lng) / 2 } : from;
+    for (const p of (await searchNearby(mid, ['mosque'], 2000, 3).catch(() => null)) ?? []) add({ name: p.name, location: p.location, placeId: p.placeId, type: facilityType(p.name) });
+  }
+  const best = prayerPlaceOnRoute(cands, from, to);
+  if (!best) return undefined;
+  return { ...best, walkMin: Math.round((metersBetween(from, best.location) * 1.3) / 80) };
 }
 
 /** How far (straight line) a filler for the people not praying may be from the prayer place. */
@@ -313,7 +336,7 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
   // Ideas already on this day (their status may not be updated in `data` yet).
   const onDay = new Set(all.flatMap((i) => (i.ref.kind === 'idea' ? [i.ref.ideaId] : [])));
   for (const slot of prayers) {
-    const facility = await facilityFor(data, slot, stops, previous, lookups);
+    const facility = await facilityFor(data, slot, stops, ends, previous, lookups);
     const filler = fillerFor(data, facility?.location ?? slot.at, used, onDay);
     if (filler) used.add(filler.id);
     const id = prayerItemId(day, slot.key);
