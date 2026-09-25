@@ -51,14 +51,14 @@ export function ArrangeSheet({
 
   return (
     <Sheet open onClose={onClose} title="AI Arrange — preview" wide>
-      <div className="space-y-4">
+      <div className="space-y-4 min-w-0">
         <p className="text-sm text-[#6D7A77]">
-          Stops are grouped by area, ordered to cut travel, fitted to opening hours and meal times, and kept clear of prayer times. Bookings stay where they
-          are. Nothing changes until you apply — and you can undo it.
+          Stops are grouped by area, ordered to cut travel (with a 10-min buffer), fitted to opening hours and meal times, and planned around the fixed prayer
+          times. Bookings stay where they are. Nothing changes until you apply — and you can undo it.
         </p>
         {job.plan.days.map((d) => (
           <section key={d.day} className="rounded-2xl border border-[#E7DFD5] bg-white p-3 space-y-2">
-            <div className="flex items-baseline justify-between gap-2">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-2">
               <h3 className="font-bold text-[#161C23]">
                 Day {days.indexOf(d.day) + 1} · {formatDay(d.day)}
               </h3>
@@ -76,12 +76,15 @@ export function ArrangeSheet({
               ]
                 .sort((a, b) => a.start.localeCompare(b.start))
                 .map((row) => (
-                  <li key={row.key} className="flex items-center gap-2">
-                    <span className="w-[8.5rem] shrink-0 text-xs font-semibold tabular-nums text-[#161C23]">
-                      {t(row.start)}–{t(row.end)}
+                  <li key={row.key} className="flex items-start gap-2 min-w-0">
+                    <span className="w-[4.5rem] shrink-0 text-[11px] leading-tight font-semibold tabular-nums text-[#161C23]">
+                      {t(row.start)}
+                      <span className="block font-normal text-[#6D7A77]">{t(row.end)}</span>
                     </span>
-                    <span className={row.prayer ? 'text-[#00685F] truncate' : 'text-[#161C23] truncate'}>{row.prayer ? `🕌 ${row.name}` : row.name}</span>
-                    {row.change && <Badge tone={row.change.tone}>{row.change.label}</Badge>}
+                    <span className="flex-1 min-w-0 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                      <span className={row.prayer ? 'text-[#00685F] break-words min-w-0' : 'text-[#161C23] break-words min-w-0'}>{row.prayer ? `🕌 ${row.name} 🔒` : row.name}</span>
+                      {row.change && <Badge tone={row.change.tone}>{row.change.label}</Badge>}
+                    </span>
                   </li>
                 ))}
             </ul>
@@ -101,7 +104,7 @@ export function ArrangeSheet({
           <p className="text-xs text-[#8A5A00]">{dropped.length} stop(s) currently on the timeline would move back to the backlog.</p>
         )}
         {error && <ErrorBanner>{error}</ErrorBanner>}
-        <div className="flex gap-2">
+        <div className="sticky bottom-0 -mx-5 px-5 pt-3 pb-1 bg-[#FAF8F5] border-t border-[#E7DFD5] flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose} disabled={busy}>
             Cancel
           </Button>

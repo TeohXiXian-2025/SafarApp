@@ -11,3 +11,4 @@ coverage/
 # Private working docs (kept locally, not on GitHub)
 docs/BUILD_PLAN.md
 docs/SYSTEM_AND_TEST_GUIDE.md
+docs/FIX_PLAN.md

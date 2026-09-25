@@ -1,6 +1,6 @@
 // The selected day on a map: numbered stops joined in visiting order, split
 // groups in their own colours with dashed lines out from (and back to) the
-// meeting point, a flag with the meeting time, and prayer places. Tapping a
+// meeting point, a flag with the meeting time, and prayer places on the route. Tapping a
 // stop on the timeline focuses it here.
 import { AdvancedMarker, APIProvider, Map, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { useEffect } from 'react';
@@ -33,7 +33,8 @@ export function DayMap({ stops, links = [], selectedId, onSelect }: { stops: Map
   if (!stops.length) {
     return <div className="h-full min-h-48 flex items-center justify-center text-sm text-[#6D7A77] p-4 text-center">Stops you add to this day show up here.</div>;
   }
-  const route = stops.filter((s) => s.kind === 'stop' || s.kind === 'booking');
+  // The group's path through the day, prayer places included (their place follows the stops around them).
+  const route = stops.filter((s) => s.kind === 'stop' || s.kind === 'booking' || s.kind === 'prayer');
   return (
     <APIProvider apiKey={MAPS_KEY}>
       <Map mapId={MAP_ID} defaultCenter={stops[0].location} defaultZoom={13} gestureHandling="cooperative" disableDefaultUI zoomControl className="w-full h-full min-h-64">

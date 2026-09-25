@@ -1,4 +1,4 @@
-import { CalendarDays, LayoutDashboard, Lightbulb, Settings, Ticket, Users, UtensilsCrossed, Wallet } from 'lucide-react';
+import { CalendarDays, ChevronLeft, LayoutDashboard, Lightbulb, Settings, Ticket, Users, UtensilsCrossed, Wallet } from 'lucide-react';
 import { useMemo } from 'react';
 import { Link, NavLink, Outlet, useOutletContext, useParams } from 'react-router';
 import { useAuth } from '../auth/auth';
@@ -72,9 +72,17 @@ export function TripLayout() {
     <div className="min-h-dvh bg-[#FAF8F5]">
       <AppHeader>
         {ctx && (
-          <div className="min-w-0">
-            <p className="font-bold text-[#161C23] truncate leading-tight">{ctx.trip.name}</p>
-            <p className="text-xs text-[#6D7A77] truncate">{formatDateRange(ctx.trip.startDate, ctx.trip.endDate)}</p>
+          <div className="flex items-center gap-2 min-w-0">
+            <Link
+              to="/trips"
+              className="shrink-0 flex items-center gap-0.5 pl-1 pr-2 py-1.5 rounded-lg text-xs font-semibold text-[#00685F] bg-[#F3EFE9] hover:bg-[#E7DFD5]"
+            >
+              <ChevronLeft className="w-4 h-4" /> <span>All trips</span>
+            </Link>
+            <div className="min-w-0">
+              <p className="font-bold text-[#161C23] truncate leading-tight">{ctx.trip.name}</p>
+              <p className="text-xs text-[#6D7A77] truncate">{formatDateRange(ctx.trip.startDate, ctx.trip.endDate)}</p>
+            </div>
           </div>
         )}
       </AppHeader>

@@ -6,15 +6,19 @@ import {
   Booking,
   byTime,
   dayFrames,
+  dayWarnings,
   estimateTravelMin,
   Idea,
+  metersBetween,
   ideaItemId,
   Member,
   mergePrefs,
   paths,
   PRAYER_LABEL,
   planDay,
-  prayersInGaps,
+  journeySpans,
+  prayerBreaks,
+  rebaseFrame,
   ScheduleItem,
   Split,
   toClock,
@@ -88,6 +92,11 @@ export function framesFor(data: TripData, days: string[]): DayFrame[] {
     pace: mergePrefs(data.members).pace ?? 'moderate',
     praying: prayingUids(data.members).length > 0,
   });
+}
+
+/** One day's frame; a day with no hotel prays on the local time where its stops are. */
+export function frameAt(data: TripData, day: string, near?: GeoPoint): DayFrame {
+  return rebaseFrame(framesFor(data, [day])[0], near, data.trip.destinations);
 }
 
 /** An approved split this idea belongs to, if any. */
@@ -221,6 +230,17 @@ export function itemEnds(data: TripData, items: ScheduleItem[]): Map<string, End
 
 // ─── Prayer breaks ──────────────────────────────────────────────────────────
 
+/** A day's airport / on-board time, from its booking moments. */
+export function journeysOf(data: TripData, items: ScheduleItem[]) {
+  return journeySpans(
+    items.flatMap((i) => {
+      if (i.ref.kind !== 'booking' || i.ref.event === 'checkin' || i.ref.event === 'checkout') return [];
+      const b = data.bookings.get(i.ref.bookingId);
+      return b ? [{ start: toMin(i.start), end: toMin(i.end), event: i.ref.event, bookingId: b.id, flight: b.kind === 'flight' }] : [];
+    }),
+  );
+}
+
 const facilityType = (name: string): NonNullable<PrayerPairing['facility']>['type'] =>
   /musall?a|surau/i.test(name) ? 'musalla' : /prayer room|prayer space/i.test(name) ? 'prayer_room' : 'mosque';
 
@@ -243,32 +263,56 @@ async function facilityFor(data: TripData, slot: PrayerSlot, items: ScheduleItem
   return { name: found.name, location: found.location, placeId: found.placeId, type: facilityType(found.name), walkMin: Math.round((meters * 1.3) / 80) };
 }
 
+/** How far (straight line) a filler for the people not praying may be from the prayer place. */
+const FILLER_M = 700;
+
 /**
- * Re-places a day's prayer breaks in the free gaps (stops are never moved)
- * and removes breaks that no longer apply. Only when someone asked for them.
+ * Something for the members who don't pray to do during a prayer break: a
+ * backlog or backup idea near where the others pray that none of them voted
+ * against (liked ones first, then nearest). Not already on the timeline.
+ */
+function fillerFor(data: TripData, near: GeoPoint, used: Set<string>): Idea | undefined {
+  const others = data.members.filter((m) => !m.prefs?.prayerReminders).map((m) => m.uid);
+  if (!others.length) return undefined;
+  return [...data.ideas.values()]
+    .filter((i) => (i.status === 'backlog' || i.status === 'backup') && !used.has(i.id) && !isAltOfSplit(data, i))
+    .filter((i) => metersBetween(i.place.location, near) <= FILLER_M)
+    .filter((i) => !others.some((u) => i.votes[u]?.value === -1))
+    .map((i) => ({ i, likes: others.filter((u) => i.votes[u]?.value === 1).length, d: metersBetween(i.place.location, near) }))
+    .sort((a, b) => b.likes - a.likes || a.d - b.d)[0]?.i;
+}
+
+/**
+ * Puts a day's prayer breaks at their locked prayer times (stops are never
+ * moved; the timeline flags a stop planned over one) and removes breaks that
+ * no longer apply. Only when someone asked for them.
  */
 export async function refreshPrayers(tripId: string, day: string, data: TripData) {
   const all = await dayItems(tripId, day);
   const previous = all.filter(isPrayerItem);
-  const stops = all.filter((i) => !isPrayerItem(i) && !isTrackB(i));
-  const frame = framesFor(data, [day])[0];
+  const stops = all.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTime);
   const ends = itemEnds(data, stops);
+  const frame = frameAt(data, day, stops.filter((i) => !i.locked).map((i) => ends.get(i.id)?.in).find(Boolean));
   const walkOf = (i: ScheduleItem) => {
     const idea = i.ref.kind === 'idea' ? data.ideas.get(i.ref.ideaId) : undefined;
     return idea ? prayerWalk(idea) : undefined;
   };
-  const { prayers } = prayersInGaps(
+  const { prayers } = prayerBreaks(
     frame.prayers,
     stops.map((i) => ({ id: i.id, start: toMin(i.start), end: Math.max(toMin(i.end), toMin(i.start)), loc: ends.get(i.id)?.out, prayerWalkMin: walkOf(i) })),
     frame.base,
+    journeysOf(data, stops),
   );
   const batch = adminDb().batch();
   const keep = new Set(prayers.map((p) => prayerItemId(day, p.key)));
   previous.filter((p) => !keep.has(p.id)).forEach((p) => batch.delete(itemRef(tripId, p.id)));
   const lookups = { n: 0 };
   const praying = prayingUids(data.members);
+  const used = new Set<string>();
   for (const slot of prayers) {
     const facility = await facilityFor(data, slot, stops, previous, lookups);
+    const filler = fillerFor(data, facility?.location ?? slot.at, used);
+    if (filler) used.add(filler.id);
     const id = prayerItemId(day, slot.key);
     batch.set(
       itemRef(tripId, id),
@@ -280,7 +324,12 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
         ref: { kind: 'custom', title: `${PRAYER_LABEL[slot.key]} prayer`, ...(facility ? { place: { name: facility.name, location: facility.location, ...(facility.placeId ? { placeId: facility.placeId } : {}) } } : {}) },
         track: 'all',
         memberUids: praying,
-        prayer: { prayer: PRAYER_LABEL[slot.key], at: toClock(slot.start), ...(facility ? { facility } : {}) },
+        prayer: {
+          prayer: PRAYER_LABEL[slot.key],
+          at: toClock(slot.start),
+          ...(facility ? { facility } : {}),
+          ...(filler ? { fillerIdeaId: filler.id, fillerPlace: { name: filler.place.name, location: filler.place.location, ...(filler.place.placeId ? { placeId: filler.place.placeId } : {}) } } : {}),
+        },
         locked: false,
         orderIndex: 0,
         updatedBy: 'system',
@@ -339,6 +388,32 @@ export async function refreshDay(tripId: string, day: string, data?: TripData) {
   await refreshLegs(tripId, day, d);
 }
 
+// ─── Checking a day ─────────────────────────────────────────────────────────
+
+/** The same 🔴 / 🟡 problems the timeline shows for a day. */
+export function dayProblems(data: TripData, day: string, items: ScheduleItem[]) {
+  const chain = items.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTime);
+  const ends = itemEnds(data, chain);
+  const ideaOf = (i: ScheduleItem) => (i.ref.kind === 'idea' ? data.ideas.get(i.ref.ideaId) : undefined);
+  return dayWarnings(
+    day,
+    items.map((it) => {
+      if (isPrayerItem(it)) return { ...it, kind: 'prayer' as const, label: it.prayer?.prayer ? `${it.prayer.prayer} prayer` : undefined };
+      if (isTrackB(it)) return { ...it, kind: 'side' as const };
+      const k = chain.indexOf(it);
+      const prev = k > 0 ? chain[k - 1] : undefined;
+      const a = prev && ends.get(prev.id)?.out;
+      const b = ends.get(it.id)?.in;
+      const known = it.transitFromPrev?.fromId === prev?.id ? it.transitFromPrev?.minutes : undefined;
+      return { ...it, transitMin: known ?? (a && b ? estimateTravelMin(a, b) : undefined) };
+    }),
+    (id) => {
+      const it = items.find((i) => i.id === id);
+      return it ? ideaOf(it)?.place.openingHours : undefined;
+    },
+  );
+}
+
 // ─── "Fix this day" (also used by Emergency Resync) ──────────────────────────
 
 export interface FixPlan {
@@ -361,7 +436,7 @@ export function planFixDay(data: TripData, day: string, items: ScheduleItem[]): 
     return [{ ...unitFor(idea, approvedSplit(data, idea)), id: it.id, loc: ends.get(it.id)?.in ?? idea.place.location }];
   });
   const locked = items.filter((i) => i.locked && toMin(i.end) > toMin(i.start));
-  const frame = { ...framesFor(data, [day])[0], blocks: locked.map((l) => ({ start: toMin(l.start), end: toMin(l.end) })) };
+  const frame = { ...frameAt(data, day, units[0]?.loc), blocks: locked.map((l) => ({ start: toMin(l.start), end: toMin(l.end) })) };
   // Real travel times where the Routes API already measured them (+20% on estimates elsewhere).
   const known = new Map(items.flatMap((i) => (i.transitFromPrev?.fromId ? [[`${i.transitFromPrev.fromId}>${i.id}`, i.transitFromPrev.minutes] as const] : [])));
   const locIndex = new Map(units.map((u) => [`${u.loc.lat},${u.loc.lng}`, u.id]));

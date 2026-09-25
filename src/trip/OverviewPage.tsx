@@ -9,6 +9,7 @@ import { Avatar, Badge, Button, Card } from '../ui';
 import { useTrip } from './TripLayout';
 import { NeedsYouStrip, useNeeds } from './ideas/NeedsYou';
 import { NotificationsCard } from '../components/live/NotificationsCard';
+import { TransportGaps } from './bookings/BookingsPage';
 
 export function OverviewPage() {
   const ctx = useTrip();
@@ -30,6 +31,11 @@ export function OverviewPage() {
         <NotificationsCard compact />
         {!me.prefs && (
           <Nudge to="preferences" icon={<SlidersHorizontal className="w-5 h-5" />} title="Set your travel preferences" text="Budget, halal needs, prayer breaks and pace — the plan balances everyone's." />
+        )}
+        {!bookings.loading && (
+          <Link to="bookings" className="block">
+            <TransportGaps bookings={bookings.data} compact />
+          </Link>
         )}
         {!bookings.loading && !bookings.data.some((b) => b.travellerUids.includes(me.uid)) && (
           <Nudge to="bookings" icon={<Ticket className="w-5 h-5" />} title="Add your flight or train" text="Upload your e-ticket and AI puts it on the group timeline." />

@@ -22,6 +22,7 @@ export const STATUS_TEXT: Record<string, string> = {
   backlog: 'everyone approved it — added to the backlog',
   rejected: 'everyone passed on it',
   mixed: 'votes are split — the people not going can pick a middle ground',
+  backup: 'most of the group passed — kept as a backup (the admin can reopen it)',
 };
 
 async function fresh(tripId: string, ideaId: string): Promise<Idea> {

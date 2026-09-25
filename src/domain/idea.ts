@@ -233,6 +233,8 @@ export const MiddleOption = z.object({
     .optional(),
   /** timing: when the whole group would go instead ("HH:MM"). */
   window: z.object({ start: z.string().max(5), end: z.string().max(5) }).optional(),
+  /** Suggested by someone not going (not found by Safar) — others not going can pick it too. */
+  proposedBy: z.string().max(128).optional(),
 });
 export type MiddleOption = z.infer<typeof MiddleOption>;
 
@@ -250,9 +252,14 @@ export const IdeaComment = z.object({
   id: Id,
   uid: Id,
   text: z.string().min(1).max(500),
+  /** Members tagged with @ — they're notified. */
+  mentions: z.array(Id).max(20).default([]),
   at: Millis,
 });
 export type IdeaComment = z.infer<typeof IdeaComment>;
+/** Comments on ideas and on hotels share one shape. */
+export const Comment = IdeaComment;
+export type Comment = IdeaComment;
 
 export const IdeaPlace = PlaceRef.extend({
   category: IdeaCategory,

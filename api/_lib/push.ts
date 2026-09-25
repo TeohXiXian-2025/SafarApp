@@ -10,6 +10,18 @@ import { adminDb } from './firebaseAdmin.js';
 
 export const subsPath = (uid: string) => `users/${uid}/pushSubs`;
 export const prefsPath = (uid: string) => `users/${uid}/private/notify`;
+/** In-app alerts (the 🔔 in the header) — kept for every notification, even with push off. */
+export const inboxPath = (uid: string) => `users/${uid}/inbox`;
+export const inboxStatePath = (uid: string) => `users/${uid}/private/inbox`;
+
+/** Saves the alert to each person's in-app inbox (laptops, or push turned off). */
+async function toInbox(uids: string[], note: Note) {
+  const db = adminDb();
+  const batch = db.batch();
+  const at = Date.now();
+  for (const uid of uids) batch.set(db.collection(inboxPath(uid)).doc(), { title: note.title, body: note.body, url: note.url, kind: note.kind, at });
+  if (uids.length) await batch.commit().catch((e) => console.warn('[inbox] write failed', e));
+}
 
 let configured: boolean | undefined;
 function ready(): boolean {
@@ -66,12 +78,13 @@ export async function notify(
   note: Note,
   opts: { timeZone: string; except?: string; throttleKey?: string; throttle?: number; /** Ignore choices, quiet hours and throttling (test alerts). */ force?: boolean },
 ): Promise<number> {
-  if (!ready() || !uids.length) return 0;
+  const targets = [...new Set(uids)].filter((u) => u !== opts.except);
+  if (!opts.force) await toInbox(targets, note);
+  if (!ready() || !targets.length) return 0;
   const db = adminDb();
   let sent = 0;
   await Promise.allSettled(
-    [...new Set(uids)]
-      .filter((u) => u !== opts.except)
+    targets
       .map(async (uid) => {
         if (!opts.force) {
           const prefs = await loadPrefs(uid);

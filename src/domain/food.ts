@@ -25,7 +25,7 @@ export function foodVerdict(opts: {
   listed?: 'google' | 'osm' | 'name' | null;
 }): FoodVerdict {
   const { community: c, analysis: a, listed } = opts;
-  const reports = c ? `${c.reportCount} traveller report${c.reportCount === 1 ? '' : 's'}` : '';
+  const reports = c ? `${c.reportCount} traveller report${c.reportCount === 1 ? '' : 's'} (all Safar trips)` : '';
   if (c?.tier === 'certified') return { bucket: 'certified', text: c.certificate ? `Certified · ${c.certificate.certifier}` : 'Certified halal', basis: c.certificate ? `Certificate photo + ${reports}` : reports };
   if (c?.tier === 'muslim_owned') return { bucket: 'halal', text: 'Muslim-owned / fully halal', basis: reports };
   if (c?.tier === 'not_halal') return { bucket: 'not_halal', text: 'Not halal', basis: reports };

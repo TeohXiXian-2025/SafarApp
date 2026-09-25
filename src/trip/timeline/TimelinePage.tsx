@@ -22,23 +22,33 @@ import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from '@dnd-kit/utilities';
 import { AlertTriangle, Car, Footprints, GitFork, GripVertical, Lock, Map as MapIcon, MapPin, Pencil, Plus, Sparkles, TrainFront, Undo2 } from 'lucide-react';
 import { collection, limit, orderBy, query } from 'firebase/firestore';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import {
   ArrangeJob,
   Booking,
   byTime,
   dayFrames,
+  daySuggestions,
+  daySummary,
+  isOutdoor,
+  weatherRisk,
+  type WeatherRisk,
+  leaveBeforeMin,
   mergePrefs,
   nearestDestination,
   PRAYER_LABEL,
-  prayersInGaps,
+  prayerBreaks,
+  journeySpans,
+  rebaseFrame,
   Split,
   type Member,
   dayWarnings,
   findSlot,
   toClock,
+  openingRanges,
   estimateTravelMin,
+  metersBetween,
   fmtClock,
   Idea,
   paths,
@@ -47,6 +57,8 @@ import {
   toMin,
   tripDays,
   type DayWarning,
+  type JourneyPrayer,
+  journeyPrayers,
   type GeoPoint,
   type TransitLeg,
 } from '../../domain';
@@ -62,6 +74,8 @@ import { DayMap, type MapLink, type MapStop } from './DayMap';
 import { ArrangeSheet } from './ArrangeSheet';
 import { AddStopSheet, CANDIDATE, EditStopSheet, type Checker } from './StopSheets';
 import { FixDaySheet } from './FixDaySheet';
+import { useForecast } from './useForecast';
+import { JourneyPrayerList } from '../JourneyPrayerList';
 
 interface Row {
   item: ScheduleItem;
@@ -74,6 +88,10 @@ interface Row {
   out?: GeoPoint;
   /** An automatic prayer break. */
   prayer?: boolean;
+  /** Timezone the row's clock times are in (bookings: the station / airport's own). */
+  zone?: string;
+  /** Where to pray around this journey (departure rows, when someone prays). */
+  journey?: JourneyPrayer[];
   /** The other groups of a split (B, C, free time), running alongside this main-group row. */
   sides?: Row[];
 }
@@ -97,7 +115,10 @@ function warningsFor(day: string, rows: Row[]): DayWarning[] {
   };
   return dayWarnings(
     day,
-    all.map((r) => ({ ...r.item, ...(r.prayer ? { kind: 'prayer' as const } : isSide(r.item.track) ? { kind: 'side' as const } : { transitMin: travel(r) }) })),
+    all.map((r) => ({
+      ...r.item,
+      ...(r.prayer ? { kind: 'prayer' as const, label: r.item.prayer ? `${r.item.prayer.prayer} prayer` : undefined } : isSide(r.item.track) ? { kind: 'side' as const } : { transitMin: travel(r) }),
+    })),
     (id) => all.find((r) => r.item.id === id)?.idea?.place.openingHours,
   );
 }
@@ -124,7 +145,8 @@ function makeChecker(rowsByDay: Map<string, Row[]>, idea: Idea | undefined, movi
     suggest: (d, duration) =>
       findSlot({
         day: d,
-        items: others(d).filter((r) => !r.prayer).map((r) => ({ start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), loc: r.out ?? r.in })),
+        // Prayer breaks count as taken: prayer times are locked like bookings.
+        items: others(d).map((r) => ({ start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), ...(r.prayer ? {} : { loc: r.out ?? r.in }) })),
         duration,
         hours: idea.place.openingHours,
         loc: idea.place.location,
@@ -136,6 +158,26 @@ function makeChecker(rowsByDay: Map<string, Row[]>, idea: Idea | undefined, movi
 const prayerWalkOf = (idea?: Idea) => (idea?.halal?.prayer ? (idea.halal.prayer.access === 'onsite' ? 0 : idea.halal.prayer.places[0]?.walkMin) : undefined);
 
 const EVENT_LABEL = { span: '', depart: 'Departs', arrive: 'Arrives', checkin: 'Check-in', checkout: 'Check-out' } as const;
+const KIND_PIN = { flight: '✈', train: '🚆', bus: '🚌', ferry: '⛴', hotel: '🛏' } as const;
+/** An airport / station counts as part of the trip within this distance of a destination. */
+const IN_TRIP_M = 100_000;
+
+/**
+ * Where a booking shows on the day's map: only its end inside the trip — not
+ * the home airport. Going there → where you land; going home → where you leave
+ * from; between trip cities → both. Hotels → the hotel.
+ */
+function tripEnd(b: Booking | undefined, event: 'span' | 'depart' | 'arrive' | 'checkin' | 'checkout', destinations: { location: GeoPoint }[]): GeoPoint | null {
+  if (!b) return null;
+  if (b.kind === 'hotel' || !b.from) return b.to.location;
+  const gap = (p: GeoPoint) => Math.min(...destinations.map((d) => metersBetween(d.location, p)));
+  const [from, to] = [gap(b.from.location), gap(b.to.location)];
+  const fromIn = from <= IN_TRIP_M || from < to;
+  const toIn = to <= IN_TRIP_M || to < from;
+  if (event === 'depart') return fromIn ? b.from.location : null;
+  if (event === 'arrive') return toIn ? b.to.location : null;
+  return toIn ? b.to.location : fromIn ? b.from.location : null;
+}
 
 function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<string, Booking>): Row | null {
   const r = item.ref;
@@ -152,13 +194,19 @@ function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<strin
     const route = b.from ? `${b.from.name} → ${b.to.name}` : b.to.name;
     const where = { span: [from, b.to.location], depart: [from, from], arrive: [b.to.location, b.to.location] } as Record<string, GeoPoint[]>;
     const [inAt, outAt] = where[r.event] ?? [b.to.location, b.to.location];
+    const zone = r.event === 'depart' ? (b.from?.timezone ?? b.to.timezone) : b.to.timezone;
+    // When to be at the airport / station, on that place's clock.
+    const leave = (r.event === 'depart' || r.event === 'span') && b.kind !== 'hotel'
+      ? ` · be at ${b.from?.name ?? 'the station'} by ${fmtClock(toMin(item.start) - leaveBeforeMin(b.kind))} ${tzCity(zone)} time`
+      : '';
     return {
       item,
       title: [EVENT_LABEL[r.event], bookingTitle(b)].filter(Boolean).join(' · '),
-      subtitle: b.kind === 'hotel' ? b.to.address ?? b.to.name : route,
+      subtitle: b.kind === 'hotel' ? b.to.address ?? b.to.name : `${route}${leave}`,
       icon: <Icon className="w-4 h-4" />,
       in: inAt,
       out: outAt,
+      zone,
     };
   }
   return { item, title: r.title, icon: <MapPin className="w-4 h-4" />, in: r.place?.location, out: r.place?.location, prayer: !!item.prayer };
@@ -178,13 +226,21 @@ export function TimelinePage() {
   const jobs = useQuery(`jobs:${trip.id}`, () => query(collection(db, paths.jobs(trip.id)), orderBy('at', 'desc'), limit(5)), ArrangeJob);
   const people = useMemo(() => new Map(members.map((m) => [m.uid, m])), [members]);
 
+  const loading = schedule.loading || ideas.loading || bookings.loading;
   const ideaMap = useMemo(() => new Map(ideas.data.map((i) => [i.id, i])), [ideas.data]);
+  const prayingUids = useMemo(() => new Set(members.filter((m) => m.prefs?.prayerReminders).map((m) => m.uid)), [members]);
   const bookingMap = useMemo(() => new Map(bookings.data.map((b) => [b.id, b])), [bookings.data]);
   const rowsByDay = useMemo(() => {
     const out = new Map<string, Row[]>();
     for (const it of [...schedule.data].sort(byTime)) {
       const row = toRow(it, ideaMap, bookingMap);
-      if (row) out.set(it.day, [...(out.get(it.day) ?? []), row]);
+      if (!row) continue;
+      // Prayer guidance for journeys of anyone who prays (on the departure row).
+      if (it.ref.kind === 'booking' && (it.ref.event === 'depart' || it.ref.event === 'span')) {
+        const b = bookingMap.get(it.ref.bookingId);
+        if (b && b.travellerUids.some((u) => prayingUids.has(u))) row.journey = journeyPrayers(b);
+      }
+      out.set(it.day, [...(out.get(it.day) ?? []), row]);
     }
     // The other groups of a split ride along with its main-group row.
     for (const [d, list] of out) {
@@ -198,7 +254,7 @@ export function TimelinePage() {
       out.set(d, main);
     }
     return out;
-  }, [schedule.data, ideaMap, bookingMap]);
+  }, [schedule.data, ideaMap, bookingMap, prayingUids]);
   const approved = useMemo(() => splits.data.filter((s) => s.status === 'approved'), [splits.data]);
   // A split's alternatives are added together with its main idea (one grouped backlog card).
   const altIds = useMemo(() => new Set(approved.flatMap((s) => s.tracks.filter((t) => t.key !== 'A' && t.ideaId).map((t) => t.ideaId!))), [approved]);
@@ -243,19 +299,76 @@ export function TimelinePage() {
   const risks = dayList.length - blocks;
   const [fixing, setFixing] = useState(false);
 
-  // Prayer times and the day's local timezone (from where the group is that day).
+  // Prayer times and the day's local timezone (from where the group is that day;
+  // with no hotel or arrival, from where the day's stops are).
+  const firstStop = rows.find((r) => !r.prayer && !r.item.locked)?.in;
   const frame = useMemo(
-    () => dayFrames([day], bookings.data, trip.destinations, { pace: mergePrefs(members).pace ?? 'moderate', praying: members.some((m) => m.prefs?.prayerReminders) })[0],
-    [day, bookings.data, trip.destinations, members],
-  );
-  const tz = nearestDestination(trip.destinations, frame.base).timezone;
-  const missed = useMemo(
     () =>
-      prayersInGaps(
+      rebaseFrame(
+        dayFrames([day], bookings.data, trip.destinations, { pace: mergePrefs(members).pace ?? 'moderate', praying: members.some((m) => m.prefs?.prayerReminders) })[0],
+        firstStop,
+        trip.destinations,
+      ),
+    [day, bookings.data, trip.destinations, members, firstStop],
+  );
+  const tz = nearestDestination(trip.destinations, frame.baseKnown ? frame.base : (firstStop ?? frame.base)).timezone;
+  // Prayer breaks saved before prayer times were locked (or with stale times) → re-place them once.
+  const expected = useMemo(
+    () =>
+      prayerBreaks(
         frame.prayers,
-        rows.filter((r) => !r.prayer).map((r) => ({ id: r.item.id, start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), loc: r.out, prayerWalkMin: prayerWalkOf(r.idea) })),
+        rows.filter((r) => !r.prayer && !isSide(r.item.track)).map((r) => ({ id: r.item.id, start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), loc: r.out, prayerWalkMin: prayerWalkOf(r.idea) })),
         frame.base,
-      ).missed,
+        journeySpans(
+          rows.flatMap((r) => {
+            const ref = r.item.ref;
+            if (ref.kind !== 'booking' || ref.event === 'checkin' || ref.event === 'checkout') return [];
+            const b = bookingMap.get(ref.bookingId);
+            return b ? [{ start: toMin(r.item.start), end: toMin(r.item.end), event: ref.event, bookingId: b.id, flight: b.kind === 'flight' }] : [];
+          }),
+        ),
+      ).prayers.map((p) => `${PRAYER_LABEL[p.key]}@${toClock(p.start)}`).sort().join(),
+    [frame, rows, bookingMap],
+  );
+  const actual = rows.filter((r) => r.prayer && r.item.prayer).map((r) => `${r.item.prayer!.prayer}@${r.item.start}`).sort().join();
+  const refreshed = useRef(new Set<string>());
+  useEffect(() => {
+    if (loading || expected === actual || !navigator.onLine || refreshed.current.has(day)) return;
+    refreshed.current.add(day);
+    void api.post('schedule/refresh', { day }, { tripId: trip.id }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expected, actual, day]);
+
+  // Live weather: the day's outlook, and outdoor stops the forecast makes a bad idea.
+  const forecast = useForecast(day, firstStop ?? frame.base);
+  const outlook = forecast ? daySummary(forecast, day) : null;
+  const weather = useMemo(() => {
+    const out = new Map<string, { risk: WeatherRisk; swap?: Idea }>();
+    if (!forecast) return out;
+    for (const r of rows) {
+      if (!r.idea || r.prayer || !isOutdoor(r.idea.place)) continue;
+      const risk = weatherRisk(forecast, day, toMin(r.item.start), toMin(r.item.end));
+      if (!risk) continue;
+      // Plan B: an indoor backlog place nearby that's open that day.
+      const swap = backlog
+        .filter((i) => !isOutdoor(i.place) && metersBetween(i.place.location, r.idea!.place.location) < 3000 && openingRanges(i.place.openingHours, day)?.length !== 0)
+        .sort((a, b) => metersBetween(a.place.location, r.idea!.place.location) - metersBetween(b.place.location, r.idea!.place.location))[0];
+      out.set(r.item.id, { risk, ...(swap ? { swap } : {}) });
+    }
+    return out;
+  }, [forecast, rows, day, backlog]);
+  const [planB, setPlanB] = useState<{ day: string; text: string } | null>(null);
+  const [askingPlanB, setAskingPlanB] = useState(false);
+
+  // 🟡 Works, but could be better: a shorter visiting order, meals at meal times.
+  const suggestions = useMemo(
+    () =>
+      daySuggestions(
+        frame,
+        rows
+          .filter((r) => !r.item.locked && !r.prayer && !isSide(r.item.track) && r.in)
+          .map((r) => ({ id: r.item.id, start: toMin(r.item.start), end: toMin(r.item.end), loc: r.in!, name: r.title, food: r.idea?.place.category === 'food' })),
+      ),
     [frame, rows],
   );
 
@@ -329,8 +442,22 @@ export function TimelinePage() {
   rows.forEach((r) => {
     const at = r.in ?? r.out;
     if (!at) return;
-    if (r.prayer) return void mapStops.push({ id: r.item.id, kind: 'prayer', label: '🕌', title: r.item.prayer?.facility?.name ?? r.title, location: at, color: '#0F766E' });
-    if (r.item.locked) return void mapStops.push({ id: r.item.id, kind: 'booking', label: '•', title: r.title, location: at, color: '#6D7A77' });
+    if (r.prayer) {
+      mapStops.push({ id: r.item.id, kind: 'prayer', label: '🕌', title: r.item.prayer?.facility?.name ?? r.title, location: at, color: '#0F766E' });
+      // What the people not praying do meanwhile: a dashed side trip.
+      const filler = r.item.prayer?.fillerPlace;
+      if (filler) {
+        mapStops.push({ id: `${r.item.id}:filler`, kind: 'side', label: '☕', title: `While others pray: ${filler.name}`, location: filler.location, color: TRACK_COLOR.F.main });
+        mapLinks.push({ from: at, to: filler.location, color: TRACK_COLOR.F.main });
+      }
+      return;
+    }
+    if (r.item.locked) {
+      // Only the trip end of a journey: the airport you land at going there, the one you leave from going home.
+      const pin = r.item.ref.kind === 'booking' ? tripEnd(bookingMap.get(r.item.ref.bookingId), r.item.ref.event, trip.destinations) : at;
+      if (pin) mapStops.push({ id: r.item.id, kind: 'booking', label: KIND_PIN[r.item.ref.kind === 'booking' ? (bookingMap.get(r.item.ref.bookingId)?.kind ?? 'hotel') : 'hotel'], title: r.title, location: pin, color: '#6D7A77' });
+      return;
+    }
     stopNo++;
     const split = !!r.sides?.length;
     mapStops.push({ id: r.item.id, kind: 'stop', label: String(stopNo), title: r.title, location: at, color: TRACK_COLOR.A.main, ...(split ? { meet: `Meet ${fmtClock(toMin(r.item.end))}` } : {}) });
@@ -341,7 +468,6 @@ export function TimelinePage() {
       mapLinks.push({ from: at, to: s.in, color: TRACK_COLOR[k].main });
     }
   });
-  const loading = schedule.loading || ideas.loading || bookings.loading;
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
@@ -386,14 +512,20 @@ export function TimelinePage() {
         <div className="text-xs text-[#6D7A77] space-y-1">
           <p>
             Times are local to {tzCity(tz)} ({tz}).
+            {rows.some((r) => r.zone && r.zone !== tz) && ' Flight and train times are on their own airport / station clock — marked under the time.'}
           </p>
-          {frame.prayers && <p>Prayer times: {(['dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => `${PRAYER_LABEL[k]} ${fmtClock(frame.prayers!.times[k])}`).join(' · ')}</p>}
+          {outlook && <p>Weather: {outlook}</p>}
+          {frame.prayers && (
+            <p>
+              🔒 Prayer times ({tzCity(tz)}): {(['dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => `${PRAYER_LABEL[k]} ${fmtClock(frame.prayers!.times[k])}`).join(' · ')} — fixed like bookings; stops are planned around them.
+            </p>
+          )}
         </div>
         {(blocks > 0 || risks > 0) && (
           <div className={cx('flex items-center gap-3 rounded-2xl border px-4 py-3', blocks ? 'border-[#F2B8B5] bg-[#FDECEA]' : 'border-[#F2D8B0] bg-[#FFF8EC]')}>
             <AlertTriangle className={cx('w-5 h-5 shrink-0', blocks ? 'text-[#B3261E]' : 'text-[#8A5A00]')} />
             <p className="flex-1 text-sm text-[#161C23]">
-              {blocks ? `🔴 ${blocks} thing${blocks > 1 ? 's' : ''} won't work` : ''}
+              {blocks ? `🔴 ${blocks} thing${blocks > 1 ? 's' : ''} won't work — fix now` : ''}
               {blocks && risks ? ' · ' : ''}
               {risks ? `🟡 ${risks} tight` : ''} on this day — see the stops below.
             </p>
@@ -402,11 +534,75 @@ export function TimelinePage() {
             </Button>
           </div>
         )}
-        {missed.map((m) => (
-          <p key={m.key} className="flex items-start gap-1.5 rounded-xl bg-[#FFF8EC] border border-[#F2D8B0] px-3 py-2 text-xs text-[#8A5A00]">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" /> No free 30 min for {PRAYER_LABEL[m.key]} between {fmtClock(m.from)} and {fmtClock(m.to)} — shorten or move a stop.
-          </p>
-        ))}
+
+        {weather.size > 0 && (
+          <div className="rounded-2xl border border-[#C9DDF2] bg-[#F3F8FD] px-4 py-3 space-y-2 text-sm">
+            <p className="font-bold text-[#1D4E89]">🌦 Weather may spoil {weather.size} outdoor stop{weather.size > 1 ? 's' : ''}</p>
+            {[...weather].map(([id, w]) => {
+              const r = rows.find((x) => x.item.id === id)!;
+              return (
+                <p key={id} className="text-[#161C23]">
+                  <b>{r.title}</b> ({fmtClock(toMin(r.item.start))}): {w.risk.text}
+                  {w.swap && (
+                    <span className="block text-xs text-[#1D4E89]">
+                      Indoor plan B nearby: <b>{w.swap.place.name}</b> — tap it in the backlog to add it, then move {r.title} to another day.
+                    </span>
+                  )}
+                </p>
+              );
+            })}
+            {planB?.day === day ? (
+              <p className="text-sm text-[#161C23] flex gap-1.5">
+                <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-[#1D4E89]" /> {planB.text}
+              </p>
+            ) : (
+              <Button
+                variant="secondary"
+                className="!min-h-8 !px-3 text-xs"
+                loading={askingPlanB}
+                onClick={() => {
+                  setAskingPlanB(true);
+                  void call(async () => {
+                    const r = await api.post<{ text: string }>(
+                      'schedule/weather-plan',
+                      {
+                        day,
+                        risks: [...weather].map(([id, w]) => ({ itemId: id, text: w.risk.text })),
+                      },
+                      { tripId: trip.id },
+                    );
+                    setPlanB({ day, text: r.text });
+                  }).finally(() => setAskingPlanB(false));
+                }}
+              >
+                <Sparkles className="w-3.5 h-3.5" /> Ask AI for a plan B
+              </Button>
+            )}
+          </div>
+        )}
+
+        {!!suggestions.length && (
+          <div className="rounded-2xl border border-[#F2D8B0] bg-[#FFF8EC] px-4 py-3 space-y-2">
+            <p className="text-sm font-bold text-[#8A5A00]">🟡 Works, but could be better</p>
+            {suggestions.map((sg) => (
+              <div key={sg.text} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[#161C23]">
+                <p className="flex-1 min-w-[12rem]">{sg.text}</p>
+                {sg.order && (
+                  <Button
+                    variant="secondary"
+                    className="!min-h-8 !px-3 text-xs shrink-0"
+                    onClick={() => {
+                      setPending({ day, order: sg.order! });
+                      void call(() => api.post('schedule/reorder', { day, order: sg.order }, { tripId: trip.id }));
+                    }}
+                  >
+                    Use this order
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px] items-start">
           <div className={cx('space-y-2', showMap && 'hidden md:block')}>
@@ -427,6 +623,8 @@ export function TimelinePage() {
                             {prev && <TravelRow leg={r.item.transitFromPrev} a={prev.out} b={r.in} />}
                             <StopRow
                               row={r}
+                              dayZone={tz}
+                              weather={weather.get(r.item.id)?.risk}
                               warnings={[...(warnings.get(r.item.id) ?? []), ...(r.sides ?? []).flatMap((s) => warnings.get(s.item.id) ?? [])]}
                               people={people}
                               me={me.uid}
@@ -448,7 +646,7 @@ export function TimelinePage() {
             <Card className={cx('overflow-hidden h-72 md:h-80', !showMap && 'hidden md:block')}>
               <DayMap stops={mapStops} links={mapLinks} selectedId={selected} onSelect={setSelected} />
             </Card>
-            <Backlog ideas={backlog} pairName={pairName} onAdd={setAdding} />
+            <Backlog ideas={backlog} pairName={pairName} onAdd={setAdding} day={day} destinations={trip.destinations} dayCity={nearestDestination(trip.destinations, firstStop ?? frame.base).name} />
           </div>
         </div>
       </div>
@@ -542,6 +740,8 @@ function DayList({ empty, children }: { empty: boolean; children: ReactNode }) {
 
 function StopRow({
   row,
+  dayZone,
+  weather,
   warnings,
   people,
   me,
@@ -550,6 +750,8 @@ function StopRow({
   onEdit,
 }: {
   row: Row;
+  dayZone: string;
+  weather?: WeatherRisk;
   warnings: DayWarning[];
   people: Map<string, Member>;
   me: string;
@@ -566,6 +768,9 @@ function StopRow({
         <div className="w-[4.75rem] shrink-0 py-3 pl-3 text-xs font-bold text-[#161C23] tabular-nums">
           <p>{fmtClock(toMin(item.start))}</p>
           {!moment && <p className="text-[#6D7A77] font-semibold">{fmtClock(toMin(item.end))}</p>}
+          {row.zone && (row.zone !== dayZone || item.ref.kind === 'booking') && (
+            <p className={cx('mt-0.5 text-[10px] leading-tight font-semibold', row.zone !== dayZone ? 'text-[#8A5A00]' : 'text-[#9AA5A3]')}>{tzCity(row.zone)} time</p>
+          )}
         </div>
         <button type="button" onClick={onSelect} aria-pressed={selected} className="flex-1 min-w-0 py-3 pr-2 text-left">
           <p className="flex items-center gap-1.5 font-semibold text-[#161C23]">
@@ -573,6 +778,8 @@ function StopRow({
             <span className="truncate">{row.title}</span>
           </p>
           {row.subtitle && !row.sides?.length && <p className="text-xs text-[#6D7A77] truncate">{row.subtitle}</p>}
+          {!!row.journey?.length && <JourneyPrayerList list={row.journey} />}
+          {weather && <p className="mt-1 text-xs text-[#1D4E89]">🌦 {weather.text}</p>}
           {!!row.sides?.length && <SplitGroups a={row} sides={row.sides} people={people} me={me} />}
           {warnings.map((w) => (
             <p key={`${w.itemId}-${w.kind}`} className={cx('mt-1 flex items-start gap-1 text-xs', w.severity === 'block' ? 'text-[#B3261E] font-semibold' : 'text-[#8A5A00]')}>
@@ -627,7 +834,56 @@ function TravelRow({ leg, a, b }: { leg?: TransitLeg; a?: GeoPoint; b?: GeoPoint
   );
 }
 
-function Backlog({ ideas, pairName, onAdd }: { ideas: Idea[]; pairName: (ideaId: string) => string | undefined; onAdd: (idea: Idea) => void }) {
+type OpenFilter = 'all' | 'open' | 'food' | 'sights';
+const OPEN_FILTERS: [OpenFilter, string][] = [
+  ['all', 'All'],
+  ['open', 'Open this day'],
+  ['food', 'Food'],
+  ['sights', 'Places to see'],
+];
+
+/** "9:00 AM–5:00 PM" / "Closed" / null (unknown) for one date. */
+function hoursOn(idea: Idea, day: string): { text: string; closed: boolean } | null {
+  const r = openingRanges(idea.place.openingHours, day);
+  if (r === null) return idea.place.openingHours ? { text: 'Open 24 hours', closed: false } : null;
+  if (!r.length) return { text: 'Closed', closed: true };
+  return { text: r.map(([o, c]) => `${fmtClock(o)}–${fmtClock(c % (24 * 60))}`).join(', '), closed: false };
+}
+
+/**
+ * Backlog grouped by city (the trip destination each place is nearest to),
+ * with each place's opening hours on the selected day; filter by city, "open
+ * this day" and type. The day's own city comes first.
+ */
+function Backlog({
+  ideas,
+  pairName,
+  onAdd,
+  day,
+  destinations,
+  dayCity,
+}: {
+  ideas: Idea[];
+  pairName: (ideaId: string) => string | undefined;
+  onAdd: (idea: Idea) => void;
+  day: string;
+  destinations: { name: string; location: GeoPoint }[];
+  dayCity: string;
+}) {
+  const [city, setCity] = useState<string>('all');
+  const [filter, setFilter] = useState<OpenFilter>('all');
+  const cityOf = (i: Idea) => nearestDestination(destinations, i.place.location).name;
+  const cities = [...new Set(ideas.map(cityOf))].sort((a, b) => Number(b === dayCity) - Number(a === dayCity) || destinations.findIndex((d) => d.name === a) - destinations.findIndex((d) => d.name === b));
+  const shown = ideas.filter((i) => {
+    if (city !== 'all' && cityOf(i) !== city) return false;
+    if (filter === 'open') return !hoursOn(i, day)?.closed;
+    if (filter === 'food') return i.place.category === 'food';
+    if (filter === 'sights') return i.place.category !== 'food';
+    return true;
+  });
+  const groups = cities.map((c) => [c, shown.filter((i) => cityOf(i) === c)] as const).filter(([, l]) => l.length);
+  const chip = (on: boolean) => cx('shrink-0 px-2.5 min-h-7 rounded-full text-xs font-semibold border', on ? 'bg-[#161C23] border-[#161C23] text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]');
+
   return (
     <Card className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -639,17 +895,49 @@ function Backlog({ ideas, pairName, onAdd }: { ideas: Idea[]; pairName: (ideaId:
           Ideas everyone approves land here. <Link to="../ideas" relative="path" className="font-semibold text-[#00685F]">Go to the Idea Board</Link>
         </p>
       ) : (
-        <ul className="space-y-2">
-          {ideas.map((i) => (
-            <BacklogItem key={i.id} idea={i} pair={pairName(i.id)} onAdd={() => onAdd(i)} />
+        <>
+          <div className="space-y-1.5">
+            {cities.length > 1 && (
+              <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5">
+                <button type="button" className={chip(city === 'all')} onClick={() => setCity('all')}>
+                  All cities
+                </button>
+                {cities.map((c) => (
+                  <button key={c} type="button" className={chip(city === c)} onClick={() => setCity(c)}>
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5">
+              {OPEN_FILTERS.map(([k, label]) => (
+                <button key={k} type="button" className={chip(filter === k)} onClick={() => setFilter(k)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {!groups.length && <p className="text-sm text-[#6D7A77]">Nothing matches these filters.</p>}
+          {groups.map(([c, list]) => (
+            <section key={c} className="space-y-2">
+              <h3 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#6D7A77]">
+                <MapPin className="w-3 h-3" /> {c} · {list.length}
+                {c === dayCity && <span className="normal-case tracking-normal font-semibold text-[#00685F]">· where you are this day</span>}
+              </h3>
+              <ul className="space-y-2">
+                {list.map((i) => (
+                  <BacklogItem key={i.id} idea={i} pair={pairName(i.id)} hours={hoursOn(i, day)} onAdd={() => onAdd(i)} />
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </>
       )}
     </Card>
   );
 }
 
-function BacklogItem({ idea, pair, onAdd }: { idea: Idea; pair?: string; onAdd: () => void }) {
+function BacklogItem({ idea, pair, hours, onAdd }: { idea: Idea; pair?: string; hours: { text: string; closed: boolean } | null; onAdd: () => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `backlog:${idea.id}`, data: { title: idea.place.name } });
   const photo = idea.place.photoUrl ?? (idea.place.photoName ? placePhotoUrl(idea.place.photoName, 160) : null);
   return (
@@ -679,6 +967,11 @@ function BacklogItem({ idea, pair, onAdd }: { idea: Idea; pair?: string; onAdd: 
               </>
             )}
           </span>
+          {hours && (
+            <span className={cx('block text-[11px] truncate', hours.closed ? 'text-[#B3261E] font-semibold' : 'text-[#3E4947]')}>
+              {hours.closed ? 'Closed this day' : `🕒 ${hours.text}`}
+            </span>
+          )}
         </span>
       </button>
       <Button variant="ghost" className="shrink-0 px-2.5" onClick={onAdd} aria-label={`Add ${idea.place.name} to a day`}>
@@ -729,12 +1022,22 @@ function PrayerRow({ row, people, me, selected, onSelect }: { row: Row; people: 
         <p className="font-semibold opacity-70">{fmtClock(toMin(row.item.end))}</p>
       </div>
       <div className="flex-1 min-w-0 py-2.5 pr-3">
-        <p className="font-semibold text-[#00685F] truncate">🕌 {mine ? `${p.prayer} prayer` : `Free time — ${p.prayer} prayer break`}</p>
+        <p className="font-semibold text-[#00685F] truncate flex items-center gap-1">
+          <span className="truncate">🕌 {mine ? `${p.prayer} prayer` : `Free time — ${p.prayer} prayer break`}</span>
+          <Lock className="w-3 h-3 shrink-0 opacity-60" aria-label="Fixed time" />
+        </p>
         <p className="text-xs text-[#3F6B64] truncate">
           {f ? `${f.name} · ${f.walkMin ? `${f.walkMin} min walk` : 'on site'}` : 'No mosque found nearby — any clean, quiet spot works'}
           {!mine && ` · ${who}`}
         </p>
+        {p.fillerPlace && (
+          <p className="text-xs text-[#1D4E89] truncate">
+            {mine ? `Meanwhile the others can visit ${p.fillerPlace.name}` : `While they pray: ${p.fillerPlace.name} nearby — from your backlog`}
+          </p>
+        )}
+        {!p.fillerPlace && !mine && <p className="text-xs text-[#6D7A77] truncate">Free time nearby — or rest and meet back after.</p>}
       </div>
     </button>
   );
 }
+

@@ -67,7 +67,7 @@ function baseLabel(idea: Idea, community?: HalalSummary | null): HalalLabel | nu
     return {
       text: `Certified halal · ${community.certificate.certifier}`,
       tone: 'good',
-      basis: `Certificate photo checked${community.certificate.expiresOn ? ` (valid until ${community.certificate.expiresOn})` : ''} · ${community.reportCount} traveller reports`,
+      basis: `Certificate photo checked${community.certificate.expiresOn ? ` (valid until ${community.certificate.expiresOn})` : ''} · ${community.reportCount} traveller reports across Safar trips`,
       evidence: [{ text: `A traveller photographed the ${community.certificate.certifier} certificate; ${community.reportCount} reports agree`, source: 'community' }, ...evidence],
     };
   }
@@ -75,7 +75,7 @@ function baseLabel(idea: Idea, community?: HalalSummary | null): HalalLabel | nu
     return {
       text: TIER_TEXT[community.tier],
       tone: TIER_TONE[community.tier],
-      basis: `${community.reportCount} traveller report${community.reportCount === 1 ? '' : 's'}`,
+      basis: `${community.reportCount} traveller report${community.reportCount === 1 ? '' : 's'} across Safar trips`,
       evidence: [{ text: `${community.reportCount} traveller${community.reportCount === 1 ? '' : 's'} reported it as ${TIER_TEXT[community.tier].toLowerCase()}`, source: 'community' }, ...evidence],
     };
   }

@@ -2,7 +2,7 @@
 // ink #161C23 · muted #6D7A77 · line #E7DFD5 · brand #00685F · sand #FAF8F5
 import { Loader2, X } from 'lucide-react';
 import { useEffect } from 'react';
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, ComponentProps, ReactNode, SelectHTMLAttributes } from 'react';
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
@@ -84,7 +84,7 @@ export function Field({
 const inputClass =
   'w-full min-h-11 px-3.5 rounded-xl border border-[#E7DFD5] bg-white text-[#161C23] text-base sm:text-sm placeholder:text-[#9AA5A3] focus:outline-none focus:ring-2 focus:ring-[#00685F]/40 focus:border-[#00685F]';
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
+export function Input(props: ComponentProps<'input'>) {
   return <input {...props} className={cx(inputClass, props.className)} />;
 }
 
@@ -185,7 +185,7 @@ export function Sheet({ open, onClose, title, children, wide }: { open: boolean;
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="overflow-y-auto overscroll-contain px-5 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">{children}</div>
+        <div className="overflow-y-auto overflow-x-hidden overscroll-contain px-5 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] min-w-0">{children}</div>
       </div>
     </div>
   );

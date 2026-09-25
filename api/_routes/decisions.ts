@@ -11,6 +11,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import {
   ackKey,
+  estimateTravelMin,
+  GeoPoint,
   CHOICE_WINDOW_MS,
   groupChoices,
   HalalSummary,
@@ -159,6 +161,51 @@ export const decisionRoutes: RouteTable = {
     { perMinute: 30 },
   ),
 
+  /**
+   * Someone not going suggests their own place instead of Safar's options.
+   * It joins the options (others not going can pick it too) and is picked for them.
+   */
+  'POST ideas/propose': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ ideaId: Id, place: z.object({ placeId: z.string().min(1).max(300), name: z.string().min(1).max(200), location: GeoPoint }) }));
+      const data = await loadTripData(tripId);
+      const optionId = `own_${body.place.placeId.slice(-12)}`;
+      let others: string[] = [];
+      let placeName = '';
+      await adminDb().runTransaction(async (tx) => {
+        const idea = await loadFresh(tripId, body.ideaId, tx);
+        if (idea.status !== 'mixed') throw new HttpError(409, 'Suggestions are only open while votes are split');
+        const goers = nonGoers(idea, data.trip.memberIds);
+        if (!goers.includes(member.uid)) throw new HttpError(403, 'Only people who voted 👎 suggest an alternative');
+        if (body.place.placeId === idea.place.placeId) throw new HttpError(400, "That's the place being voted on");
+        const walkMin = estimateTravelMin(idea.place.location, body.place.location);
+        if (walkMin > 45) throw new HttpError(400, `${body.place.name} is too far from ${idea.place.name} to meet back up — pick somewhere closer.`);
+        const options = idea.options ?? [];
+        if (options.filter((o) => o.proposedBy).length >= 4 && !options.some((o) => o.id === optionId)) throw new HttpError(409, 'There are already 4 suggestions — pick one of them');
+        const option: MiddleOption = {
+          id: optionId,
+          type: 'alternative',
+          title: `Go to ${body.place.name}`,
+          detail: `Suggested by ${member.displayName} · ${walkMin} min walk · meet the group back at ${idea.place.name}`,
+          place: { placeId: body.place.placeId, name: body.place.name, location: body.place.location, walkMin },
+          proposedBy: member.uid,
+        };
+        const next = [...options.filter((o) => o.id !== optionId), option];
+        tx.update(ideaDocRef(tripId, idea.id), { options: next, [`choices.${member.uid}`]: { optionId, at: Date.now() }, updatedAt: Date.now() });
+        others = goers.filter((u) => u !== member.uid);
+        placeName = idea.place.name;
+      });
+      await notify(
+        others,
+        { kind: 'choose', title: `${member.displayName} suggested another place`, body: `Instead of ${placeName}: ${body.place.name}. You can pick it too.`, url: `/t/${tripId}/ideas?filter=mixed`, tag: `choose-${body.ideaId}` },
+        { timeZone: data.trip.destinations[0].timezone, except: member.uid },
+      );
+      await onReadyForAdmin(tripId, data, await loadFresh(tripId, body.ideaId));
+      return json({ optionId }, { status: 201 });
+    },
+    { perMinute: 20 },
+  ),
+
   /** Admin: accept (with the groups people picked) · backup · reject · close voting now · reopen. */
   'POST ideas/decide': withTrip(
     async (req, { tripId, member }) => {
@@ -271,16 +318,20 @@ export const decisionRoutes: RouteTable = {
 
   'POST ideas/comment': withTrip(
     async (req, { tripId, member }) => {
-      const { ideaId, text } = await readJson(req, z.object({ ideaId: Id, text: z.string().trim().min(1).max(500) }));
+      const body = await readJson(req, z.object({ ideaId: Id, text: z.string().trim().min(1).max(500), mentions: z.array(Id).max(20).default([]) }));
+      const { ideaId, text } = body;
       await useDailyQuota(member.uid, 'comment');
       const idea = await loadFresh(tripId, ideaId);
-      const ref = adminDb().collection(paths.comments(tripId, ideaId)).doc();
-      await ref.set(IdeaComment.parse({ id: ref.id, uid: member.uid, text, at: Date.now() }));
-      // The person who added it, everyone who voted, and earlier commenters.
-      const earlier = (await adminDb().collection(paths.comments(tripId, ideaId)).select('uid').get()).docs.map((d) => d.get('uid') as string);
       const trip = (await loadTripData(tripId)).trip;
+      const mentions = [...new Set(body.mentions)].filter((u) => trip.memberIds.includes(u) && u !== member.uid);
+      const ref = adminDb().collection(paths.comments(tripId, ideaId)).doc();
+      await ref.set(IdeaComment.parse({ id: ref.id, uid: member.uid, text, mentions, at: Date.now() }));
+      // @-mentioned people always hear about it…
+      await notify(mentions, { kind: 'comment', title: `${member.displayName} mentioned you · ${idea.place.name}`, body: text.slice(0, 140), url: `/t/${tripId}/ideas`, tag: `comment-${idea.id}` }, { timeZone: trip.destinations[0].timezone, except: member.uid });
+      // …and the person who added it, everyone who voted, and earlier commenters (throttled).
+      const earlier = (await adminDb().collection(paths.comments(tripId, ideaId)).select('uid').get()).docs.map((d) => d.get('uid') as string);
       await notify(
-        [idea.createdBy, ...Object.keys(idea.votes), ...earlier].filter((u) => trip.memberIds.includes(u)),
+        [idea.createdBy, ...Object.keys(idea.votes), ...earlier].filter((u) => trip.memberIds.includes(u) && !mentions.includes(u)),
         { kind: 'comment', title: `${member.displayName} on ${idea.place.name}`, body: text.slice(0, 140), url: `/t/${tripId}/ideas`, tag: `comment-${idea.id}` },
         { timeZone: trip.destinations[0].timezone, except: member.uid, throttleKey: `comment:${idea.id}`, throttle: 300 },
       );

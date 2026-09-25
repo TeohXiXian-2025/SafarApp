@@ -20,12 +20,71 @@ import { withTrip } from '../_lib/auth.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { osmPoint, overpass, similarName } from '../_lib/halal.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
-import { searchNearbyFood, type NearbyFood } from '../_lib/places.js';
+import { photoUrl, searchFoodText, searchNearbyFood, type NearbyFood } from '../_lib/places.js';
 import { useDailyQuota } from '../_lib/quota.js';
 import type { RouteTable } from '../_lib/routes.js';
 
 const RADIUS_M = 1200;
+/** Text-search results can come from further away (it's only a bias) — keep what's reachable. */
+const MAX_TEXT_M = 3000;
+/** Same area (~110 m grid) within this long reuses the last search — saves Maps quota for the group. */
+const CACHE_MS = 30 * 60_000;
+/** A place's photo link, resolved once (one billed call) and reused. */
+const PHOTO_TTL_MS = 7 * 86_400_000;
+const PHOTOS_PER_SEARCH = 24;
 const waitRef = (placeKey: string) => adminDb().collection(`waitReports/${placeKey}/reports`);
+
+/** Restaurants around a point from several angles: nearest, most popular, halal-typed, and "halal" by name / cuisine. */
+async function findFood(at: GeoPoint): Promise<{ places: NearbyFood[]; halalIds: string[] } | null> {
+  const cell = `${at.lat.toFixed(3)}_${at.lng.toFixed(3)}`;
+  const ref = adminDb().doc(`foodSearchCache/${cell}`);
+  const cached = (await ref.get()).data();
+  if (cached && Date.now() - Number(cached.at) < CACHE_MS) return { places: cached.places as NearbyFood[], halalIds: cached.halalIds as string[] };
+  const MEALS = ['restaurant', 'fast_food_restaurant', 'food_court'];
+  const [nearest, popular, snacks, halalTyped, halalNamed, cuisines] = await Promise.all([
+    searchNearbyFood(at, MEALS, RADIUS_M, 20),
+    searchNearbyFood(at, MEALS, RADIUS_M * 1.5, 20, 'POPULARITY'),
+    searchNearbyFood(at, ['cafe', 'bakery'], RADIUS_M, 10),
+    searchNearbyFood(at, ['halal_restaurant'], RADIUS_M * 2, 20),
+    searchFoodText(at, 'halal food', MAX_TEXT_M, 20),
+    // Cuisines that are usually halal (Middle Eastern, Turkish, Pakistani, Indonesian, …).
+    searchNearbyFood(at, ['middle_eastern_restaurant', 'turkish_restaurant', 'lebanese_restaurant', 'afghani_restaurant', 'indonesian_restaurant', 'indian_restaurant'], RADIUS_M * 2, 20),
+  ]);
+  if (!nearest && !popular && !halalTyped) return null;
+  // Only Google's own halal type counts as a listing; name / cuisine matches are just candidates to check.
+  const halalIds = (halalTyped ?? []).map((p) => p.placeId);
+  const all = new Map<string, NearbyFood>();
+  for (const p of [...(halalTyped ?? []), ...(halalNamed ?? []).filter((x) => metersBetween(at, x.location) <= MAX_TEXT_M), ...(nearest ?? []), ...(popular ?? []), ...(cuisines ?? []), ...(snacks ?? [])]) {
+    if (!all.has(p.placeId)) all.set(p.placeId, p);
+  }
+  const places = [...all.values()];
+  await ref.set({ at: Date.now(), places, halalIds }).catch(() => {});
+  return { places, halalIds };
+}
+
+/** Direct photo links for the list (cached per place; a few new ones resolved per search). */
+async function photosFor(items: { placeKey: string; photoName?: string }[]): Promise<Map<string, string>> {
+  const db = adminDb();
+  const withPhoto = items.filter((i) => i.photoName);
+  if (!withPhoto.length) return new Map();
+  const snaps = await db.getAll(...withPhoto.map((i) => db.doc(`placePhotos/${i.placeKey}`)));
+  const out = new Map<string, string>();
+  const missing: typeof withPhoto = [];
+  snaps.forEach((snap, k) => {
+    const url = snap.get('url') as string | undefined;
+    if (url && Date.now() - Number(snap.get('at')) < PHOTO_TTL_MS) out.set(withPhoto[k].placeKey, url);
+    else missing.push(withPhoto[k]);
+  });
+  await Promise.all(
+    missing.slice(0, PHOTOS_PER_SEARCH).map(async (i) => {
+      const url = await photoUrl(i.photoName!, 400);
+      if (!url) return;
+      out.set(i.placeKey, url);
+      await db.doc(`placePhotos/${i.placeKey}`).set({ url, at: Date.now() }).catch(() => {});
+    }),
+  );
+  return out;
+}
 
 export interface FoodItem extends NearbyFood {
   placeKey: string;
@@ -39,6 +98,8 @@ export interface FoodItem extends NearbyFood {
   /** Already on this trip's Idea Board. */
   ideaId?: string;
   checked: boolean;
+  /** Direct photo link (cached). */
+  photo?: string;
 }
 
 function toItem(p: NearbyFood, at: GeoPoint, ctx: { analysis?: HalalAssessment; community?: HalalSummary; listed: 'google' | 'osm' | 'name' | null; wait?: FoodItem['wait']; ideaId?: string }): FoodItem {
@@ -63,18 +124,15 @@ export const foodRoutes: RouteTable = {
       const at = await readJson(req, GeoPoint);
       await useDailyQuota(member.uid, 'food');
       const db = adminDb();
-      const [general, halal, osm, ideas] = await Promise.all([
-        searchNearbyFood(at, ['restaurant', 'cafe', 'fast_food_restaurant', 'food_court', 'bakery'], RADIUS_M, 20),
-        searchNearbyFood(at, ['halal_restaurant'], RADIUS_M * 2, 20),
+      const [found, osm, ideas] = await Promise.all([
+        findFood(at),
         // OpenStreetMap is a bonus source — don't let a slow Overpass server hold up the list.
         Promise.race([overpass(at), new Promise<null>((r) => setTimeout(() => r(null), 3500))]),
         db.collection(paths.ideas(tripId)).select('place.placeId').get(),
       ]);
-      if (!general && !halal) throw new HttpError(502, "Couldn't search Google Maps right now — try again in a moment.");
-      const all = new Map<string, NearbyFood>();
-      for (const p of [...(halal ?? []), ...(general ?? [])]) if (!all.has(p.placeId)) all.set(p.placeId, p);
-      const places = [...all.values()];
-      const halalIds = new Set((halal ?? []).map((p) => p.placeId));
+      if (!found) throw new HttpError(502, "Couldn't search Google Maps right now — try again in a moment.");
+      const places = found.places;
+      const halalIds = new Set(found.halalIds);
       const osmHalal = (osm ?? []).filter((e) => /yes|only/.test(e.tags?.['diet:halal'] ?? '') && e.tags?.name);
       const onBoard = new Map(ideas.docs.map((d) => [d.get('place.placeId') as string, d.id]));
 
@@ -101,7 +159,8 @@ export const foodRoutes: RouteTable = {
         });
       });
       items.sort((a, b) => a.distanceM - b.distanceM);
-      return json({ items });
+      const photos = await photosFor(items);
+      return json({ items: items.map((i) => (photos.has(i.placeKey) ? { ...i, photo: photos.get(i.placeKey) } : i)) });
     },
     { perMinute: 12 },
   ),

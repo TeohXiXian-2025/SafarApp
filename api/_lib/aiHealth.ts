@@ -50,3 +50,26 @@ export function retryAfterFrom(err: unknown): number | undefined {
   const m = /retry(?:Delay)?[^0-9]{0,20}(\d+(?:\.\d+)?)s/i.exec(String((err as Error)?.message ?? ''));
   return m ? Math.ceil(Number(m[1])) : undefined;
 }
+
+// ─── Usage counters (for GET /api/system/usage) ─────────────────────────────
+
+const countKey = (day: string, outcome: string) => `ai:count:${day}:${outcome}`;
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** Counts one AI request by outcome ('gemini' / 'groq' / 'failed'). Fire and forget. */
+export function countAi(outcome: 'gemini' | 'groq' | 'failed') {
+  const key = countKey(today(), outcome);
+  void redis([
+    ['INCR', key],
+    ['EXPIRE', key, 40 * 86400],
+  ]);
+}
+
+/** AI requests per day for the last `days` days, by outcome. */
+export async function aiCounts(days = 7): Promise<{ day: string; gemini: number; groq: number; failed: number }[]> {
+  const list = Array.from({ length: days }, (_, i) => new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10));
+  const outcomes = ['gemini', 'groq', 'failed'] as const;
+  const r = await redis([['MGET', ...list.flatMap((d) => outcomes.map((o) => countKey(d, o)))]]);
+  const v = (r?.[0]?.result as (string | null)[] | undefined) ?? [];
+  return list.map((day, i) => ({ day, gemini: Number(v[i * 3] ?? 0), groq: Number(v[i * 3 + 1] ?? 0), failed: Number(v[i * 3 + 2] ?? 0) }));
+}

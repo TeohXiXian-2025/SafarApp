@@ -4,6 +4,7 @@ import {
   Booking,
   BookingDraft,
   bookingAnchors,
+  hotelJourneyProblem,
   Id,
   paths,
   ScheduleItem,
@@ -11,6 +12,7 @@ import {
   type Member,
 } from '../../src/domain/index.js';
 import { withTrip } from '../_lib/auth.js';
+import { FieldValue } from 'firebase-admin/firestore';
 import { adminBucket, adminDb } from '../_lib/firebaseAdmin.js';
 import { extractJson } from '../_lib/gemini.js';
 import { findPlace, localToInstant } from '../_lib/google.js';
@@ -211,12 +213,23 @@ async function saveBooking(tripId: string, booking: Booking, actorUid: string, a
   await batch.commit();
 }
 
+/** A hotel whose check-in / check-out clashes with its guests' flights, trains, … → 409 with why. */
+async function assertHotelFits(tripId: string, booking: Booking) {
+  if (booking.kind !== 'hotel') return;
+  const others = (await adminDb().collection(paths.bookings(tripId)).get()).docs.flatMap((d) => {
+    const r = Booking.safeParse(d.data());
+    return r.success && r.data.id !== booking.id ? [r.data] : [];
+  });
+  const problem = hotelJourneyProblem({ ...booking, location: booking.to.location }, others);
+  if (problem) throw new HttpError(409, problem);
+}
+
 /** Saves a new booking (already validated) with its timeline anchors. Returns its id. */
 export async function addBooking(
   tripId: string,
   draft: BookingDraft,
   actor: { uid: string; displayName: string },
-  extra: { source: Booking['source']; fileRef?: string; parseConfidence?: number },
+  extra: { source: Booking['source']; fileRef?: string; parseConfidence?: number; stayId?: string },
 ): Promise<string> {
   const now = Date.now();
   const id = adminDb().collection(paths.bookings(tripId)).doc().id;
@@ -225,14 +238,24 @@ export async function addBooking(
     ...(await withTimezones(draft)),
     id,
     source: extra.source,
+    ...(extra.stayId ? { stayId: extra.stayId } : {}),
     ...(extra.fileRef ? { fileRef: extra.fileRef } : {}),
     ...(extra.parseConfidence !== undefined ? { parseConfidence: extra.parseConfidence } : {}),
     createdBy: actor.uid,
     createdAt: now,
     updatedAt: now,
   };
+  await assertHotelFits(tripId, booking);
   await saveBooking(tripId, booking, actor.uid, `${actor.displayName} added a ${describe(booking)}`);
   return id;
+}
+
+/** Replaces a booking's details (new times → new timezones and timeline anchors). */
+export async function updateBooking(tripId: string, current: Booking, draft: BookingDraft, actor: { uid: string; displayName: string }) {
+  const booking: Booking = { ...current, ...draft, ...(await withTimezones(draft)), updatedAt: Date.now() };
+  await assertHotelFits(tripId, booking);
+  await saveBooking(tripId, booking, actor.uid, `${actor.displayName} updated the ${describe(booking)}`);
+  return booking;
 }
 
 /** New local times for a booking (a delay): timezones and timeline anchors follow. */
@@ -250,6 +273,11 @@ export async function removeBooking(tripId: string, booking: Booking, actor: { u
   const batch = db.batch();
   batch.delete(db.doc(`${paths.bookings(tripId)}/${booking.id}`));
   anchors.docs.forEach((d) => batch.delete(d.ref));
+  // A stay's "booked" link goes with it (the hotel stays picked).
+  if (booking.stayId) {
+    const stay = db.doc(paths.stay(tripId, booking.stayId));
+    if ((await stay.get()).get('bookingId') === booking.id) batch.update(stay, { bookingId: FieldValue.delete(), updatedAt: Date.now() });
+  }
   logActivity(batch, tripId, actor.uid, `${actor.displayName} ${activity}`);
   await batch.commit();
 }
@@ -262,7 +290,7 @@ function describe(b: Pick<Booking, 'kind' | 'carrier' | 'number' | 'from' | 'to'
   return `${b.kind}${code ? ` ${code}` : ''} ${b.from ? `${b.from.name} → ` : 'to '}${b.to.name}`;
 }
 
-async function loadBooking(tripId: string, id: string): Promise<Booking> {
+export async function loadBooking(tripId: string, id: string): Promise<Booking> {
   const snap = await adminDb().doc(`${paths.bookings(tripId)}/${id}`).get();
   if (!snap.exists) throw new HttpError(404, 'Booking not found');
   return Booking.parse(snap.data());
@@ -341,8 +369,7 @@ export const bookingRoutes: RouteTable = {
         throw new HttpError(403, 'Only the person who added this booking, or the admin, can edit it');
       }
       assertTravellers(body.draft, await loadMembers(tripId));
-      const booking: Booking = { ...current, ...body.draft, ...(await withTimezones(body.draft)), updatedAt: Date.now() };
-      await saveBooking(tripId, booking, member.uid, `${member.displayName} updated the ${describe(booking)}`);
+      await updateBooking(tripId, current, body.draft, member);
       return json({ ok: true });
     },
     { perMinute: 30 },

@@ -2,7 +2,7 @@
 import { GoogleGenAI, type Part, type Schema } from '@google/genai';
 import type { z } from 'zod';
 import { optionalEnv } from './env.js';
-import { downModels, markDown, retryAfterFrom } from './aiHealth.js';
+import { countAi, downModels, markDown, retryAfterFrom } from './aiHealth.js';
 import { groqJson } from './groq.js';
 import { HttpError } from './http.js';
 
@@ -170,7 +170,9 @@ export async function extractJson<S extends z.ZodType>(opts: {
   let attempt: Attempt;
   try {
     attempt = await generate(opts);
+    countAi(attempt.provider.startsWith('groq') ? 'groq' : 'gemini');
   } catch (err) {
+    countAi('failed');
     console.error('[ai] all providers failed', err);
     throw new HttpError(503, 'The AI is busy right now. Please try again in a minute — or add it manually.');
   }

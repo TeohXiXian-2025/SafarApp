@@ -42,6 +42,8 @@ export const Booking = BookingDraft.omit({ from: true, to: true }).extend({
   startAt: IsoDateTime,
   endAt: IsoDateTime,
   source: z.enum(['upload', 'text', 'manual']),
+  /** Hotel bookings made from a stay's hotel list ("I booked it"). */
+  stayId: Id.optional(),
   fileRef: z.string().max(300).optional(),
   parseConfidence: z.number().min(0).max(1).optional(),
   createdBy: Id,
@@ -176,7 +178,7 @@ export type BookingAnchor = Pick<ScheduleItem, 'day' | 'start' | 'end'> & {
  * - Overnight / timezone-crossing journeys: separate depart + arrive moments.
  * - Hotels: check-in and check-out moments.
  */
-export function bookingAnchors(b: Pick<BookingDraft, 'kind' | 'startLocal' | 'endLocal'>): BookingAnchor[] {
+export function bookingAnchors(b: Pick<BookingDraft, 'kind' | 'startLocal' | 'endLocal'> & { startAt?: string; endAt?: string }): BookingAnchor[] {
   const [sDay, sTime] = b.startLocal.split('T');
   const [eDay, eTime] = b.endLocal.split('T');
   if (b.kind === 'hotel') {
@@ -185,12 +187,20 @@ export function bookingAnchors(b: Pick<BookingDraft, 'kind' | 'startLocal' | 'en
       { event: 'checkout', day: eDay, start: eTime, end: eTime },
     ];
   }
-  if (sDay === eDay && eTime > sTime) return [{ event: 'span', day: sDay, start: sTime, end: eTime }];
+  // One block only when both ends read the same clock: a KL 08:00 → Bangkok
+  // 09:05 flight is two moments (KL time, then Bangkok time), not 08:00–09:05.
+  if (sDay === eDay && eTime > sTime && sameZone(b)) return [{ event: 'span', day: sDay, start: sTime, end: eTime }];
   return [
     { event: 'depart', day: sDay, start: sTime, end: sTime },
     { event: 'arrive', day: eDay, start: eTime, end: eTime },
   ];
 }
+
+/** Both ends of a journey use the same UTC offset (unknown → assume yes). */
+export const sameZone = (b: { startAt?: string; endAt?: string }) => !b.startAt || !b.endAt || b.startAt.slice(19) === b.endAt.slice(19);
+
+/** How long before departure to be at the airport / station. */
+export const leaveBeforeMin = (kind: BookingKind) => (kind === 'flight' ? 150 : 45);
 
 // ─── AI Arrange jobs ────────────────────────────────────────────────────────
 

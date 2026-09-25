@@ -14,6 +14,8 @@ interface Props {
   /** 'regions' = cities/countries (trip destinations); 'any' = airports, stations, hotels… */
   scope?: 'regions' | 'any';
   autoFocus?: boolean;
+  /** Prefer places around here (5 km). */
+  near?: { lat: number; lng: number };
 }
 
 export function PlaceSearch(props: Props) {
@@ -25,7 +27,7 @@ export function PlaceSearch(props: Props) {
   );
 }
 
-function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…', scope = 'regions', autoFocus }: Props) {
+function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…', scope = 'regions', autoFocus, near }: Props) {
   const places = useMapsLibrary('places');
   const [text, setText] = useState('');
   const [suggestions, setSuggestions] = useState<google.maps.places.AutocompleteSuggestion[]>([]);
@@ -45,6 +47,7 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…',
           input: text,
           sessionToken: session.current!,
           ...(scope === 'regions' ? { includedPrimaryTypes: ['(regions)'] } : {}),
+          ...(near ? { locationBias: { center: near, radius: 5000 } } : {}),
         });
         if (!cancelled) {
           setSuggestions(res.suggestions.filter((s) => s.placePrediction));
@@ -58,7 +61,7 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…',
       cancelled = true;
       clearTimeout(t);
     };
-  }, [places, text, scope]);
+  }, [places, text, scope, near?.lat, near?.lng]);
 
   const pick = async (s: google.maps.places.AutocompleteSuggestion) => {
     const place = s.placePrediction!.toPlace();

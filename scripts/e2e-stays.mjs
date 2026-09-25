@@ -113,21 +113,67 @@ try {
   assert.equal(kept.votes[bob.uid], 'up');
   ok('searching again keeps votes and the pick');
 
-  const b = await bob.call('stays/booked', { id: kl.id, pnr: 'HB12345' }, q);
+  // A flight landing at KLIA 18:05 on check-in day: a 15:00 check-in is refused with why.
+  const fl = await ali.call('bookings/create', {
+    draft: {
+      kind: 'flight', carrier: 'MH', number: '602',
+      from: { name: 'Singapore Changi Airport', location: { lat: 1.3644, lng: 103.9915 } },
+      to: { name: 'Kuala Lumpur International Airport', location: { lat: 2.7456, lng: 101.7072 } },
+      startLocal: '2026-12-07T17:00', endLocal: '2026-12-07T18:05', passengerNames: [], travellerUids: [ali.uid, bob.uid],
+    },
+  }, q);
+  assert.equal(fl.status, 201, JSON.stringify(fl.body));
+  assert.equal((await bob.call('stays/booked', { id: kl.id, checkIn: '2026-12-07T19:30', checkOut: '2026-12-09T12:00' }, q)).status, 403);
+  ok('only the admin marks a hotel as booked');
+  const clash = await ali.call('stays/booked', { id: kl.id, checkIn: '2026-12-07T15:00', checkOut: '2026-12-09T12:00' }, q);
+  assert.equal(clash.status, 409, JSON.stringify(clash.body));
+  assert.match(clash.body.error, /lands at 18:05/);
+  ok(`check-in before the flight lands is refused: “${clash.body.error}”`);
+
+  const b = await ali.call('stays/booked', { id: kl.id, checkIn: '2026-12-07T19:30', checkOut: '2026-12-09T11:00', pnr: 'HB12345' }, q);
   assert.equal(b.status, 201, JSON.stringify(b.body));
   const booking = (await db.doc(`trips/${q.tripId}/bookings/${b.body.bookingId}`).get()).data();
   assert.equal(booking.kind, 'hotel');
-  assert.equal(booking.startLocal.slice(0, 10), '2026-12-07');
-  assert.equal(booking.endLocal.slice(0, 10), '2026-12-09');
+  assert.equal(booking.startLocal, '2026-12-07T19:30');
+  assert.equal(booking.endLocal, '2026-12-09T11:00');
+  assert.equal(booking.stayId, kl.id);
   assert.equal(booking.to.timezone, 'Asia/Kuala_Lumpur');
+  assert.equal((await db.doc(`trips/${q.tripId}/stays/${kl.id}`).get()).get('bookingId'), b.body.bookingId);
   const anchors = (await db.collection(`trips/${q.tripId}/schedule`).where('ref.bookingId', '==', b.body.bookingId).get()).docs.map((d) => d.data().ref.event).sort();
   assert.deepEqual(anchors, ['checkin', 'checkout']);
-  ok(`“I booked it” → hotel booking ${booking.startLocal} → ${booking.endLocal} with check-in/out on the timeline`);
-  assert.equal((await bob.call('stays/booked', { id: kl.id }, q)).status, 409);
-  ok('tapping it twice does not book twice');
+  ok(`“I booked it” → hotel booking ${booking.startLocal} → ${booking.endLocal}, linked to the stay, check-in/out on the timeline`);
+
+  // Change it: same booking, new times.
+  const ch = await ali.call('stays/booked', { id: kl.id, checkIn: '2026-12-07T20:00', checkOut: '2026-12-08T10:00' }, q);
+  assert.equal(ch.status, 200, JSON.stringify(ch.body));
+  assert.equal(ch.body.bookingId, b.body.bookingId);
+  const changed = (await db.doc(`trips/${q.tripId}/bookings/${b.body.bookingId}`).get()).data();
+  assert.deepEqual([changed.startLocal, changed.endLocal, changed.pnr], ['2026-12-07T20:00', '2026-12-08T10:00', 'HB12345']);
+  assert.equal((await db.doc(`trips/${q.tripId}/stays/${kl.id}`).get()).get('checkOut'), '2026-12-08');
+  ok('changing the booking updates it in place (and the stay follows the new dates)');
+
+  // Comments with @mentions.
+  const cm = await bob.call('stays/comment', { id: kl.id, key: top.key, text: 'Near the station 👍 @E2E Ali', mentions: [ali.uid] }, q);
+  assert.equal(cm.status, 201, JSON.stringify(cm.body));
+  const comment = (await db.doc(`trips/${q.tripId}/stays/${kl.id}/hotels/${top.key}/comments/${cm.body.id}`).get()).data();
+  assert.deepEqual(comment.mentions, [ali.uid]);
+  ok('hotel comment with an @mention saved (the mentioned person is notified)');
+
+  // Cancel it.
+  assert.equal((await ali.call('stays/unbook', { id: kl.id }, q)).status, 200);
+  assert.equal((await db.doc(`trips/${q.tripId}/bookings/${b.body.bookingId}`).get()).exists, false);
+  assert.equal((await db.collection(`trips/${q.tripId}/schedule`).where('ref.bookingId', '==', b.body.bookingId).get()).size, 0);
+  const afterUnbook = (await db.doc(`trips/${q.tripId}/stays/${kl.id}`).get()).data();
+  assert.equal(afterUnbook.bookingId, undefined);
+  assert.equal(afterUnbook.chosenKey, top.key);
+  ok('cancelling removes the booking and its timeline points; the hotel stays picked');
+  const again = await ali.call('stays/booked', { id: kl.id, checkIn: '2026-12-07T19:30', checkOut: '2026-12-09T11:00' }, q);
+  assert.equal(again.status, 201, JSON.stringify(again.body));
+  ok('it can be booked again after cancelling');
 
   // Room size change → needs a new search.
   const u = await ali.call('stays/update', { id: kl.id, checkIn: '2026-12-07', checkOut: '2026-12-09', perRoom: 3 }, q);
+  assert.equal(u.status, 200, JSON.stringify(u.body));
   assert.equal(u.body.research, true);
   assert.equal((await db.doc(`trips/${q.tripId}/stays/${kl.id}`).get()).get('search'), undefined);
   ok('changing people per room clears the old prices (search again)');

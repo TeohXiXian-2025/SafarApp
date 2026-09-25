@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arrangeTrip, dayFrames, orderByDistance, prayersInGaps, timeSequence, type DayFrame, type Unit } from './arrange';
+import { arrangeTrip, dayFrames, daySuggestions, orderByDistance, prayerBreaks, timeSequence, type DayFrame, type Unit } from './arrange';
 import type { DayPrayers } from './prayer';
 import { dayWarnings, estimateTravelMin } from './timeline';
 
@@ -16,7 +16,7 @@ const unit = (id: string, duration: number, over: Partial<Unit> = {}): Unit => (
 
 describe('timeSequence', () => {
   it('packs stops with travel time from the hotel', () => {
-    const t = timeSequence(frame(), [unit('a', 60), unit('b', 90)], { strict: true, travel: flat });
+    const t = timeSequence(frame(), [unit('a', 60), unit('b', 90)], { strict: true, travel: flat, buffer: 0 });
     expect(t.placed.map((p) => [p.id, clock(p.start), clock(p.end)])).toEqual([
       ['a', '09:10', '10:10'],
       ['b', '10:20', '11:50'],
@@ -24,27 +24,34 @@ describe('timeSequence', () => {
     expect(t.prayers).toEqual([]);
   });
 
-  it('prays Dhuhr before heading to the next stop once it is due', () => {
-    const t = timeSequence(frame({ prayers: PRAYERS }), [unit('a', 225, { prayerWalkMin: 5 }), unit('b', 60)], { strict: true, travel: flat });
-    // a 09:10–12:55; Dhuhr 13:05 is due before we'd reach b (13:05) → pray 13:05–13:30 near a, then b.
-    expect(t.prayers.map((p) => [p.key, clock(p.start), clock(p.end), p.afterId])).toEqual([['dhuhr', '13:05', '13:30', 'a']]);
-    expect(clock(t.placed[1].start)).toBe('13:40');
+  it('keeps a buffer on top of the travel time', () => {
+    const t = timeSequence(frame(), [unit('a', 60), unit('b', 90)], { strict: true, travel: flat });
+    expect(t.placed.map((p) => clock(p.start))).toEqual(['09:20', '10:40']);
   });
 
-  it('prays on arrival when a prayer would run out during a long visit', () => {
-    // Arrive 19:00; Maghrib 19:10 must be prayed by Isha 20:25 — a 2 h visit would miss it, so pray first.
-    const t = timeSequence(frame({ start: h('18:50'), end: h('23:00'), prayers: PRAYERS }), [unit('night', 120, { prayerWalkMin: 0 })], { strict: true, travel: flat });
-    expect(clock(t.placed[0].start)).toBe('19:30');
-    // Isha (20:25, until 23:25) falls during the visit and is prayed right after it.
-    expect(t.prayers.map((p) => [p.key, clock(p.start)])).toEqual([
-      ['maghrib', '19:10'],
-      ['isha', '21:30'],
+  it('plans stops around a locked prayer time, prayed near the stop before', () => {
+    const t = timeSequence(frame({ prayers: PRAYERS }), [unit('a', 120), unit('b', 60), unit('c', 60)], { strict: true, travel: flat, buffer: 0 });
+    // a 09:10–11:10, b 11:20–12:20; c would run into Dhuhr (13:05–13:35) → after it.
+    expect(t.placed.map((p) => [p.id, clock(p.start)])).toEqual([
+      ['a', '09:10'],
+      ['b', '11:20'],
+      ['c', '13:50'],
     ]);
+    expect(t.prayers.map((p) => [p.key, clock(p.start), clock(p.end), p.afterId])).toEqual([['dhuhr', '13:05', '13:35', 'b']]);
   });
 
-  it('still owes Asr when the day starts late in its window', () => {
-    const t = timeSequence(frame({ start: h('18:40'), end: h('23:00'), prayers: PRAYERS }), [unit('x', 30)], { strict: true, travel: flat });
-    expect(t.prayers[0]).toMatchObject({ key: 'asr', start: h('18:40') });
+  it('pauses the journey for a prayer that comes due on the way', () => {
+    const t = timeSequence(frame({ start: h('12:00'), prayers: PRAYERS }), [unit('a', 60), unit('b', 60)], { strict: true, travel: () => 20, buffer: 0 });
+    // a 12:20–13:20 would overlap Dhuhr → a after it; the walk to b is split by nothing else.
+    expect(t.prayers[0]).toMatchObject({ key: 'dhuhr', start: h('13:05') });
+    expect(t.placed.every((p) => p.end <= h('13:05') || p.start >= h('13:35'))).toBe(true);
+  });
+
+  it('lets a long visit run through a prayer time and pray there', () => {
+    const t = timeSequence(frame({ prayers: PRAYERS }), [unit('park', 240, { prayerWalkMin: 0 })], { strict: true, travel: flat, buffer: 0 });
+    // 09:10 + 4 h reaches Dhuhr at 13:05 → 20 min added for praying there.
+    expect([clock(t.placed[0].start), clock(t.placed[0].end)]).toEqual(['09:10', '13:30']);
+    expect(t.prayers.map((p) => [p.key, p.afterId])).toEqual([['dhuhr', 'park']]);
   });
 
   it('waits for opening time, and drops closed / non-fitting stops when strict', () => {
@@ -63,7 +70,7 @@ describe('timeSequence', () => {
   });
 
   it('steps around a locked train', () => {
-    const t = timeSequence(frame({ blocks: [{ start: h('10:00'), end: h('12:00') }] }), [unit('a', 60), unit('b', 60)], { strict: true, travel: flat });
+    const t = timeSequence(frame({ blocks: [{ start: h('10:00'), end: h('12:00') }] }), [unit('a', 60), unit('b', 60)], { strict: true, travel: flat, buffer: 0 });
     expect(t.placed.map((p) => clock(p.start))).toEqual(['12:15', '13:25']);
   });
 });
@@ -127,33 +134,40 @@ describe('arrangeTrip', () => {
   });
 });
 
-describe('prayersInGaps', () => {
+describe('prayerBreaks', () => {
   const stops = [
     { id: 'a', start: h('10:00'), end: h('13:00') },
     { id: 'b', start: h('13:40'), end: h('15:00') },
-    { id: 'c', start: h('15:00'), end: h('18:00') },
+    { id: 'c', start: h('15:00'), end: h('16:20') },
+    { id: 'd', start: h('17:00'), end: h('18:00') },
   ];
 
-  it('uses the first free gap after the prayer time', () => {
-    const r = prayersInGaps(PRAYERS, stops, HOTEL);
-    // Dhuhr fits between a and b; Asr (16:25–19:10) only after c ends at 18:00.
-    expect(r.prayers.map((p) => [p.key, clock(p.start), p.afterId])).toEqual([
-      ['dhuhr', '13:05', 'a'],
-      ['asr', '18:00', 'c'],
+  it('puts each prayer at its locked time, near the stop before it', () => {
+    const r = prayerBreaks(PRAYERS, stops, HOTEL);
+    expect(r.prayers.map((p) => [p.key, clock(p.start), clock(p.end), p.afterId])).toEqual([
+      ['dhuhr', '13:05', '13:35', 'a'],
+      ['asr', '16:25', '16:55', 'c'],
     ]);
+    expect(r.clashes).toEqual([]);
   });
 
-  it('reports a prayer with no gap before its time runs out', () => {
-    // Back-to-back from 15:00 to 21:00: no 30-min gap for Asr (until 19:10) or Maghrib (until 20:25).
-    const busy = [...stops.slice(0, 2), { id: 'c', start: h('15:00'), end: h('19:05') }, { id: 'd', start: h('19:05'), end: h('21:00') }];
-    const r = prayersInGaps(PRAYERS, busy, HOTEL);
-    expect(r.missed.map((m) => m.key)).toEqual(['asr', 'maghrib']);
+  it('reports a stop planned over a prayer time', () => {
+    const r = prayerBreaks(PRAYERS, [...stops.slice(0, 2), { id: 'c', start: h('15:00'), end: h('17:00') }], HOTEL);
+    expect(r.clashes.map((c) => [c.key, c.stopId])).toEqual([['asr', 'c']]);
+    // The break stays at its time anyway.
+    expect(r.prayers.find((p) => p.key === 'asr')?.start).toBe(h('16:25'));
+  });
+
+  it('does not flag a long visit — you pray there', () => {
+    const r = prayerBreaks(PRAYERS, [{ id: 'park', start: h('11:00'), end: h('15:00') }], HOTEL);
+    expect(r.clashes).toEqual([]);
+    expect(r.prayers.map((p) => [p.key, p.afterId])).toEqual([['dhuhr', 'park']]);
   });
 
   it('skips prayers before the day starts or after it ends', () => {
-    const r = prayersInGaps(PRAYERS, [{ id: 'm', start: h('09:00'), end: h('11:00') }], HOTEL);
+    const r = prayerBreaks(PRAYERS, [{ id: 'm', start: h('09:00'), end: h('11:00') }], HOTEL);
     expect(r.prayers).toEqual([]);
-    expect(r.missed).toEqual([]);
+    expect(r.clashes).toEqual([]);
   });
 });
 
@@ -197,7 +211,7 @@ describe('dayFrames', () => {
   });
 });
 
-describe('AI Arrange never creates a blocking conflict', () => {
+describe('AI Arrange never creates a blocking conflict (or a tight transfer)', () => {
   // Small seeded PRNG so failures are reproducible.
   const rng = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
   const DAYNAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -235,13 +249,36 @@ describe('AI Arrange never creates a blocking conflict', () => {
             transitMin: k > 0 ? estimateTravelMin(placed[k - 1].unit.loc, p.unit.loc) : undefined,
           })),
           ...d.timing.prayers.map((p, k) => ({ id: `pr${k}`, start: clock(p.start), end: clock(p.end), orderIndex: 0, kind: 'prayer' as const })),
-          ...f.blocks.map((b, k) => ({ id: `blk${k}`, start: clock(b.start), end: clock(b.end), orderIndex: 0 })),
+          ...f.blocks.map((b, k) => ({ id: `blk${k}`, start: clock(b.start), end: clock(b.end), orderIndex: 0, locked: true })),
         ];
         // Travel is only checked stop→stop (the scheduler routes around trains the same way).
-        const blocking = dayWarnings(d.day, items, (id) => units.find((u) => u.id === id)?.hours).filter((w) => w.severity === 'block' && !(w.kind === 'unreachable' && items.some((x) => x.id.startsWith('blk'))));
+        const blocking = dayWarnings(d.day, items, (id) => units.find((u) => u.id === id)?.hours).filter((w) => (w.severity === 'block' || w.kind === 'tight') && !((w.kind === 'unreachable' || w.kind === 'tight') && items.some((x) => x.id.startsWith('blk'))));
         if (blocking.length) failures.push(`seed ${seed} ${d.day}: ${blocking.map((w) => `${w.itemId} ${w.kind} (${w.text})`).join('; ')}`);
       }
     }
     expect(failures).toEqual([]);
+  });
+});
+
+describe('daySuggestions', () => {
+  it('suggests a shorter visiting order and flags a meal at an odd hour', () => {
+    const stops = [
+      { id: 'far', start: h('09:00'), end: h('10:00'), loc: near(0.12), name: 'Far' },
+      { id: 'close', start: h('10:30'), end: h('11:30'), loc: near(0.03), name: 'Close' },
+      { id: 'mid', start: h('12:00'), end: h('13:00'), loc: near(0.06), name: 'Mid' },
+      { id: 'cafe', start: h('16:00'), end: h('17:00'), loc: near(0.061), name: 'Cafe', food: true },
+    ];
+    const s = daySuggestions({ base: HOTEL, baseKnown: true }, stops);
+    expect(s.find((x) => x.kind === 'order')?.order).toEqual(['close', 'mid', 'cafe', 'far']);
+    expect(s.find((x) => x.kind === 'meal')?.text).toMatch(/Cafe/);
+  });
+
+  it('stays quiet when the order is already good', () => {
+    const stops = [
+      { id: 'a', start: h('09:00'), end: h('10:00'), loc: near(0.01), name: 'A' },
+      { id: 'b', start: h('10:30'), end: h('11:30'), loc: near(0.02), name: 'B' },
+      { id: 'c', start: h('12:00'), end: h('13:00'), loc: near(0.03), name: 'C' },
+    ];
+    expect(daySuggestions({ base: HOTEL, baseKnown: true }, stops)).toEqual([]);
   });
 });

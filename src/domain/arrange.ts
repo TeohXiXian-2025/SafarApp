@@ -2,18 +2,22 @@
 // breaks. Pure functions (no I/O) so every rule is unit-tested:
 //
 //   dayFrames()      bookings → each day's usable hours, base (hotel) and blocked spans
-//   timeSequence()   walks one day's stops in order: travel, opening hours,
-//                    locked bookings, meal times and prayer breaks
+//   timeSequence()   walks one day's stops in order: travel (+ buffer), opening
+//                    hours, locked bookings, meal times and locked prayer times
 //   arrangeTrip()    clusters stops into days, orders each day (nearest
 //                    neighbour + 2-opt, then meal/prayer-aware local search)
-//   prayersInGaps()  prayer breaks for a hand-made day, without moving stops
+//   prayerBreaks()   prayer breaks for a hand-made day, without moving stops
+//
+// Prayer breaks are pinned to the prayer's time, like a booking: stops are
+// planned around them. Only where you pray moves (near the stop before it).
+// Long visits (LONG_VISIT_MIN+) may run through a prayer time: you pray there.
 //
 // All times are minutes after local midnight at the day's location — the
 // timezone of the trip destination closest to where the group is that day.
 import type { GeoPoint } from './common.js';
 import type { BookingDraft } from './plan.js';
 import { openingRanges, PRAY_MIN, prayerTimesOn, type DayPrayers, type PrayerKey } from './prayer.js';
-import { ceil5, DEFAULT_GAP, estimateTravelMin, metersBetween, toMin } from './timeline.js';
+import { BUFFER_MIN, ceil5, DEFAULT_GAP, estimateTravelMin, LONG_VISIT_MIN, metersBetween, toMin } from './timeline.js';
 import type { Destination, MemberPrefs } from './trip.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -124,12 +128,51 @@ const mealPenalty = (u: Unit, start: number) => {
   return Math.min(...MEALS.map(([a, b]) => (start < a ? a - start : start > b ? start - b : 0)));
 };
 
-/** Dhuhr → Asr → Maghrib → Isha, each with when it must be prayed by. Fajr is before any day out. */
-function prayerList(p: DayPrayers) {
-  return ORDER.slice(1).map((key, i) => {
-    const next = ORDER[i + 2];
-    return { key, t: p.times[key], by: next ? p.times[next] : p.times[key] + 180 };
+/** A prayer break: its own time (from the adhan, rounded to 5 min) + walking to the prayer space and back. */
+export const PRAYER_BLOCK_MIN = PRAY_MIN + PRAYER_WALK_DEFAULT;
+
+export interface LockedPrayer {
+  key: PrayerKey;
+  start: number;
+  end: number;
+}
+
+/** Dhuhr, Asr, Maghrib and Isha, locked at their times. Fajr is before any day out. */
+export function lockedPrayers(p: DayPrayers | null): LockedPrayer[] {
+  if (!p) return [];
+  return ORDER.slice(1).map((key) => {
+    const start = ceil5(p.times[key]);
+    return { key, start, end: start + PRAYER_BLOCK_MIN };
   });
+}
+
+/** How long a visit lasts from `start`: long ones get PRAY_MIN for each prayer time inside them. */
+function lengthWith(prayers: LockedPrayer[], start: number, duration: number) {
+  if (duration < LONG_VISIT_MIN) return duration;
+  let d = duration;
+  for (const p of prayers) if (p.start >= start && p.start < start + d) d += PRAY_MIN;
+  return d;
+}
+
+/** Travel from `from` for `move` minutes, pausing for any prayer on the way. */
+function arriveAfter(prayers: LockedPrayer[], from: number, move: number) {
+  let t = from + move;
+  for (const p of prayers) if (p.start < t && p.end > from) t += p.end - Math.max(p.start, from);
+  return t;
+}
+
+/** Where each prayer of a planned day is prayed, for the prayers that fall while the group is out. */
+function placePrayers(prayers: LockedPrayer[], placed: (Timed & { loc: GeoPoint })[], leftAt: number, base: GeoPoint): PrayerSlot[] {
+  if (!placed.length) return [];
+  const last = Math.max(...placed.map((x) => x.end));
+  return prayers
+    .filter((p) => p.end > leftAt && p.start < last)
+    .map((p) => {
+      const inside = placed.find((x) => x.start <= p.start && x.end > p.start);
+      const before = [...placed].reverse().find((x) => x.end <= p.start);
+      const near = inside ?? before;
+      return { key: p.key, start: p.start, end: p.end, afterId: near?.id ?? null, at: near?.loc ?? placed[0]?.loc ?? base };
+    });
 }
 
 // ─── One day ────────────────────────────────────────────────────────────────
@@ -140,26 +183,20 @@ function prayerList(p: DayPrayers) {
  * past the day's end are dropped as `unfit`; otherwise (reordering by hand)
  * they're kept and the timeline shows a warning instead.
  */
-export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boolean; travel?: Travel }): DayTiming {
+export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boolean; travel?: Travel; buffer?: number }): DayTiming {
   const travel = opts.travel ?? estimateTravelMin;
-  const pending = frame.prayers ? prayerList(frame.prayers).filter((p) => p.by > frame.start + PRAY_MIN && p.t < frame.end) : [];
+  const buffer = opts.buffer ?? BUFFER_MIN;
+  const prayers = lockedPrayers(frame.prayers);
   const out: DayTiming = { placed: [], prayers: [], unfit: [], travelMin: 0, cost: 0 };
+  const placed: (Timed & { loc: GeoPoint })[] = [];
   let cursor = frame.start;
-  let prev: { id: string | null; loc: GeoPoint; walk: number } = { id: null, loc: frame.base, walk: 0 };
-  // Unknown start point: begin at the first stop (and pray near it) instead of a guessed centre.
-  if (!frame.baseKnown && units[0]) prev = { id: null, loc: units[0].loc, walk: units[0].prayerWalkMin ?? PRAYER_WALK_DEFAULT };
-
-  const pray = (p: (typeof pending)[number], near: { id: string | null; loc: GeoPoint; walk: number }) => {
-    const start = avoidBlocks(Math.max(cursor, p.t), PRAY_MIN + near.walk, frame.blocks);
-    out.prayers.push({ key: p.key, start, end: start + PRAY_MIN + near.walk, afterId: near.id, at: near.loc });
-    cursor = start + PRAY_MIN + near.walk;
-  };
+  let leftAt = frame.start;
+  let prevLoc: GeoPoint = frame.base;
+  // Unknown start point: begin at the first stop instead of a guessed centre.
+  let fromPrev = frame.baseKnown;
 
   for (const u of units) {
-    const move = travelOr(travel, prev.loc, u.loc);
-    // Prayers that come due before we'd get there: pray first, near the last stop.
-    while (pending[0] && pending[0].t <= cursor + move) pray(pending.shift()!, prev);
-
+    const move = fromPrev ? travelOr(travel, prevLoc, u.loc) : 0;
     const hoursOpen = openingRanges(u.hours, frame.day);
     // A required window narrows the opening hours (or stands in for them).
     const open = u.window
@@ -169,72 +206,54 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
       out.unfit.push({ id: u.id, reason: 'closed' });
       continue;
     }
+    // Short visits step around prayer times like around a booking; long ones pray there.
+    const blocks = u.duration >= LONG_VISIT_MIN ? frame.blocks : [...frame.blocks, ...prayers];
+    const len = (s: number) => lengthWith(prayers, s, u.duration);
     /**
-     * Earliest start ≥ from that is inside opening hours AND clear of locked
-     * bookings — re-checked after every shift, so stepping around a train
-     * can never push a visit past closing time. null = it doesn't fit.
+     * Earliest start >= from that is inside opening hours AND clear of locked
+     * bookings and prayer times — re-checked after every shift, so stepping
+     * around one can never push a visit past closing time. null = no fit.
      */
     const fit = (from: number): number | null => {
       let s = ceil5(from);
-      for (let guard = 0; guard < 8; guard++) {
+      for (let guard = 0; guard < 16; guard++) {
         if (open?.length) {
-          const range = open.find(([o, c]) => Math.max(s, o) + u.duration <= c);
+          const range = open.find(([o, c]) => Math.max(s, o) + len(Math.max(s, o)) <= c);
           if (!range) return null;
           s = ceil5(Math.max(s, range[0]));
         }
-        const moved = avoidBlocks(s, u.duration, frame.blocks);
+        const moved = avoidBlocks(s, len(s), blocks);
         if (moved === s) return s;
         s = moved;
       }
       return null;
     };
 
-    let start = fit(cursor + move);
+    const ready = arriveAfter(prayers, cursor, move + (fromPrev ? buffer : 0));
+    let start = fit(ready);
     if (start === null) {
       if (opts.strict) {
         out.unfit.push({ id: u.id, reason: 'hours' });
         continue;
       }
-      start = avoidBlocks(ceil5(cursor + move), u.duration, frame.blocks); // by hand: keep it, the timeline warns
+      start = avoidBlocks(ceil5(ready), u.duration, blocks); // by hand: keep it, the timeline warns
     }
-
-    // A prayer starting mid-visit whose time runs out before we'd be done: pray on arrival first.
-    const walk = u.prayerWalkMin ?? PRAYER_WALK_DEFAULT;
-    const due = pending[0];
-    if (due && due.t < start + u.duration && due.by < start + u.duration + walk + PRAY_MIN) {
-      const before = { cursor, prayers: out.prayers.length };
-      pending.shift();
-      cursor = Math.max(cursor, start);
-      pray(due, { id: prev.id, loc: u.loc, walk });
-      const after = fit(cursor);
-      if (after !== null) start = after;
-      else if (opts.strict) {
-        // Praying first leaves no time before closing: undo the prayer and leave this stop out.
-        out.prayers.length = before.prayers;
-        cursor = before.cursor;
-        pending.unshift(due);
-        out.unfit.push({ id: u.id, reason: 'hours' });
-        continue;
-      } else start = avoidBlocks(cursor, u.duration, frame.blocks);
-    }
-
-    const end = start + u.duration;
+    const end = start + len(start);
     if (opts.strict && end > frame.end) {
       out.unfit.push({ id: u.id, reason: 'time' });
       continue;
     }
+    if (!placed.length) leftAt = start - move - (fromPrev ? buffer : 0);
+    placed.push({ id: u.id, start, end, loc: u.loc });
     out.placed.push({ id: u.id, start, end });
     out.travelMin += move;
-    out.cost += move + 0.5 * (start - (cursor + move)) + mealPenalty(u, start);
+    out.cost += move + 0.5 * (start - ready) + mealPenalty(u, start);
     cursor = end;
-    prev = { id: u.id, loc: u.loc, walk };
+    prevLoc = u.loc;
+    fromPrev = true;
   }
-  // Prayers that come due by the time the last stop ends: pray before heading back.
-  while (pending[0] && pending[0].t <= cursor && out.placed.length) pray(pending.shift()!, prev);
-
-  // Nobody went out: prayers happen at the hotel, not on the plan.
-  if (!out.placed.length) out.prayers = [];
-  out.cost += (frame.baseKnown ? travelOr(travel, prev.loc, frame.base) : 0) + 1000 * out.unfit.length;
+  out.prayers = placePrayers(prayers, placed, leftAt, frame.base);
+  out.cost += (frame.baseKnown ? travelOr(travel, prevLoc, frame.base) : 0) + 1000 * out.unfit.length;
   return out;
 }
 
@@ -346,7 +365,11 @@ const centroid = (us: Unit[], fallback: GeoPoint) =>
  * day's hotel), capped by free time and pace, then each day ordered and
  * timed. Stops that fit nowhere come back in `unplaced` with a reason.
  */
-export function arrangeTrip(frames: DayFrame[], units: Unit[], opts: { maxStops: number; travel?: Travel }): Arrangement {
+export function arrangeTrip(
+  frames: DayFrame[],
+  units: Unit[],
+  opts: { maxStops: number; travel?: Travel; destinations?: Pick<Destination, 'location' | 'timezone' | 'countryCode'>[] },
+): Arrangement {
   const travel = opts.travel ?? estimateTravelMin;
   const usable = frames.filter((f) => freeMinutes(f) >= 60);
   const unplaced: Arrangement['unplaced'] = [];
@@ -380,6 +403,13 @@ export function arrangeTrip(frames: DayFrame[], units: Unit[], opts: { maxStops:
   }
 
   // 3. Order + time each day; stops that don't fit try every other day before giving up.
+  // A day with no hotel prays on the local time where its stops are.
+  if (opts.destinations) {
+    for (let i = 0; i < usable.length; i++) {
+      const us = byDay.get(usable[i].day)!;
+      if (us.length) usable[i] = rebaseFrame(usable[i], centroid(us, usable[i].base), opts.destinations);
+    }
+  }
   const days = new Map<string, ArrangedDay>();
   for (const f of usable) {
     const r = improveOrder(f, orderByDistance(f.base, byDay.get(f.day)!), travel);
@@ -424,37 +454,79 @@ export interface GapStop extends Timed {
   prayerWalkMin?: number;
 }
 
+export interface PrayerClash {
+  key: PrayerKey;
+  start: number;
+  end: number;
+  /** The stop planned over the prayer time. */
+  stopId: string;
+}
+
 /**
- * Prayer breaks for a day arranged by hand: each prayer that falls while the
- * group is out goes in the first free gap between its time and the next
- * prayer — stops are never moved. `missed` lists prayers with no such gap.
+ * Prayer breaks for a day arranged by hand, at their locked times, for the
+ * prayers that fall while the group is out — stops are never moved. Where to
+ * pray follows the stop before it (or the long visit it falls in). `clashes`
+ * lists stops planned over a prayer time (long visits excepted: you pray there).
  */
-export function prayersInGaps(prayers: DayPrayers | null, stops: GapStop[], base?: GeoPoint): { prayers: PrayerSlot[]; missed: { key: PrayerKey; from: number; to: number }[] } {
-  const out: PrayerSlot[] = [];
-  const missed: { key: PrayerKey; from: number; to: number }[] = [];
-  if (!prayers || !stops.length) return { prayers: out, missed };
+export function prayerBreaks(
+  prayers: DayPrayers | null,
+  stops: GapStop[],
+  base?: GeoPoint,
+  /** Time spent travelling (airport → landing): prayers then are covered by the journey's own guidance. */
+  journeys: Block[] = [],
+): { prayers: PrayerSlot[]; clashes: PrayerClash[] } {
+  const clashes: PrayerClash[] = [];
+  if (!prayers || !stops.length) return { prayers: [], clashes };
   const sorted = [...stops].sort((a, b) => a.start - b.start);
   const first = sorted[0].start;
   const last = Math.max(...sorted.map((s) => s.end));
-  const busy = (s: number, e: number) => sorted.some((x) => x.start < e && Math.max(x.end, x.start + 1) > s) || out.some((p) => p.start < e && p.end > s);
-
-  for (const p of prayerList(prayers)) {
-    if (p.t + PRAY_MIN <= first || p.t >= last) continue; // prayed before leaving / after getting back
-    const candidates = [Math.max(p.t, first), ...sorted.map((x) => x.end).filter((e) => e >= p.t)].sort((a, b) => a - b);
-    let placed = false;
-    for (const c of candidates) {
-      const s = ceil5(c);
-      const anchor = [...sorted].reverse().find((x) => x.end <= s) ?? sorted[0];
-      const walk = anchor.prayerWalkMin ?? PRAYER_WALK_DEFAULT;
-      const e = s + PRAY_MIN + walk;
-      if (e > p.by || busy(s, e)) continue;
-      out.push({ key: p.key, start: s, end: e, afterId: anchor.end <= s ? anchor.id : null, at: anchor.loc ?? base ?? { lat: 0, lng: 0 } });
-      placed = true;
-      break;
+  const out: PrayerSlot[] = [];
+  for (const p of lockedPrayers(prayers)) {
+    if (p.end <= first || p.start >= last) continue; // prayed before leaving / after getting back
+    if (journeys.some((j) => p.start < j.end && p.end > j.start)) continue; // at the airport / on board
+    const isLong = (x: GapStop) => x.end - x.start >= LONG_VISIT_MIN;
+    const inside = sorted.find((x) => x.start <= p.start && x.end > p.start && isLong(x));
+    for (const x of sorted) {
+      if (isLong(x)) continue;
+      if (x.start < p.end && Math.max(x.end, x.start + 1) > p.start) clashes.push({ ...p, stopId: x.id });
     }
-    if (!placed) missed.push({ key: p.key, from: p.t, to: p.by });
+    const before = [...sorted].reverse().find((x) => x.end <= p.start);
+    const near = inside ?? before ?? sorted[0];
+    out.push({ key: p.key, start: p.start, end: p.end, afterId: inside || before ? near.id : null, at: near.loc ?? base ?? { lat: 0, lng: 0 } });
   }
-  return { prayers: out, missed };
+  return { prayers: out, clashes };
+}
+
+/**
+ * When a day's journeys keep you at the airport / station or on board: from
+ * getting there before departure until out after arrival. Items are the day's
+ * booking moments ('depart' / 'arrive' / 'span'); a departure with no arrival
+ * that day runs to midnight, an arrival with no departure from midnight.
+ */
+export function journeySpans(items: { start: number; end: number; event: string; bookingId: string; flight: boolean }[]): Block[] {
+  const out: Block[] = [];
+  const pre = (f: boolean) => (f ? 150 : 45);
+  const post = (f: boolean) => (f ? 60 : 30);
+  for (const it of items) {
+    if (it.event === 'span') out.push({ start: it.start - pre(it.flight), end: it.end + post(it.flight) });
+    else if (it.event === 'depart') {
+      const arr = items.find((x) => x.bookingId === it.bookingId && x.event === 'arrive');
+      out.push({ start: it.start - pre(it.flight), end: arr ? arr.end + post(it.flight) : 24 * 60 });
+    } else if (it.event === 'arrive' && !items.some((x) => x.bookingId === it.bookingId && x.event === 'depart')) {
+      out.push({ start: 0, end: it.end + post(it.flight) });
+    }
+  }
+  return out;
+}
+
+/**
+ * A day with no hotel or arrival only knows its country: pray on the local
+ * time of where the stops actually are (the destination nearest them).
+ */
+export function rebaseFrame(frame: DayFrame, at: GeoPoint | undefined, destinations: Pick<Destination, 'location' | 'timezone' | 'countryCode'>[]): DayFrame {
+  if (frame.baseKnown || !at || !frame.prayers) return frame;
+  const dest = nearestDestination(destinations, at);
+  return { ...frame, prayers: prayerTimesOn(frame.day, at, dest.timezone, dest.countryCode) };
 }
 
 // ─── Days from bookings ─────────────────────────────────────────────────────
@@ -532,3 +604,57 @@ export function dayFrames(
     };
   });
 }
+
+// ─── 🟡 "Works, but could be better" for a hand-made day ─────────────────────
+
+export interface DaySuggestion {
+  kind: 'order' | 'meal';
+  text: string;
+  /** For 'order': the stop ids in the suggested order (send to reorder). */
+  order?: string[];
+}
+
+/** Minutes of travel saved before a new order is worth suggesting. */
+const ORDER_SAVING_MIN = 15;
+
+/**
+ * Better arrangements for a day planned by hand: a visiting order that cuts
+ * travel (same stops, nearest-neighbour + 2-opt), and meal spots planned far
+ * from lunch / dinner time. `stops` are the movable stops in their current order.
+ */
+export function daySuggestions(
+  frame: Pick<DayFrame, 'base' | 'baseKnown'>,
+  stops: (Timed & { loc: GeoPoint; name: string; food?: boolean })[],
+  travel: Travel = estimateTravelMin,
+): DaySuggestion[] {
+  const out: DaySuggestion[] = [];
+  const route = (list: { loc: GeoPoint }[]) => {
+    const pts = frame.baseKnown ? [frame.base, ...list.map((s) => s.loc), frame.base] : list.map((s) => s.loc);
+    return pts.slice(1).reduce((m, p, i) => m + travel(pts[i], p), 0);
+  };
+  if (stops.length >= 3) {
+    const units = stops.map((s) => ({ id: s.id, loc: s.loc, duration: s.end - s.start }));
+    const better = orderByDistance(frame.baseKnown ? frame.base : stops[0].loc, units);
+    const byId = new Map(stops.map((s) => [s.id, s]));
+    const now = route(stops);
+    const next = route(better.map((u) => byId.get(u.id)!));
+    if (now - next >= ORDER_SAVING_MIN && better.some((u, i) => u.id !== stops[i].id)) {
+      out.push({
+        kind: 'order',
+        text: `Visiting in this order saves ~${Math.round(now - next)} min of travel: ${better.map((u) => byId.get(u.id)!.name).join(' → ')}.`,
+        order: better.map((u) => u.id),
+      });
+    }
+  }
+  for (const s of stops) {
+    if (!s.food) continue;
+    const off = Math.min(...MEALS.map(([a, b]) => (s.start < a ? a - s.start : s.start > b ? s.start - b : 0)));
+    if (off >= 60) out.push({ kind: 'meal', text: `${s.name} is a meal spot but it's planned at ${fmtHm(s.start)} — lunch (11:30–2 PM) or dinner (6–8:30 PM) suits it better.` });
+  }
+  return out;
+}
+
+const fmtHm = (min: number) => {
+  const h = Math.floor(min / 60) % 24;
+  return `${h % 12 || 12}:${String(min % 60).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+};

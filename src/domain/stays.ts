@@ -23,6 +23,8 @@ export const Stay = z.object({
   perRoom: z.number().int().min(1).max(8).default(2),
   /** The admin's pick among the options. */
   chosenKey: z.string().max(300).optional(),
+  /** The hotel booking made for this stay ("I booked it"); cleared when it's cancelled. */
+  bookingId: Id.optional(),
   search: z
     .object({
       at: Millis,
@@ -283,3 +285,162 @@ export function scoreHotel(h: ScoreInput, ctx: ScoreContext): { score: number; w
 
 /** Everyone's average minutes from the hotel to a set of stops (or the centre). */
 export const avgTravelMin = (from: GeoPoint, to: GeoPoint[]) => Math.round(to.reduce((s, p) => s + estimateTravelMin(from, p), 0) / Math.max(1, to.length));
+
+// ─── Booking a hotel around the journeys ────────────────────────────────────
+
+/** Arriving within this distance of a hotel = arriving in its city. */
+const HOTEL_CITY_M = 60_000;
+/** From landing to the hotel door (immigration, bags, the ride in). */
+const AFTER_LANDING_MIN = { flight: 90, other: 45 };
+
+interface JourneyLike {
+  kind: string;
+  carrier?: string;
+  number?: string;
+  startLocal: string;
+  endLocal: string;
+  startAt: string;
+  endAt: string;
+  travellerUids: string[];
+  from?: { location: GeoPoint; name: string };
+  to: { location: GeoPoint; name: string };
+}
+
+const journeyName = (j: Pick<JourneyLike, 'carrier' | 'number' | 'kind'>) => [j.carrier, j.number].filter(Boolean).join(' ') || j.kind;
+const hhmm = (local: string) => local.slice(11, 16);
+
+/**
+ * Why a hotel stay (check-in / check-out instants, with offsets) doesn't work
+ * with the guests' journeys, or null. Catches checking in while still in the
+ * air or before landing in that city, and checking out after leaving it.
+ */
+export function hotelJourneyProblem(
+  hotel: { startLocal: string; endLocal: string; startAt: string; endAt: string; travellerUids: string[]; location: GeoPoint },
+  journeys: JourneyLike[],
+): string | null {
+  const inn = Date.parse(hotel.startAt);
+  const out = Date.parse(hotel.endAt);
+  for (const j of journeys) {
+    if (j.kind === 'hotel' || !j.travellerUids.some((u) => hotel.travellerUids.includes(u))) continue;
+    const dep = Date.parse(j.startAt);
+    const arr = Date.parse(j.endAt);
+    const name = journeyName(j);
+    const arrivesHere = metersBetween(j.to.location, hotel.location) < HOTEL_CITY_M;
+    const leavesHere = !!j.from && metersBetween(j.from.location, hotel.location) < HOTEL_CITY_M;
+    // Landing here on check-in day, after the check-in time.
+    if (arrivesHere && arr > inn && arr < out && dep < out && j.endLocal.slice(0, 10) === hotel.startLocal.slice(0, 10)) {
+      return `Check-in at ${hhmm(hotel.startLocal)} is before ${name} lands at ${hhmm(j.endLocal)}. Set check-in after you arrive (about ${hhmm(j.endLocal)} + the ride in).`;
+    }
+    if (dep < inn && arr > inn) return `Check-in at ${hhmm(hotel.startLocal)} is while you're on ${name} (${hhmm(j.startLocal)} → ${hhmm(j.endLocal)}).`;
+    // Leaving this city before the check-out time on check-out day.
+    if (leavesHere && dep < out && dep > inn && j.startLocal.slice(0, 10) === hotel.endLocal.slice(0, 10)) {
+      return `Check-out at ${hhmm(hotel.endLocal)} is after ${name} leaves at ${hhmm(j.startLocal)}. Set check-out before you go to the ${j.kind === 'flight' ? 'airport' : 'station'}.`;
+    }
+    if (dep < out && arr > out) return `Check-out at ${hhmm(hotel.endLocal)} is while you're on ${name} (${hhmm(j.startLocal)} → ${hhmm(j.endLocal)}).`;
+  }
+  return null;
+}
+
+const addMin = (hhmmStr: string, min: number) => {
+  const t = Math.max(0, Math.min(23 * 60 + 55, Number(hhmmStr.slice(0, 2)) * 60 + Number(hhmmStr.slice(3, 5)) + min));
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+};
+
+/**
+ * Check-in / check-out (local date + time) to suggest for a stay: the hotel's
+ * own times, moved later when you land that day and earlier when you leave.
+ */
+export function suggestStayTimes(
+  stay: { checkIn: string; checkOut: string; location: GeoPoint },
+  hotel: { checkIn: string; checkOut: string },
+  journeys: Omit<JourneyLike, 'startAt' | 'endAt'>[],
+  travellerUids: string[],
+): { checkIn: string; checkOut: string; notes: string[] } {
+  let inTime = hotel.checkIn;
+  let outTime = hotel.checkOut;
+  const notes: string[] = [];
+  for (const j of journeys) {
+    if (j.kind === 'hotel' || !j.travellerUids.some((u) => travellerUids.includes(u))) continue;
+    if (j.endLocal.slice(0, 10) === stay.checkIn && metersBetween(j.to.location, stay.location) < HOTEL_CITY_M) {
+      const ready = addMin(hhmm(j.endLocal), j.kind === 'flight' ? AFTER_LANDING_MIN.flight : AFTER_LANDING_MIN.other);
+      if (ready > inTime) {
+        inTime = ready;
+        notes.push(`${journeyName(j)} lands at ${hhmm(j.endLocal)}, so check-in is set to ${ready}.`);
+      }
+    }
+    if (j.from && j.startLocal.slice(0, 10) === stay.checkOut && metersBetween(j.from.location, stay.location) < HOTEL_CITY_M) {
+      const leave = addMin(hhmm(j.startLocal), -(j.kind === 'flight' ? 180 : 60));
+      if (leave < outTime) {
+        outTime = leave;
+        notes.push(`${journeyName(j)} leaves at ${hhmm(j.startLocal)}, so check-out is set to ${leave}.`);
+      }
+    }
+  }
+  return { checkIn: `${stay.checkIn}T${inTime}`, checkOut: `${stay.checkOut}T${outTime}`, notes };
+}
+
+// ─── Journeys still to book ─────────────────────────────────────────────────
+
+/** Cities closer than this are one area — no journey needed between them. */
+const SAME_AREA_M = 30_000;
+/** A station / airport within this distance serves a city. */
+const SERVES_CITY_M = 100_000;
+
+export interface TransportGap {
+  key: string;
+  /** 'there' = getting to the first city, 'between' = city → city, 'home' = leaving the last. */
+  kind: 'there' | 'between' | 'home';
+  from?: string;
+  to?: string;
+  /** Local date the journey is expected on. */
+  date: string;
+  text: string;
+}
+
+const dayShift = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * Journeys the plan needs but nobody has booked: getting to the first city,
+ * each move between cities (from the stays, else the destinations in order),
+ * and getting home. Any traveller's booking counts.
+ */
+export function transportGaps(input: {
+  startDate: string;
+  endDate: string;
+  destinations: Pick<Destination, 'name' | 'location'>[];
+  stays: Pick<Stay, 'destIdx' | 'checkIn' | 'checkOut'>[];
+  bookings: { kind: string; startLocal: string; endLocal: string; from?: { location: GeoPoint }; to: { location: GeoPoint } }[];
+}): TransportGap[] {
+  const moves = input.bookings.filter((b) => b.kind !== 'hotel');
+  const fmt = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const within = (d: string, ref: string, before: number, after: number) => d >= dayShift(ref, -before) && d <= dayShift(ref, after);
+  const serves = (p: GeoPoint | undefined, i: number) => !!p && metersBetween(p, input.destinations[i].location) < SERVES_CITY_M;
+  const out: TransportGap[] = [];
+  if (!input.destinations.length) return out;
+
+  // City order and the day each move happens: from the stays when planned, else the listed order.
+  const legs: { from: number; to: number; date: string }[] = [];
+  const stays = [...input.stays].sort((a, b) => a.checkIn.localeCompare(b.checkIn));
+  if (stays.length) {
+    for (let k = 1; k < stays.length; k++) if (stays[k].destIdx !== stays[k - 1].destIdx) legs.push({ from: stays[k - 1].destIdx, to: stays[k].destIdx, date: stays[k].checkIn });
+  } else {
+    for (let i = 1; i < input.destinations.length; i++) legs.push({ from: i - 1, to: i, date: '' });
+  }
+  const first = stays[0]?.destIdx ?? 0;
+  const last = stays.at(-1)?.destIdx ?? input.destinations.length - 1;
+
+  if (!moves.some((b) => within(b.endLocal.slice(0, 10), input.startDate, 2, 1))) {
+    out.push({ key: 'there', kind: 'there', to: input.destinations[first].name, date: input.startDate, text: `No transport booked to get to ${input.destinations[first].name} (arriving by ${fmt(input.startDate)}).` });
+  }
+  for (const l of legs) {
+    if (metersBetween(input.destinations[l.from].location, input.destinations[l.to].location) < SAME_AREA_M) continue;
+    const booked = moves.some((b) => (serves(b.to.location, l.to) || serves(b.from?.location, l.from)) && (!l.date || within(b.startLocal.slice(0, 10), l.date, 1, 0) || within(b.endLocal.slice(0, 10), l.date, 1, 0)));
+    if (booked) continue;
+    const [a, b] = [input.destinations[l.from].name, input.destinations[l.to].name];
+    out.push({ key: `between:${l.from}>${l.to}:${l.date}`, kind: 'between', from: a, to: b, date: l.date, text: `No transport booked from ${a} to ${b}${l.date ? ` (around ${fmt(l.date)})` : ''} — add the train, bus or flight so the day can be planned.` });
+  }
+  if (!moves.some((b) => within(b.startLocal.slice(0, 10), input.endDate, 1, 2))) {
+    out.push({ key: 'home', kind: 'home', from: input.destinations[last].name, date: input.endDate, text: `No transport booked to get home from ${input.destinations[last].name} (leaving around ${fmt(input.endDate)}).` });
+  }
+  return out;
+}

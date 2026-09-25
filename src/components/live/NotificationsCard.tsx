@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { NOTIFY_KINDS, type NotifyKind, type NotifyPrefs } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { disablePush, enablePush, pushState, type PushState } from '../../lib/push';
+import { isMobileDevice } from '../../pwa/pwa';
 import { Button, Card, ErrorBanner, Toggle } from '../../ui';
 
 const STATE_TEXT: Record<PushState, string> = {
@@ -24,6 +25,7 @@ export function NotificationsCard({ compact }: { compact?: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
+  const mobile = isMobileDevice();
   const [dismissed, setDismissed] = useState(() => {
     try {
       return localStorage.getItem(DISMISS_KEY) === '1';
@@ -114,16 +116,24 @@ export function NotificationsCard({ compact }: { compact?: boolean }) {
           </Button>
         )}
         {state === 'on' && (
-          <>
-            <Button variant="secondary" loading={busy === 'test'} onClick={test}>
-              Send a test
-            </Button>
-            <Button variant="ghost" loading={busy === 'off'} onClick={turnOff}>
-              Turn off here
-            </Button>
-          </>
+          <Button variant="ghost" loading={busy === 'off'} onClick={turnOff}>
+            Turn off here
+          </Button>
         )}
       </div>
+      {!mobile && (
+        <p className="text-xs text-[#6D7A77] rounded-xl bg-[#FAF8F5] px-3 py-2">
+          💻 On a laptop, every alert also appears under the 🔔 at the top (with a count on the browser tab) while Safar is open. Pop-ups when the browser is
+          closed depend on your computer (Windows: Settings → System → Notifications → allow Chrome/Edge; keep the browser running in the background). For
+          alerts on the go, turn them on in the installed phone app.
+        </p>
+      )}
+      {/* A quick way to check the phone is set up right. */}
+      {state === 'on' && mobile && (
+        <button type="button" onClick={test} disabled={busy === 'test'} className="text-xs font-semibold text-[#00685F] underline underline-offset-2 disabled:opacity-50">
+          {busy === 'test' ? 'Sending…' : 'Not getting alerts? Send a test to this phone'}
+        </button>
+      )}
       {note && <p className="text-sm text-[#0B6B45]">{note}</p>}
       {prefs && (
         <div className="space-y-3 border-t border-[#E7DFD5] pt-4">

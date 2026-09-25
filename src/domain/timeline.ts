@@ -80,14 +80,17 @@ export function estimateTravelMin(a: GeoPoint, b: GeoPoint): number {
 
 /** Minutes kept free on top of the travel time (finding the entrance, parking, queues). */
 export const BUFFER_MIN = 10;
+/** Visits at least this long may run through a prayer time — you pray there. */
+export const LONG_VISIT_MIN = 150;
 
-export type WarningKind = 'overlap' | 'unreachable' | 'closed' | 'hours' | 'tight' | 'closing' | 'late';
+export type WarningKind = 'overlap' | 'unreachable' | 'closed' | 'hours' | 'prayer' | 'tight' | 'closing' | 'late';
 /** block = the plan doesn't work as is; risk = it works, but only just. */
 export const SEVERITY: Record<WarningKind, 'block' | 'risk'> = {
   overlap: 'block',
   unreachable: 'block',
   closed: 'block',
   hours: 'block',
+  prayer: 'block',
   tight: 'risk',
   closing: 'risk',
   late: 'risk',
@@ -112,7 +115,7 @@ const warn = (itemId: string, kind: WarningKind, text: string): DayWarning => ({
  */
 export function dayWarnings(
   day: string,
-  items: (Pick<ScheduleItem, 'id' | 'start' | 'end' | 'orderIndex'> & { transitMin?: number; kind?: 'prayer' | 'side' })[],
+  items: (Pick<ScheduleItem, 'id' | 'start' | 'end' | 'orderIndex'> & { transitMin?: number; kind?: 'prayer' | 'side'; label?: string; locked?: boolean })[],
   hours: (id: string) => string[] | undefined,
 ): DayWarning[] {
   const out: DayWarning[] = [];
@@ -134,6 +137,11 @@ export function dayWarnings(
       else if (free < it.transitMin + BUFFER_MIN) out.push(warn(it.id, 'tight', `Only ${free - it.transitMin} min to spare after the ~${it.transitMin} min trip${after}.`));
     }
     if (e >= DAY_END) out.push(warn(it.id, 'late', 'Runs past midnight.'));
+    // Prayer times are locked like bookings; long visits pray on the spot, journeys on board.
+    if (it.kind !== 'side' && !it.locked && e - s < LONG_VISIT_MIN) {
+      const p = prayers.find((x) => s < toMin(x.end) && Math.max(e, s + 1) > toMin(x.start));
+      if (p) out.push(warn(it.id, 'prayer', `Overlaps ${p.label ?? 'a prayer'} (${toClock(toMin(p.start))}–${toClock(toMin(p.end))}) — prayer times are fixed; move this stop or tap Fix this day.`));
+    }
 
     const open = openingRanges(hours(it.id), day);
     if (open?.length === 0) out.push(warn(it.id, 'closed', 'Closed on this day.'));

@@ -63,7 +63,7 @@ export function LoginPage() {
     if (mode === 'reset') {
       return run('email', async () => {
         await resetPassword(email);
-        setNotice('If an account exists for that email, a reset link is on its way.');
+        setNotice("If an account exists for that email, a reset link is on its way. It can take a minute — check your Spam or Promotions folder too, and mark it \"Not spam\" so the next one lands in your inbox.");
       });
     }
     return run('email', () => (mode === 'signUp' ? signUpWithEmail(name.trim(), email, password) : signInWithEmail(email, password)));

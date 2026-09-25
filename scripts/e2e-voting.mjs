@@ -103,6 +103,19 @@ try {
   assert.equal((await dan.call('ideas/choose', { ideaId: towers, optionId: 'free' }, q)).status, 200);
   ok('only people who voted 👎 choose; Bob → ' + alts[0].place.name + ', Dan → free time');
 
+  // Suggesting your own alternative: picked for you, pickable by the others not going.
+  const aquaria = { placeId: await placeId('Aquaria KLCC'), name: 'Aquaria KLCC', location: { lat: 3.1537, lng: 101.7131 } };
+  assert.equal((await alice.call('ideas/propose', { ideaId: towers, place: aquaria }, q)).status, 403);
+  const pr = await bob.call('ideas/propose', { ideaId: towers, place: aquaria }, q);
+  assert.equal(pr.status, 201, JSON.stringify(pr.body));
+  let withOwn = await idea(tripId, towers);
+  assert.equal(withOwn.choices[bob.uid].optionId, pr.body.optionId);
+  assert.ok(withOwn.options.some((o) => o.id === pr.body.optionId && o.proposedBy === bob.uid));
+  assert.equal((await dan.call('ideas/choose', { ideaId: towers, optionId: pr.body.optionId }, q)).status, 200);
+  await bob.call('ideas/choose', { ideaId: towers, optionId: alts[0].id }, q);
+  await dan.call('ideas/choose', { ideaId: towers, optionId: 'free' }, q);
+  ok('someone not going suggests their own place (Aquaria KLCC); it is picked for them and others can pick it too');
+
   // Changing votes while split: 👎 → 👍 drops the choice; 👍 → 👎 must choose again.
   await dan.call('ideas/vote', { ideaId: towers, value: 1 }, q);
   i1 = await idea(tripId, towers);
@@ -121,11 +134,12 @@ try {
   await dan.call('ideas/choose', { ideaId: towers, optionId: 'free' }, q);
   ok('taking a vote back waits for that person again; voting again returns to split votes');
 
-  // Eve (late joiner) votes 👎 too — her vote counts, so she chooses as well.
-  await eve.call('ideas/vote', { ideaId: towers, value: -1, tag: 'not_interested' }, q);
-  const eveOpt = (alts[1] ?? alts[0]).id;
-  assert.equal((await eve.call('ideas/choose', { ideaId: towers, optionId: eveOpt }, q)).status, 200);
-  ok('a later joiner who votes is counted and chooses too');
+  // Eve (late joiner) votes 👍 — her vote counts (3 👍 vs 2 👎, still split, not a majority no).
+  await eve.call('ideas/vote', { ideaId: towers, value: 1 }, q);
+  i1 = await idea(tripId, towers);
+  assert.equal(i1.status, 'mixed');
+  assert.equal(i1.votes[eve.uid].value, 1);
+  ok('a later joiner who votes is counted');
 
   // ── Admin accepts → groups ───────────────────────────────────────────────
   assert.equal((await bob.call('ideas/decide', { ideaId: towers, action: 'accept' }, q)).status, 403);
@@ -134,10 +148,10 @@ try {
   assert.equal(i1.status, 'backlog');
   let s1 = await splitOf(tripId, i1);
   let tr = tracks(s1);
-  assert.deepEqual([...tr.A].sort(), [alice.uid, cara.uid].sort());
+  assert.deepEqual([...tr.A].sort(), [alice.uid, cara.uid, eve.uid].sort());
   assert.deepEqual(tr.F, [dan.uid]);
   const altUids = s1.tracks.filter((x) => x.key === 'B' || x.key === 'C').flatMap((x) => x.memberUids).sort();
-  assert.deepEqual(altUids, [bob.uid, eve.uid].sort());
+  assert.deepEqual(altUids, [bob.uid]);
   for (const x of s1.tracks.filter((x) => x.ideaId && x.key !== 'A')) assert.equal((await idea(tripId, x.ideaId)).status, 'backlog');
   ok(`accepted with groups: ${s1.tracks.map((x) => `${x.key}=${x.memberUids.length}`).join(' ')} — “${s1.explanation}”`);
 
@@ -149,10 +163,10 @@ try {
   assert.equal((await cara.call('ideas/optout', { ideaId: towers, optionId: 'free', note: 'tired' }, q)).status, 200);
   s1 = await splitOf(tripId, await idea(tripId, towers));
   assert.deepEqual([...tracks(s1).F].sort(), [cara.uid, dan.uid].sort());
-  assert.deepEqual(tracks(s1).A, [alice.uid]);
+  assert.deepEqual([...tracks(s1).A].sort(), [alice.uid, eve.uid].sort());
   assert.equal((await cara.call('ideas/optin', { ideaId: towers }, q)).status, 200);
   s1 = await splitOf(tripId, await idea(tripId, towers));
-  assert.deepEqual([...tracks(s1).A].sort(), [alice.uid, cara.uid].sort());
+  assert.deepEqual([...tracks(s1).A].sort(), [alice.uid, cara.uid, eve.uid].sort());
   ok("\"I can't go\" moves Cara to free time without approval; opting back in returns her");
 
   // Schedule the split, then Bob leaves the trip → his group disappears everywhere.
@@ -177,6 +191,13 @@ try {
   items = (await db.collection(`trips/${tripId}/schedule`).get()).docs.map((d) => d.data()).filter((i) => i.ref.kind === 'idea' || i.ref.kind === 'custom');
   assert.ok(items.some((i) => i.id === `idea_${towers}` && i.track === 'all'));
   ok('when everyone is back in the main group the split ends and the stop is a normal one');
+
+  // ── Most of the group says no → backup, not a split ────────────────────
+  const klTower = (await alice.call('ideas/add', { placeId: await placeId('Thean Hou Temple Kuala Lumpur') }, q)).body.id;
+  await alice.call('ideas/vote', { ideaId: klTower, value: 1 }, q);
+  for (const u of [cara, dan, eve]) await u.call('ideas/vote', { ideaId: klTower, value: -1, tag: 'not_interested' }, q);
+  assert.equal((await idea(tripId, klTower)).status, 'backup');
+  ok('1 👍 vs 3 👎 → kept as a backup instead of splitting the group');
 
   // ── Confirm at vote time ───────────────────────────────────────────────
   const dtf = (await cara.call('ideas/add', { placeId: await placeId('Din Tai Fung Pavilion Kuala Lumpur') }, q)).body.id;

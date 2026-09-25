@@ -3,7 +3,7 @@
 // checked with where each verdict comes from. "Check" runs the full Halal
 // Radar on a place; "Add" puts it on the Idea Board; people can report the
 // queue (gone after an hour).
-import { Clock, ExternalLink, LocateFixed, MapPin, Phone, Plus, ShieldCheck, Star } from 'lucide-react';
+import { Clock, ExternalLink, LocateFixed, MapPin, Phone, Plus, ShieldCheck, Star, UtensilsCrossed } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { FOOD_TABS, fmtClock, Idea, paths, planningDate, ScheduleItem, toMin, type FoodVerdict, type GeoPoint } from '../../domain';
@@ -32,6 +32,7 @@ interface FoodItem {
   wait?: { minutes: number; agoMin: number };
   ideaId?: string;
   checked: boolean;
+  photo?: string;
 }
 
 const TONE: Record<FoodVerdict['bucket'], string> = {
@@ -163,7 +164,7 @@ export function FoodPage() {
       {loading && <Spinner label="Searching nearby…" />}
       {!loading && items && !shown.length && (
         <Card className="p-5 text-sm text-[#6D7A77]">
-          {tab === 'halal' ? 'No halal-listed places within ~1 km. Try “Not checked” and tap Check, or search near another stop.' : 'Nothing here.'}
+          {tab === 'halal' ? 'No halal-listed places within ~2 km. Try “Not checked” and tap Check, or search near another stop.' : 'Nothing here.'}
         </Card>
       )}
 
@@ -198,7 +199,8 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
 
   return (
     <Card className="p-4 space-y-2">
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-3">
+        <FoodPhoto src={i.photo} />
         <div className="flex-1 min-w-0">
           <p className="font-bold text-[#161C23] leading-snug">{i.name}</p>
           <p className="text-xs text-[#6D7A77] flex flex-wrap gap-x-2">
@@ -215,7 +217,11 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
             </span>
           </p>
         </div>
-        {i.openNow !== undefined && <Badge tone={i.openNow ? 'brand' : 'muted'}>{i.openNow ? 'Open' : 'Closed'}</Badge>}
+        {i.openNow !== undefined && (
+          <span className="shrink-0">
+            <Badge tone={i.openNow ? 'brand' : 'muted'}>{i.openNow ? 'Open' : 'Closed'}</Badge>
+          </span>
+        )}
       </div>
 
       <div className={cx('rounded-xl border px-3 py-2', TONE[i.verdict.bucket])}>
@@ -299,4 +305,17 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
       <ErrorBanner>{error}</ErrorBanner>
     </Card>
   );
+}
+
+/** The restaurant's photo (Google); a placeholder when there's none or it fails to load. */
+function FoodPhoto({ src }: { src?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <span className="w-16 h-16 rounded-xl bg-[#F3EFE9] shrink-0 flex items-center justify-center text-[#9AA5A3]" aria-hidden>
+        <UtensilsCrossed className="w-5 h-5" />
+      </span>
+    );
+  }
+  return <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} className="w-16 h-16 rounded-xl object-cover shrink-0 bg-[#F3EFE9]" />;
 }

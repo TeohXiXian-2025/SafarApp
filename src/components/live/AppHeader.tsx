@@ -1,8 +1,9 @@
-import { Compass, LogOut } from 'lucide-react';
+import { Compass, LayoutGrid, LogOut } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { signOut, useAuth } from '../../auth/auth';
 import { Avatar } from '../../ui';
+import { InboxBell } from './InboxBell';
 
 /** Top bar for the live app: logo → My Trips, optional title, account menu. */
 export function AppHeader({ children }: { children?: ReactNode }) {
@@ -20,6 +21,7 @@ export function AppHeader({ children }: { children?: ReactNode }) {
           <span className="font-extrabold text-[#161C23] hidden sm:inline">Safar</span>
         </Link>
         <div className="flex-1 min-w-0">{children}</div>
+        {user && <InboxBell />}
         {user && (
           <div className="relative">
             <button onClick={() => setMenu((m) => !m)} className="rounded-full" aria-label="Account menu" aria-expanded={menu}>
@@ -34,6 +36,13 @@ export function AppHeader({ children }: { children?: ReactNode }) {
                   <p className="font-bold text-[#161C23] truncate">{user.displayName || 'Signed in'}</p>
                   <p className="text-xs text-[#6D7A77] truncate">{user.email}</p>
                 </div>
+                <Link
+                  to="/trips"
+                  onClick={() => setMenu(false)}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[#161C23] hover:bg-[#F3EFE9]"
+                >
+                  <LayoutGrid className="w-4 h-4" /> My trips
+                </Link>
                 <button
                   onClick={() => void signOut()}
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[#B3261E] hover:bg-[#FDECEA]"

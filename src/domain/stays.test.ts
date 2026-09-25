@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupHotelBudget, proposeStays, scoreHotel, tripNights, uncoveredNights, type ScoreContext } from './stays';
+import { groupHotelBudget, hotelJourneyProblem, proposeStays, scoreHotel, suggestStayTimes, transportGaps, tripNights, uncoveredNights, type ScoreContext } from './stays';
 
 const KL = { lat: 3.139, lng: 101.6869 };
 const PENANG = { lat: 5.4141, lng: 100.3288 };
@@ -92,5 +92,51 @@ describe('scoreHotel', () => {
     const paid = scoreHotel({ ...h, nightlyMinor: 20000, amenities: ['Breakfast ($)'] }, want);
     expect(free.score).toBeGreaterThan(paid.score);
     expect(free.why).toContain('Free breakfast');
+  });
+});
+
+describe('booking a hotel around the flights', () => {
+  const KUL = { lat: 2.7456, lng: 101.7072 };
+  const SIN = { lat: 1.3644, lng: 103.9915 };
+  // SIN 17:00 → KUL 18:05 (both +08:00), and home KUL 10:00 → SIN 11:05 two days later.
+  const inbound = { kind: 'flight', carrier: 'MH', number: '602', startLocal: '2026-12-07T17:00', endLocal: '2026-12-07T18:05', startAt: '2026-12-07T17:00:00+08:00', endAt: '2026-12-07T18:05:00+08:00', travellerUids: ['a'], from: { location: SIN, name: 'Changi' }, to: { location: KUL, name: 'KLIA' } };
+  const outbound = { kind: 'flight', carrier: 'MH', number: '603', startLocal: '2026-12-09T10:00', endLocal: '2026-12-09T11:05', startAt: '2026-12-09T10:00:00+08:00', endAt: '2026-12-09T11:05:00+08:00', travellerUids: ['a'], from: { location: KUL, name: 'KLIA' }, to: { location: SIN, name: 'Changi' } };
+  const stay = (inn: string, out: string) => ({ startLocal: inn, endLocal: out, startAt: `${inn}:00+08:00`, endAt: `${out}:00+08:00`, travellerUids: ['a'], location: KLCC });
+
+  it('refuses a 15:00 check-in before the flight lands, and a check-out after leaving', () => {
+    expect(hotelJourneyProblem(stay('2026-12-07T15:00', '2026-12-09T08:00'), [inbound, outbound])).toMatch(/before MH 602 lands at 18:05/);
+    expect(hotelJourneyProblem(stay('2026-12-07T19:30', '2026-12-09T12:00'), [inbound, outbound])).toMatch(/after MH 603 leaves at 10:00/);
+    expect(hotelJourneyProblem(stay('2026-12-07T19:30', '2026-12-09T07:00'), [inbound, outbound])).toBeNull();
+  });
+
+  it("ignores other people's flights", () => {
+    expect(hotelJourneyProblem({ ...stay('2026-12-07T15:00', '2026-12-09T12:00'), travellerUids: ['b'] }, [inbound, outbound])).toBeNull();
+  });
+
+  it('suggests check-in after landing and check-out before leaving for the airport', () => {
+    const s = suggestStayTimes({ checkIn: '2026-12-07', checkOut: '2026-12-09', location: KLCC }, { checkIn: '15:00', checkOut: '12:00' }, [inbound, outbound], ['a']);
+    expect(s.checkIn).toBe('2026-12-07T19:35');
+    expect(s.checkOut).toBe('2026-12-09T07:00');
+    expect(s.notes).toHaveLength(2);
+  });
+});
+
+describe('transportGaps', () => {
+  const trip = { startDate: '2026-12-07', endDate: '2026-12-12', destinations: [{ name: 'Kuala Lumpur', location: KL }, { name: 'Penang', location: PENANG }] };
+  const stays = [
+    { destIdx: 0, checkIn: '2026-12-07', checkOut: '2026-12-10' },
+    { destIdx: 1, checkIn: '2026-12-10', checkOut: '2026-12-12' },
+  ];
+  const move = (start: string, end: string, from: { lat: number; lng: number }, to: { lat: number; lng: number }) => ({ kind: 'bus', startLocal: start, endLocal: end, from: { location: from }, to: { location: to } });
+
+  it('lists getting there, each city change and getting home until booked', () => {
+    expect(transportGaps({ ...trip, stays, bookings: [] }).map((g) => g.kind)).toEqual(['there', 'between', 'home']);
+    const all = [move('2026-12-06T23:00', '2026-12-07T07:00', { lat: 1.36, lng: 103.99 }, KL), move('2026-12-10T09:00', '2026-12-10T14:00', KL, PENANG), move('2026-12-12T18:00', '2026-12-12T20:00', PENANG, { lat: 1.36, lng: 103.99 })];
+    expect(transportGaps({ ...trip, stays, bookings: all })).toEqual([]);
+  });
+
+  it('flags only the missing KL → Penang leg', () => {
+    const r = transportGaps({ ...trip, stays, bookings: [move('2026-12-06T23:00', '2026-12-07T07:00', { lat: 1.36, lng: 103.99 }, KL), move('2026-12-12T18:00', '2026-12-12T20:00', PENANG, { lat: 1.36, lng: 103.99 })] });
+    expect(r.map((g) => [g.kind, g.from, g.to])).toEqual([['between', 'Kuala Lumpur', 'Penang']]);
   });
 });

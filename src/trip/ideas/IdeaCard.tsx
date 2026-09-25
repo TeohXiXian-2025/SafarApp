@@ -74,8 +74,13 @@ const SENTIMENT = {
 } as const;
 
 const SUGGESTION_TYPE = { alternative: 'Alternative', split: 'Split up briefly', timing: 'Timing', prep: 'Prepare' } as const;
-/** Accepted onto the plan (or heading there) despite a conflict → show middle-ground ideas. */
+/** Accepted onto the plan (or heading there) despite a conflict. */
 const ACCEPTED: Idea['status'][] = ['backlog', 'scheduled', 'split_pending'];
+/**
+ * Where the AI middle ground is shown. While voting the card only lists the
+ * conflicts; on split votes the blue split box already offers middle grounds.
+ */
+const MIDDLE_GROUND: Idea['status'][] = ['backlog', 'scheduled'];
 
 const fmtDist = (m: number) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
 const fmtDay = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
@@ -147,17 +152,18 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
   const muslimCheck = idea.status === 'voting' && !!me.prefs?.halalRequired;
   const cKey = conflictKey(conflicts);
   const accepted = ACCEPTED.includes(idea.status);
-  const suggestions = idea.resolution?.key === cKey ? idea.resolution.suggestions : null;
+  const showMiddle = MIDDLE_GROUND.includes(idea.status);
+  const suggestions = showMiddle && idea.resolution?.key === cKey ? idea.resolution.suggestions : null;
   const resolve = (force = false) => act('resolve', () => api.post('ideas/resolve', { ideaId: idea.id, force }, q));
   // Only the admin and the affected members trigger the AI (it's cached per conflict set on the server).
   const mayResolve = isAdmin || conflicts.some((c) => c.uid === me.uid);
   useEffect(() => {
-    if (accepted && conflicts.length && !suggestions && !pending && mayResolve && autoResolved.current !== cKey) {
+    if (showMiddle && conflicts.length && !suggestions && !pending && mayResolve && autoResolved.current !== cKey) {
       autoResolved.current = cKey;
       void resolve();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accepted, cKey, !!suggestions, pending]);
+  }, [showMiddle, cKey, !!suggestions, pending]);
 
   const label = halalLabel(idea, community.data);
   const prayer = idea.halal?.prayer;
@@ -376,7 +382,7 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
         <DecisionBox idea={idea} split={split ?? null} alts={alts ?? new Map()} />
 
         {!!conflicts.length && (
-          <ConflictBox conflicts={conflicts} accepted={accepted} suggestions={suggestions} busy={busy === 'resolve'} canResolve={mayResolve} onResolve={() => resolve(!!suggestions)} />
+          <ConflictBox conflicts={conflicts} accepted={accepted} suggestions={suggestions} busy={busy === 'resolve'} canResolve={mayResolve && showMiddle} onResolve={() => resolve(!!suggestions)} />
         )}
 
         {/* Reviews */}

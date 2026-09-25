@@ -81,7 +81,8 @@ export function ReportHalalSheet({ idea, community, onClose }: { idea: Idea; com
     <Sheet open onClose={onClose} title={`Halal status of ${idea.place.name}`}>
       <div className="space-y-4">
         <p className="text-sm text-[#6D7A77]">
-          Only report what you've seen yourself. Your report is combined with other travellers' — {community?.reportCount ?? 0} so far.
+          Only report what you've seen yourself. Your report is combined with other travellers' — {community?.reportCount ?? 0} so far — and helps every Safar
+          group that plans a visit here, not just this trip.
         </p>
         <div className="rounded-xl border border-[#C4E0DD] bg-[#EAF4F3] p-3 space-y-2">
           <p className="text-sm font-semibold text-[#00685F]">Best evidence: a photo</p>

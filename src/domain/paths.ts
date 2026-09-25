@@ -21,6 +21,7 @@ export const paths = {
   stays: (tripId: string) => `trips/${tripId}/stays`,
   stay: (tripId: string, stayId: string) => `trips/${tripId}/stays/${stayId}`,
   hotels: (tripId: string, stayId: string) => `trips/${tripId}/stays/${stayId}/hotels`,
+  hotelComments: (tripId: string, stayId: string, key: string) => `trips/${tripId}/stays/${stayId}/hotels/${key}/comments`,
   /** Each member's shared vault status (labels only). */
   readiness: (tripId: string) => `trips/${tripId}/readiness`,
   documents: (tripId: string) => `trips/${tripId}/documents`,

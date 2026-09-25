@@ -22,6 +22,9 @@ describe('tally and status', () => {
     expect(statusFromTally(tallyIdea(idea({ votes: { ali: up, bob: up, cara: up, dan: up } }), ALL), false)).toBe('backlog');
     expect(statusFromTally(tallyIdea(idea({ votes: { ali: down, bob: down, cara: down, dan: down } }), ALL), false)).toBe('rejected');
     expect(statusFromTally(tallyIdea(idea({ votes: { ali: up, bob: down, cara: up, dan: up } }), ALL), false)).toBe('mixed');
+    // A tie still splits; a majority 👎 goes to the backups instead.
+    expect(statusFromTally(tallyIdea(idea({ votes: { ali: up, bob: down, cara: up, dan: down } }), ALL), false)).toBe('mixed');
+    expect(statusFromTally(tallyIdea(idea({ votes: { ali: up, bob: down, cara: down, dan: down } }), ALL), false)).toBe('backup');
   });
 
   it('after the deadline, non-voters abstain', () => {

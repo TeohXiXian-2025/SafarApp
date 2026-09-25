@@ -229,39 +229,55 @@ export interface NearbyFood {
   photoName?: string;
 }
 
-/** Places to eat around a point, with what a food list needs (rating, price, open now, phone). null = lookup failed. */
-export async function searchNearbyFood(center: GeoPoint, includedTypes: string[], radiusM: number, max = 20): Promise<NearbyFood[] | null> {
-  const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+const FOOD_FIELDS =
+  'places.id,places.displayName,places.location,places.types,places.primaryTypeDisplayName,places.rating,places.userRatingCount,places.priceLevel,places.currentOpeningHours.openNow,places.internationalPhoneNumber,places.photos';
+
+type RawFood = RawPlace & { currentOpeningHours?: { openNow?: boolean } };
+
+const toFood = (p: RawFood): NearbyFood => ({
+  placeId: p.id,
+  name: p.displayName!.text.slice(0, 200),
+  location: { lat: p.location!.latitude, lng: p.location!.longitude },
+  types: p.types ?? [],
+  ...(p.primaryTypeDisplayName?.text ? { typeLabel: p.primaryTypeDisplayName.text.slice(0, 80) } : {}),
+  ...(p.rating !== undefined ? { rating: p.rating } : {}),
+  ...(p.userRatingCount !== undefined ? { ratingCount: p.userRatingCount } : {}),
+  ...(p.priceLevel && p.priceLevel in PRICE ? { priceLevel: PRICE[p.priceLevel as keyof typeof PRICE] } : {}),
+  ...(p.currentOpeningHours?.openNow !== undefined ? { openNow: p.currentOpeningHours.openNow } : {}),
+  ...(p.internationalPhoneNumber ? { phone: p.internationalPhoneNumber.slice(0, 40) } : {}),
+  ...(p.photos?.[0]?.name ? { photoName: p.photos[0].name } : {}),
+});
+
+async function foodRequest(endpoint: 'searchNearby' | 'searchText', body: object): Promise<NearbyFood[] | null> {
+  const res = await fetch(`https://places.googleapis.com/v1/places:${endpoint}`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'X-Goog-Api-Key': requireEnv('GOOGLE_MAPS_SERVER_KEY'),
-      'X-Goog-FieldMask':
-        'places.id,places.displayName,places.location,places.types,places.primaryTypeDisplayName,places.rating,places.userRatingCount,places.priceLevel,places.currentOpeningHours.openNow,places.internationalPhoneNumber,places.photos',
-    },
-    body: JSON.stringify({
-      includedTypes,
-      maxResultCount: max,
-      rankPreference: 'DISTANCE',
-      locationRestriction: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius: radiusM } },
-    }),
+    headers: { 'content-type': 'application/json', 'X-Goog-Api-Key': requireEnv('GOOGLE_MAPS_SERVER_KEY'), 'X-Goog-FieldMask': FOOD_FIELDS },
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(8000),
   }).catch(() => null);
   if (!res?.ok) return null;
-  const places = ((await res.json()) as { places?: (RawPlace & { currentOpeningHours?: { openNow?: boolean } })[] }).places ?? [];
-  return places
-    .filter((p) => p.location && p.displayName?.text)
-    .map((p) => ({
-      placeId: p.id,
-      name: p.displayName!.text.slice(0, 200),
-      location: { lat: p.location!.latitude, lng: p.location!.longitude },
-      types: p.types ?? [],
-      ...(p.primaryTypeDisplayName?.text ? { typeLabel: p.primaryTypeDisplayName.text.slice(0, 80) } : {}),
-      ...(p.rating !== undefined ? { rating: p.rating } : {}),
-      ...(p.userRatingCount !== undefined ? { ratingCount: p.userRatingCount } : {}),
-      ...(p.priceLevel && p.priceLevel in PRICE ? { priceLevel: PRICE[p.priceLevel as keyof typeof PRICE] } : {}),
-      ...(p.currentOpeningHours?.openNow !== undefined ? { openNow: p.currentOpeningHours.openNow } : {}),
-      ...(p.internationalPhoneNumber ? { phone: p.internationalPhoneNumber.slice(0, 40) } : {}),
-      ...(p.photos?.[0]?.name ? { photoName: p.photos[0].name } : {}),
-    }));
+  const places = ((await res.json()) as { places?: RawFood[] }).places ?? [];
+  return places.filter((p) => p.location && p.displayName?.text).map(toFood);
+}
+
+/**
+ * Places to eat around a point, with what a food list needs (rating, price,
+ * open now, phone, photo). `rank` = nearest first or most popular. null = lookup failed.
+ */
+export async function searchNearbyFood(center: GeoPoint, includedTypes: string[], radiusM: number, max = 20, rank: 'DISTANCE' | 'POPULARITY' = 'DISTANCE'): Promise<NearbyFood[] | null> {
+  return foodRequest('searchNearby', {
+    includedTypes,
+    maxResultCount: max,
+    rankPreference: rank,
+    locationRestriction: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius: radiusM } },
+  });
+}
+
+/** Restaurants matching words ("halal", "muslim") around a point — catches places whose type doesn't say halal. */
+export async function searchFoodText(center: GeoPoint, query: string, radiusM: number, max = 20): Promise<NearbyFood[] | null> {
+  return foodRequest('searchText', {
+    textQuery: query,
+    pageSize: max,
+    locationBias: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius: radiusM } },
+  });
 }

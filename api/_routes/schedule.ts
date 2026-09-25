@@ -12,16 +12,21 @@ import {
   ideaItemId,
   LocalDate,
   LocalTime,
+  lockedPrayers,
   nextSlot,
   PACE,
   PRAYER_LABEL,
   mergePrefs,
   paths,
   ScheduleItem,
+  estimateTravelMin,
+  isOutdoor,
+  metersBetween,
   timeSequence,
   toClock,
   toMin,
   tripDays,
+  type GeoPoint,
   type Idea,
   type Trip,
   type Unit,
@@ -35,6 +40,8 @@ import type { RouteTable } from '../_lib/routes.js';
 import {
   approvedSplit,
   dayItems,
+  dayProblems,
+  frameAt,
   framesFor,
   ideaDocRef,
   isAltOfSplit,
@@ -72,6 +79,12 @@ async function loadMovable(tripId: string, id: string): Promise<ScheduleItem> {
 
 const ideaOf = (data: TripData, item: ScheduleItem) => (item.ref.kind === 'idea' ? data.ideas.get(item.ref.ideaId) : undefined);
 
+/** A day's stops plus its locked prayer times, for finding the next free slot. */
+function withPrayerTimes(data: TripData, day: string, items: ScheduleItem[], near?: GeoPoint) {
+  const prayers = lockedPrayers(frameAt(data, day, near).prayers).map((p) => ({ id: `prayer_${p.key}`, start: toClock(p.start), end: toClock(p.end), orderIndex: 0, locked: true }));
+  return [...items, ...prayers];
+}
+
 /** Refresh several days one after another (they share Routes API budgets). */
 async function refreshDays(tripId: string, days: Iterable<string>, data: TripData) {
   for (const d of new Set(days)) await refreshDay(tripId, d, data);
@@ -94,7 +107,7 @@ export const scheduleRoutes: RouteTable = {
       const lead = leadIdea(data, idea);
       const day = (await dayItems(tripId, body.day)).filter((i) => !isPrayerItem(i));
       const duration = unitFor(lead, split).duration;
-      const start = body.start ? toMin(body.start) : toMin(nextSlot(day, duration).start);
+      const start = body.start ? toMin(body.start) : toMin(nextSlot(withPrayerTimes(data, body.day, day, lead.place.location), duration).start);
 
       const batch = adminDb().batch();
       const placed = writeStops(batch, tripId, { data, idea: lead, day: body.day, start, orderIndex: day.length, actor: member.uid });
@@ -102,6 +115,7 @@ export const scheduleRoutes: RouteTable = {
       logActivity(batch, tripId, member.uid, `${member.displayName} added ${split ? `the split at ${lead.place.name}` : idea.place.name} to ${body.day}`);
       await batch.commit();
       await refreshDay(tripId, body.day, data);
+      await alertAdmin(tripId, body.day, member, data);
       return json({ id: ideaItemId(lead.id) }, { status: 201 });
     },
     { perMinute: 30 },
@@ -133,13 +147,14 @@ export const scheduleRoutes: RouteTable = {
       if (moved) {
         const target = (await dayItems(tripId, day)).filter((i) => !isPrayerItem(i));
         orderIndex = target.length;
-        if (!body.start) start = toMin(nextSlot(target, duration).start);
+        if (!body.start) start = toMin(nextSlot(withPrayerTimes(data, day, target, leadIdea.place.location), duration).start);
       }
       const batch = adminDb().batch();
       group.forEach((g) => batch.delete(itemRef(tripId, g.id)));
       writeStops(batch, tripId, { data, idea: leadIdea, day, start, durationMin: split ? undefined : duration, orderIndex, actor: member.uid });
       await batch.commit();
       await refreshDays(tripId, moved ? [day, item.day] : [day], data);
+      await alertAdmin(tripId, day, member, data);
       return json({ ok: true });
     },
     { perMinute: 60 },
@@ -162,7 +177,7 @@ export const scheduleRoutes: RouteTable = {
         const base = idea ? unitFor(idea, approvedSplit(data, idea)) : null;
         return { ...(base ?? { id: it.id }), id: it.id, loc: ends.get(it.id)?.in ?? data.trip.destinations[0].location, duration: Math.max(5, toMin(it.end) - toMin(it.start)) } as Unit;
       });
-      const frame = framesFor(data, [body.day])[0];
+      const frame = frameAt(data, body.day, units[0]?.loc);
       const locked = items.filter((i) => i.locked && toMin(i.end) > toMin(i.start));
       const timing = timeSequence(
         { ...frame, start: Math.min(...ordered.map((i) => toMin(i.start))), end: 24 * 60 - 1, blocks: locked.map((l) => ({ start: toMin(l.start), end: toMin(l.end) })) },
@@ -181,6 +196,7 @@ export const scheduleRoutes: RouteTable = {
       logActivity(batch, tripId, member.uid, `${member.displayName} reordered ${body.day}`);
       await batch.commit();
       await refreshDay(tripId, body.day, data);
+      await alertAdmin(tripId, body.day, member, data);
       return json({ ok: true });
     },
     { perMinute: 60 },
@@ -222,7 +238,9 @@ export const scheduleRoutes: RouteTable = {
       if (!ideas.length) throw new HttpError(409, 'Nothing to arrange yet — approve some ideas on the Idea Board first');
       const units = ideas.map((i) => unitFor(i, approvedSplit(data, i)));
       const pace = mergePrefs(data.members).pace ?? 'moderate';
-      const result = arrangeTrip(frames, units, { maxStops: PACE[pace].maxStops });
+      // Straight-line estimates run short of real routes (checked after Apply) — plan with a margin.
+      const travel = (a: GeoPoint, b: GeoPoint) => Math.round(estimateTravelMin(a, b) * 1.25);
+      const result = arrangeTrip(frames, units, { maxStops: PACE[pace].maxStops, travel, destinations: data.trip.destinations });
 
       const plan: ArrangeJob['plan'] = {
         days: result.days
@@ -276,12 +294,14 @@ export const scheduleRoutes: RouteTable = {
       logActivity(batch, tripId, member.uid, `${member.displayName} applied AI Arrange (${scheduled.size} stops over ${job.plan.days.length} days)`);
       await batch.commit();
       await refreshDays(tripId, [...job.plan.days.map((d) => d.day), ...before.map((i) => i.day)], data);
+      // With real travel times in, re-check each day; anything 🔴 is re-timed right away.
+      const fixed = await autoFix(tripId, job.plan.days.map((d) => d.day), member.uid);
       await notify(
         data.trip.memberIds,
         { kind: 'timeline', title: 'The timeline was re-planned', body: `${member.displayName} applied AI Arrange: ${scheduled.size} stops over ${job.plan.days.length} days.`, url: `/t/${tripId}/timeline`, tag: `timeline-${tripId}` },
         { timeZone: data.trip.destinations[0].timezone, except: member.uid },
       );
-      return json({ ok: true });
+      return json({ ok: true, fixed });
     },
     { admin: true, perMinute: 6 },
   ),
@@ -339,6 +359,49 @@ export const scheduleRoutes: RouteTable = {
     { perMinute: 20 },
   ),
 
+  /** Re-place a day's prayer breaks and travel legs (e.g. saved before prayer times were locked). */
+  'POST schedule/refresh': withTrip(
+    async (req, { tripId }) => {
+      const { day } = await readJson(req, z.object({ day: LocalDate }));
+      await refreshDay(tripId, day);
+      return json({ ok: true });
+    },
+    { perMinute: 10 },
+  ),
+
+  /**
+   * Bad weather on a day: one or two AI sentences with a plan B, using only
+   * the day's stops and the group's backlog (indoor places near the ones at risk).
+   */
+  'POST schedule/weather-plan': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ day: LocalDate, risks: z.array(z.object({ itemId: Id, text: z.string().max(300) })).min(1).max(10) }));
+      await useDailyQuota(member.uid, 'arrange');
+      const data = await loadTripData(tripId);
+      const items = (await dayItems(tripId, body.day)).filter((i) => i.ref.kind === 'idea').sort((a, b) => a.start.localeCompare(b.start));
+      const name = (i: ScheduleItem) => (i.ref.kind === 'idea' ? (data.ideas.get(i.ref.ideaId)?.place.name ?? 'a stop') : 'a stop');
+      const atRisk = body.risks.flatMap((r) => {
+        const it = items.find((i) => i.id === r.itemId);
+        return it ? [{ stop: name(it), time: it.start, weather: r.text, loc: it.ref.kind === 'idea' ? data.ideas.get(it.ref.ideaId)?.place.location : undefined }] : [];
+      });
+      if (!atRisk.length) throw new HttpError(409, 'Those stops are no longer on this day');
+      const indoor = [...data.ideas.values()]
+        .filter((i) => (i.status === 'backlog' || i.status === 'backup') && !isOutdoor(i.place) && atRisk.some((r) => r.loc && metersBetween(r.loc, i.place.location) < 4000))
+        .slice(0, 8)
+        .map((i) => ({ name: i.place.name, kind: i.place.typeLabel ?? i.place.category, minutes: i.estDurationMin }));
+      const out = await extractJson({
+        system:
+          'You help a travel group adapt one day of their plan to bad weather. In at most 2 short sentences (max 45 words), suggest a practical plan B: swap an outdoor stop for one of the indoor options given, or move it to a drier time of the same day. Use only the places given; never invent places.',
+        parts: [{ text: JSON.stringify({ day: body.day, plan: items.map((i) => `${i.start} ${name(i)}`), weatherProblems: atRisk.map(({ loc: _l, ...r }) => r), indoorOptionsNearby: indoor }) }],
+        responseSchema: { type: Type.OBJECT, properties: { plan: { type: Type.STRING } }, required: ['plan'] },
+        validate: z.object({ plan: z.string().min(5) }),
+        budgetMs: 15_000,
+      });
+      return json({ text: out.plan.slice(0, 400) });
+    },
+    { perMinute: 6 },
+  ),
+
   /** Close a preview without applying it. */
   'POST schedule/discard': withTrip(
     async (req, { tripId }) => {
@@ -351,6 +414,45 @@ export const scheduleRoutes: RouteTable = {
     { admin: true, perMinute: 30 },
   ),
 };
+
+/**
+ * After a member (not the admin) changes a day by hand: if it now has a 🔴
+ * problem, tell the admin (at most every 30 min per day).
+ */
+async function alertAdmin(tripId: string, day: string, actor: { uid: string; role: string; displayName: string }, data: TripData) {
+  if (actor.role === 'admin') return;
+  const problems = dayProblems(data, day, await dayItems(tripId, day)).filter((w) => w.severity === 'block');
+  if (!problems.length) return;
+  await notify(
+    [data.trip.adminId],
+    {
+      kind: 'timeline',
+      title: `🔴 ${day}: ${problems.length} thing${problems.length > 1 ? 's' : ''} won't work`,
+      body: `After ${actor.displayName}'s change: ${problems[0].text}`,
+      url: `/t/${tripId}/timeline?day=${day}`,
+      tag: `red-${tripId}-${day}`,
+    },
+    { timeZone: data.trip.destinations[0].timezone, throttleKey: `red:${tripId}:${day}`, throttle: 1800 },
+  );
+}
+
+/** Days with a 🔴 problem get "Fix this day" applied (once). Returns the days changed. */
+async function autoFix(tripId: string, days: string[], actor: string): Promise<string[]> {
+  const data = await loadTripData(tripId);
+  const changed: string[] = [];
+  for (const day of new Set(days)) {
+    const items = await dayItems(tripId, day);
+    if (!dayProblems(data, day, items).some((w) => w.severity === 'block')) continue;
+    const plan = planFixDay(data, day, items);
+    if (!plan.stops.length && !plan.removed.length) continue;
+    const batch = adminDb().batch();
+    writeFixPlan(batch, tripId, data, items, plan, actor);
+    await batch.commit();
+    await refreshDay(tripId, day, data);
+    changed.push(day);
+  }
+  return changed;
+}
 
 /** One friendly sentence per day from the AI (skipped quietly if it's busy). */
 async function addNotes(plan: ArrangeJob['plan'], data: TripData) {

@@ -4,11 +4,14 @@
 //   stays/search   find & score hotels near the stay's plans (Google Hotels, live prices)
 //   stays/offers   per-site prices + booking links for one hotel
 //   stays/vote     👍 / 👎 a hotel;  stays/choose  the admin picks one
-//   stays/booked   "I booked it" → a hotel booking (check-in/out on the timeline)
+//   stays/booked   "I booked it" (admin) → the stay's hotel booking, or change it
+//   stays/unbook   cancel it (admin);  stays/comment  comments with @mentions
 import { FieldValue } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import {
   avgTravelMin,
+  Comment,
+  LocalDateTime,
   formatMoney,
   freeBreakfast,
   groupHotelBudget,
@@ -35,7 +38,7 @@ import { useDailyQuota } from '../_lib/quota.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { loadTripData, type TripData } from '../_lib/schedule.js';
 import { loadTrip, logActivity } from '../_lib/trip.js';
-import { addBooking } from './bookings.js';
+import { addBooking, loadBooking, removeBooking, updateBooking } from './bookings.js';
 import { Type } from '@google/genai';
 import { extractJson } from '../_lib/gemini.js';
 
@@ -190,6 +193,9 @@ export const stayRoutes: RouteTable = {
   'POST stays/delete': withTrip(
     async (req, { tripId }) => {
       const { id } = await readJson(req, z.object({ id: Id }));
+      // Its booking (if any) stays — it's a real reservation — but no longer points here.
+      const linked = await adminDb().collection(paths.bookings(tripId)).where('stayId', '==', id).get();
+      await Promise.all(linked.docs.map((d) => d.ref.update({ stayId: FieldValue.delete() })));
       await adminDb().recursiveDelete(stayRef(tripId, id));
       return json({ ok: true });
     },
@@ -329,32 +335,136 @@ export const stayRoutes: RouteTable = {
     { admin: true, perMinute: 20 },
   ),
 
-  /** "I booked it": the chosen (or given) hotel becomes a hotel booking for the stay's dates. */
+  /**
+   * "I booked it" (admin): the chosen (or given) hotel becomes the stay's
+   * hotel booking, with the check-in / check-out date and time the admin
+   * confirms (suggested around the flights). Again on a booked stay = change it.
+   */
   'POST stays/booked': withTrip(
     async (req, { tripId, member }) => {
-      const body = await readJson(req, z.object({ id: Id, key: z.string().max(300).optional(), pnr: z.string().trim().max(20).optional(), travellerUids: z.array(Id).min(1).max(50).optional() }));
+      const body = await readJson(
+        req,
+        z.object({
+          id: Id,
+          key: z.string().max(300).optional(),
+          checkIn: LocalDateTime,
+          checkOut: LocalDateTime,
+          pnr: z.string().trim().max(20).optional(),
+          travellerUids: z.array(Id).min(1).max(50).optional(),
+        }),
+      );
       const [stay, trip] = await Promise.all([loadStay(tripId, body.id), loadTrip(tripId)]);
       const key = body.key ?? stay.chosenKey;
       if (!key) throw new HttpError(400, 'Pick a hotel first');
+      if (body.checkOut <= body.checkIn) throw new HttpError(400, 'Check-out must be after check-in');
+      if (body.checkIn.slice(0, 10) < trip.startDate || body.checkOut.slice(0, 10) > trip.endDate) throw new HttpError(400, 'The stay must be within the trip dates');
       const hotel = await loadHotel(tripId, body.id, key);
-      const dup = await adminDb().collection(paths.bookings(tripId)).where('kind', '==', 'hotel').where('carrier', '==', hotel.name).get();
-      if (dup.docs.some((d) => String(d.get('startLocal')).slice(0, 10) === stay.checkIn)) throw new HttpError(409, `${hotel.name} is already booked for these dates`);
       const travellers = body.travellerUids ?? trip.memberIds;
       if (!travellers.every((u) => trip.memberIds.includes(u))) throw new HttpError(400, 'Travellers must be members of this trip');
+      const current = stay.bookingId ? await loadBooking(tripId, stay.bookingId).catch(() => null) : null;
+      if (!current) {
+        const dup = await adminDb().collection(paths.bookings(tripId)).where('kind', '==', 'hotel').where('carrier', '==', hotel.name).get();
+        if (dup.docs.some((d) => String(d.get('startLocal')).slice(0, 10) < body.checkOut.slice(0, 10) && String(d.get('endLocal')).slice(0, 10) > body.checkIn.slice(0, 10))) {
+          throw new HttpError(409, `${hotel.name} is already booked for these dates — change or cancel that booking instead.`);
+        }
+      }
       const draft: BookingDraft = {
         kind: 'hotel',
         carrier: hotel.name,
-        ...(body.pnr ? { pnr: body.pnr } : {}),
+        ...(body.pnr ? { pnr: body.pnr } : current?.pnr ? { pnr: current.pnr } : {}),
         to: { name: hotel.name, location: hotel.location, ...(hotel.address ? { address: hotel.address } : {}) },
-        startLocal: `${stay.checkIn}T${clock(hotel.checkInTime, '15:00')}`,
-        endLocal: `${stay.checkOut}T${clock(hotel.checkOutTime, '12:00')}`,
-        passengerNames: [],
+        startLocal: body.checkIn,
+        endLocal: body.checkOut,
+        passengerNames: current?.passengerNames ?? [],
         travellerUids: travellers,
       };
-      const bookingId = await addBooking(tripId, draft, member, { source: 'manual' });
-      if (stay.chosenKey !== key) await stayRef(tripId, body.id).update({ chosenKey: key, updatedAt: Date.now() });
-      return json({ bookingId }, { status: 201 });
+      const bookingId = current
+        ? (await updateBooking(tripId, { ...current, stayId: body.id }, draft, member)).id
+        : await addBooking(tripId, draft, member, { source: 'manual', stayId: body.id });
+      // The stay follows what was actually booked.
+      await stayRef(tripId, body.id).update({ chosenKey: key, bookingId, checkIn: body.checkIn.slice(0, 10), checkOut: body.checkOut.slice(0, 10), updatedAt: Date.now() });
+      await notify(
+        trip.memberIds,
+        {
+          kind: 'decision',
+          title: current ? `Hotel booking changed — ${stay.city}` : `Hotel booked for ${stay.city}`,
+          body: `${hotel.name}: check-in ${body.checkIn.replace('T', ' ')}, check-out ${body.checkOut.replace('T', ' ')}.`,
+          url: `/t/${tripId}/bookings?tab=stays`,
+          tag: `stay-${stay.id}`,
+        },
+        { timeZone: trip.destinations[0].timezone, except: member.uid },
+      );
+      return json({ bookingId }, { status: current ? 200 : 201 });
+    },
+    { admin: true, perMinute: 20 },
+  ),
+
+  /**
+   * Cancel a stay's hotel booking (admin): the booking and its check-in /
+   * check-out leave the timeline. The hotel stays picked unless `unpick`.
+   * `bookingId` covers hotel bookings made before stays linked them.
+   */
+  'POST stays/unbook': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ id: Id, bookingId: Id.optional(), unpick: z.boolean().default(false) }));
+      const [stay, trip] = await Promise.all([loadStay(tripId, body.id), loadTrip(tripId)]);
+      const bookingId = stay.bookingId ?? body.bookingId;
+      const booking = bookingId ? await loadBooking(tripId, bookingId).catch(() => null) : null;
+      if (booking && booking.kind !== 'hotel') throw new HttpError(400, 'That is not a hotel booking');
+      if (booking) await removeBooking(tripId, booking, member, `cancelled the hotel booking at ${booking.to.name}`);
+      await stayRef(tripId, body.id).update({ bookingId: FieldValue.delete(), ...(body.unpick ? { chosenKey: FieldValue.delete() } : {}), updatedAt: Date.now() });
+      if (booking) {
+        await notify(
+          trip.memberIds,
+          {
+            kind: 'decision',
+            title: `Hotel booking cancelled — ${stay.city}`,
+            body: `${booking.to.name} is off the plan. Pick and book another hotel for these nights.`,
+            url: `/t/${tripId}/bookings?tab=stays`,
+            tag: `stay-${stay.id}`,
+          },
+          { timeZone: trip.destinations[0].timezone, except: member.uid },
+        );
+      }
+      return json({ ok: true });
+    },
+    { admin: true, perMinute: 20 },
+  ),
+
+  /** Comment on a hotel; @-mentioned members (and earlier commenters) are notified. */
+  'POST stays/comment': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ id: Id, key: z.string().max(300), text: z.string().trim().min(1).max(500), mentions: z.array(Id).max(20).default([]) }));
+      await useDailyQuota(member.uid, 'comment');
+      const [stay, hotel, trip] = await Promise.all([loadStay(tripId, body.id), loadHotel(tripId, body.id, body.key), loadTrip(tripId)]);
+      const mentions = [...new Set(body.mentions)].filter((u) => trip.memberIds.includes(u) && u !== member.uid);
+      const col = adminDb().collection(paths.hotelComments(tripId, body.id, body.key));
+      const ref = col.doc();
+      await ref.set(Comment.parse({ id: ref.id, uid: member.uid, text: body.text, mentions, at: Date.now() }));
+      const url = `/t/${tripId}/bookings?tab=stays`;
+      const opts = { timeZone: trip.destinations[0].timezone, except: member.uid };
+      await notify(mentions, { kind: 'comment', title: `${member.displayName} mentioned you · ${hotel.name}`, body: body.text.slice(0, 140), url, tag: `hotel-comment-${hotel.key}` }, opts);
+      const earlier = (await col.select('uid').get()).docs.map((d) => d.get('uid') as string);
+      await notify(
+        [...earlier, ...Object.keys(hotel.votes)].filter((u) => trip.memberIds.includes(u) && !mentions.includes(u)),
+        { kind: 'comment', title: `${member.displayName} on ${hotel.name} (${stay.city})`, body: body.text.slice(0, 140), url, tag: `hotel-comment-${hotel.key}` },
+        { ...opts, throttleKey: `hotel-comment:${hotel.key}`, throttle: 300 },
+      );
+      return json({ id: ref.id }, { status: 201 });
     },
     { perMinute: 20 },
+  ),
+
+  'POST stays/comment-delete': withTrip(
+    async (req, { tripId, member }) => {
+      const { id, key, commentId } = await readJson(req, z.object({ id: Id, key: z.string().max(300), commentId: Id }));
+      const ref = adminDb().doc(`${paths.hotelComments(tripId, id, key)}/${commentId}`);
+      const snap = await ref.get();
+      if (!snap.exists) return json({ ok: true });
+      if (snap.get('uid') !== member.uid && member.role !== 'admin') throw new HttpError(403, 'You can only delete your own comments');
+      await ref.delete();
+      return json({ ok: true });
+    },
+    { perMinute: 30 },
   ),
 };

@@ -3,7 +3,8 @@
 //
 //   voting ──everyone 👍──────────────▶ backlog
 //          ──everyone 👎──────────────▶ rejected
-//          ──mixed──▶ people not going pick a middle ground (24 h)
+//          ──more 👎 than 👍───────────▶ backup (plan B; the admin can reopen it)
+//          ──mixed, 👍 ≥ 👎──▶ people not going pick a middle ground (24 h)
 //                     ──▶ admin: accept (with groups) → backlog | backup | reject
 //
 // Votes close when every required voter has voted or after 24 h / when the
@@ -51,11 +52,13 @@ export function tallyIdea(idea: Pick<Idea, 'voters' | 'votes'>, memberIds: strin
  * Status from the votes alone. `closed` = the admin closed voting or the
  * 24 h ran out: non-voters abstain.
  */
-export function statusFromTally(t: IdeaTally, closed: boolean): 'voting' | 'backlog' | 'mixed' | 'rejected' {
+export function statusFromTally(t: IdeaTally, closed: boolean): 'voting' | 'backlog' | 'mixed' | 'backup' | 'rejected' {
   if (!closed && t.pending.length) return 'voting';
   if (t.up + t.down === 0) return closed ? 'rejected' : 'voting';
   if (t.down === 0) return 'backlog';
   if (t.up === 0) return 'rejected';
+  // Most of the group said no: don't split the group over it — keep it as a plan B.
+  if (t.down > t.up) return 'backup';
   return 'mixed';
 }
 
@@ -124,6 +127,9 @@ export function groupChoices(idea: VotingIdea, memberIds: string[]): Groups {
       else g.alternatives.push({ option: opt, uids: [u] });
     }
   }
+  // At most two alternative groups (the biggest); anyone in another gets free time rather than being left out.
+  g.alternatives.sort((a, b) => b.uids.length - a.uids.length);
+  for (const extra of g.alternatives.slice(MAX_ALTERNATIVES)) g.freeTime.push(...extra.uids);
   g.alternatives = g.alternatives.slice(0, MAX_ALTERNATIVES);
   return g;
 }

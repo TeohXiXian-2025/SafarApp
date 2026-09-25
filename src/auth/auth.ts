@@ -15,6 +15,7 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { create } from 'zustand';
 import { paths, type UserProfile } from '../domain';
+import { PUBLIC_ORIGIN } from '../config';
 import { auth, db, isStandaloneApp, useSameOriginAuth } from '../firebase/config';
 import { isMobileDevice } from '../pwa/pwa';
 
@@ -96,7 +97,9 @@ export async function signUpWithEmail(name: string, email: string, password: str
 /** Surfaces an error from a finished redirect sign-in (e.g. account disabled). */
 export const checkRedirectResult = () => getRedirectResult(auth);
 
-export const resetPassword = (email: string) => sendPasswordResetEmail(auth, email);
+// After resetting, the "Continue" button brings people back to our login page.
+export const resetPassword = (email: string) =>
+  sendPasswordResetEmail(auth, email, { url: `${import.meta.env.DEV ? window.location.origin : PUBLIC_ORIGIN}/login` });
 export const signOut = () => fbSignOut(auth);
 
 /** Maps Firebase auth error codes to messages people understand. */

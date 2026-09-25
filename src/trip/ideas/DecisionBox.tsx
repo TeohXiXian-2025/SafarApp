@@ -3,7 +3,7 @@
 //                 sees the groups that would form and accepts / backs up / rejects
 //   accepted    → the groups (if split), "I can't go" to step out (no approval
 //                 needed), "Rejoin the group" to come back
-import { Check, GitFork, RefreshCw, Users } from 'lucide-react';
+import { Check, GitFork, Plus, RefreshCw, Send, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   aloneIn,
@@ -18,6 +18,7 @@ import {
   type MiddleOption,
   type Split,
 } from '../../domain';
+import { PlaceSearch } from '../../components/live/PlaceSearch';
 import { api, ApiError } from '../../lib/api';
 import { Avatar, Button, cx, ErrorBanner, Input, Sheet } from '../../ui';
 import { TRACK_COLOR } from '../trackColors';
@@ -48,6 +49,8 @@ export function DecisionBox({ idea, split, alts }: { idea: Idea; split: Split | 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
+  const [noteSent, setNoteSent] = useState(false);
+  const [proposing, setProposing] = useState(false);
   const [stepping, setStepping] = useState(false);
   const asked = useRef(false);
   const q = { tripId: trip.id };
@@ -113,6 +116,7 @@ export function DecisionBox({ idea, split, alts }: { idea: Idea; split: Split | 
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-[#161C23] text-sm">
                     {o.title}
+                    {o.proposedBy && <span className="ml-1.5 text-[10px] font-bold text-[#1D4E89] bg-[#E3EEF9] rounded px-1 py-0.5 align-middle">SUGGESTED</span>}
                     {o.place?.halalListed && <span className="ml-1.5 text-[10px] font-bold text-[#0B6B45] bg-[#E3F4EC] rounded px-1 py-0.5 align-middle">HALAL-LISTED</span>}
                   </p>
                   <p className="text-xs text-[#6D7A77]">{o.detail}</p>
@@ -129,7 +133,7 @@ export function DecisionBox({ idea, split, alts }: { idea: Idea; split: Split | 
                     className="shrink-0 min-h-9 px-3"
                     loading={busy === o.id}
                     disabled={!!busy}
-                    onClick={() => act(o.id, () => api.post('ideas/choose', { ideaId: idea.id, optionId: o.id, ...(note.trim() ? { note: note.trim() } : {}) }, q))}
+                    onClick={() => act(o.id, () => api.post('ideas/choose', { ideaId: idea.id, optionId: o.id }, q))}
                   >
                     {picked ? <Check className="w-4 h-4" /> : 'Pick'}
                   </Button>
@@ -138,13 +142,65 @@ export function DecisionBox({ idea, split, alts }: { idea: Idea; split: Split | 
             );
           })}
           {iChoose && (
-            <div className="flex gap-2">
-              <Input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="Note for the group (optional)" className="min-h-9 text-sm" />
+            <div className="flex flex-wrap justify-end gap-1">
+              <Button variant="ghost" className="shrink-0 min-h-9 px-2.5" disabled={!!busy} onClick={() => setProposing((v) => !v)}>
+                <Plus className="w-4 h-4" /> Suggest my own
+              </Button>
               <Button variant="ghost" className="shrink-0 min-h-9 px-2.5" loading={busy === 'more'} disabled={!!busy} onClick={() => act('more', () => api.post('ideas/options', { ideaId: idea.id, more: true }, q))}>
-                <RefreshCw className="w-4 h-4" /> More
+                <RefreshCw className="w-4 h-4" /> More options
               </Button>
             </div>
           )}
+          {iChoose && proposing && (
+            <div className="rounded-lg border border-[#D8E6F3] bg-white p-2.5 space-y-1.5">
+              <p className="text-xs text-[#3F5873]">Where would you go instead? It's picked for you, and the others not going can pick it too.</p>
+              <PlaceSearch
+                scope="any"
+                near={idea.place.location}
+                placeholder="Search a place nearby…"
+                autoFocus
+                onPick={(d) => {
+                  if (!d.placeId) return setError('Pick a place from the list.');
+                  setProposing(false);
+                  void act('propose', () => api.post('ideas/propose', { ideaId: idea.id, place: { placeId: d.placeId, name: d.name, location: d.location } }, q));
+                }}
+              />
+            </div>
+          )}
+          {/* A note is posted to the idea's comments, so everyone sees it (and gets notified). */}
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const text = note.trim();
+              if (!text) return;
+              void act('note', async () => {
+                await api.post('ideas/comment', { ideaId: idea.id, text }, q);
+                setNote('');
+                setNoteSent(true);
+              });
+            }}
+          >
+            <Input
+              value={note}
+              maxLength={300}
+              onChange={(e) => {
+                setNote(e.target.value);
+                setNoteSent(false);
+              }}
+              placeholder="Note for the group (optional)"
+              className="min-h-9 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={!!busy || !note.trim()}
+              aria-label="Send note"
+              className="shrink-0 w-9 h-9 rounded-xl bg-[#1D4E89] text-white inline-flex items-center justify-center disabled:opacity-50"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </form>
+          {noteSent && <p className="text-[11px] text-[#0B6B45]">Sent — it's in the comments below.</p>}
         </div>
 
         <p className="text-[11px] text-[#3F5873]">

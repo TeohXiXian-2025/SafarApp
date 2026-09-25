@@ -1,0 +1,192 @@
+// One booking (flight, train, bus, ferry or hotel): times on each place's own
+// clock, travellers, and edit / delete / "delayed or cancelled?" actions.
+import { ArrowRight, FileText, Pencil, Siren, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import { Booking, journeyPrayers, type BookingDraft } from '../../domain';
+import { JourneyPrayerList } from '../JourneyPrayerList';
+import { api, ApiError } from '../../lib/api';
+import { fileUrl } from '../../lib/storage';
+import { Avatar, Badge, Button, Card, ErrorBanner, Sheet } from '../../ui';
+import { useTrip } from '../TripLayout';
+import { BookingEditor, draftProblem, type EditableDraft } from './BookingEditor';
+import { bookingTitle, dayDiff, formatDay, KIND, localParts, tzCity } from './format';
+import { ResyncSheet } from './ResyncSheet';
+
+export function BookingCard({ booking: b, canEdit, isMine, onEdit }: { booking: Booking; canEdit: boolean; isMine: boolean; onEdit: () => void }) {
+  const { trip, members, me } = useTrip();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [resync, setResync] = useState(false);
+  const k = KIND[b.kind];
+  const Icon = k.icon;
+  const start = localParts(b.startAt);
+  const end = localParts(b.endAt);
+  const plusDays = dayDiff(start.date, end.date);
+  const outside = end.date < trip.startDate || start.date > trip.endDate;
+  const travellers = members.filter((m) => b.travellerUids.includes(m.uid));
+
+  const remove = async () => {
+    if (!confirm(`Delete this ${k.label.toLowerCase()} booking?`)) return;
+    setBusy(true);
+    try {
+      await api.post('bookings/delete', { id: b.id }, { tripId: trip.id });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not delete.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-start gap-3">
+        <span className="w-10 h-10 rounded-xl bg-[#00685F]/10 text-[#00685F] flex items-center justify-center shrink-0">
+          <Icon className="w-5 h-5" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-bold text-[#161C23]">{bookingTitle(b)}</p>
+            {b.pnr && <Badge tone="muted">Ref {b.pnr}</Badge>}
+            {outside && <Badge tone="amber">Outside trip dates</Badge>}
+          </div>
+          {b.kind === 'hotel' ? (
+            <p className="text-sm text-[#6D7A77] truncate">{b.to.address ?? b.to.name}</p>
+          ) : (
+            <p className="text-sm text-[#6D7A77] flex items-center gap-1.5 min-w-0">
+              <span className="truncate">{b.from?.name}</span> <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{b.to.name}</span>
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 rounded-xl bg-[#FAF8F5] p-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-[#6D7A77]">{b.kind === 'hotel' ? 'Check-in' : 'Depart'}</p>
+          <p className="text-lg font-extrabold text-[#161C23]">{start.time}</p>
+          <p className="text-xs text-[#6D7A77]">
+            {formatDay(start.date)} · {tzCity((b.from ?? b.to).timezone)} time
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-[#6D7A77]">{b.kind === 'hotel' ? 'Check-out' : 'Arrive'}</p>
+          <p className="text-lg font-extrabold text-[#161C23]">
+            {end.time}
+            {plusDays > 0 && b.kind !== 'hotel' && <sup className="text-xs text-[#96590B] ml-0.5">+{plusDays}</sup>}
+          </p>
+          <p className="text-xs text-[#6D7A77]">
+            {formatDay(end.date)} · {tzCity(b.to.timezone)} time
+          </p>
+        </div>
+      </div>
+
+      {b.kind !== 'hotel' && travellers.some((m) => m.prefs?.prayerReminders) && (() => {
+        const list = journeyPrayers(b);
+        return list.length ? <JourneyPrayerList list={list} /> : null;
+      })()}
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="flex -space-x-1.5">
+            {travellers.slice(0, 5).map((m) => (
+              <span key={m.uid} className="ring-2 ring-white rounded-full" title={m.displayName}>
+                <Avatar name={m.displayName} photoURL={m.photoURL} size={24} />
+              </span>
+            ))}
+          </div>
+          <span className="text-xs text-[#6D7A77] truncate">{travellers.map((m) => m.displayName).join(', ')}</span>
+        </div>
+        <div className="flex gap-1 shrink-0">
+          {b.kind !== 'hotel' && (canEdit || b.travellerUids.includes(me.uid)) && (
+            <IconBtn label="Delayed or cancelled?" onClick={() => setResync(true)}>
+              <Siren className="w-4 h-4" />
+            </IconBtn>
+          )}
+          {isMine && b.fileRef && (
+            <IconBtn label="View original ticket" onClick={() => void fileUrl(b.fileRef!).then((u) => window.open(u, '_blank', 'noopener'))}>
+              <FileText className="w-4 h-4" />
+            </IconBtn>
+          )}
+          {canEdit && (
+            <>
+              <IconBtn label="Edit booking" onClick={onEdit}>
+                <Pencil className="w-4 h-4" />
+              </IconBtn>
+              <IconBtn label="Delete booking" onClick={remove} disabled={busy} danger>
+                <Trash2 className="w-4 h-4" />
+              </IconBtn>
+            </>
+          )}
+        </div>
+      </div>
+      <ErrorBanner>{error}</ErrorBanner>
+      {resync && <ResyncSheet booking={b} onClose={() => setResync(false)} />}
+    </Card>
+  );
+}
+
+export function EditBookingSheet({ booking, onClose }: { booking: Booking; onClose: () => void }) {
+  const { trip, members } = useTrip();
+  const [draft, setDraft] = useState<EditableDraft>(() => ({
+    kind: booking.kind,
+    carrier: booking.carrier,
+    number: booking.number,
+    pnr: booking.pnr,
+    from: booking.from,
+    to: booking.to,
+    startLocal: booking.startAt.slice(0, 16),
+    endLocal: booking.endAt.slice(0, 16),
+    passengerNames: booking.passengerNames,
+    travellerUids: booking.travellerUids,
+    notes: booking.notes,
+  }));
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const problem = draftProblem(draft);
+    if (problem) return setError(problem);
+    setSaving(true);
+    try {
+      // Places still carry their stored `timezone`; the server ignores it and recomputes.
+      await api.post('bookings/update', { id: booking.id, draft: draft as BookingDraft }, { tripId: trip.id });
+      onClose();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not save.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title="Edit booking" wide>
+      <div className="space-y-4">
+        <BookingEditor value={draft} onChange={(d) => (setDraft(d), setError(''))} members={members} />
+        <ErrorBanner>{error}</ErrorBanner>
+        <div className="flex gap-3">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button className="flex-1" loading={saving} onClick={save}>
+            Save changes
+          </Button>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+export function IconBtn({ label, onClick, disabled, danger, children }: { label: string; onClick: () => void; disabled?: boolean; danger?: boolean; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-9 h-9 rounded-lg inline-flex items-center justify-center border border-[#E7DFD5] disabled:opacity-50 ${
+        danger ? 'text-[#B3261E] hover:bg-[#FDECEA]' : 'text-[#6D7A77] hover:bg-[#F3EFE9]'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}

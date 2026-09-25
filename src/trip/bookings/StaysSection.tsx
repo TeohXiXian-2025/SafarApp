@@ -1,14 +1,19 @@
 // Stays: one per city block of nights. For each: find hotels near where you'll
-// be (live Google Hotels prices), vote, the admin picks, you book on the site
-// and tap "I booked it" — it becomes the hotel booking on the timeline.
-import { BedDouble, Check, ExternalLink, Loader2, Pencil, Plus, RefreshCw, Star, ThumbsDown, ThumbsUp, Trash2, TriangleAlert } from 'lucide-react';
+// be (live Google Hotels prices). Everyone votes 👍/👎 and comments (@ to tag
+// someone); the list is ordered by the votes, then by how well each fits. The
+// admin picks, books on the site and taps "I booked it" with the real check-in
+// and check-out — it becomes the stay's hotel booking on the timeline, and can
+// be changed or cancelled later.
+import { BedDouble, Check, ExternalLink, Loader2, Pencil, Plus, RefreshCw, Star, ThumbsDown, ThumbsUp, Trash2, TriangleAlert, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { Booking, formatMoney, groupHotelBudget, HotelOption, paths, Stay, toMinor, tripNights, uncoveredNights } from '../../domain';
+import { Booking, formatMoney, groupHotelBudget, HotelOption, paths, Stay, suggestStayTimes, toMinor, tripNights, uncoveredNights } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Badge, Button, Card, cx, ErrorBanner, Field, Input, Select, Sheet, Spinner } from '../../ui';
+import { CommentThread } from '../CommentThread';
 import { useTrip } from '../TripLayout';
+import { BookingCard } from './BookingCard';
 import { formatDay } from './format';
 
 const SHOW_FIRST = 5;
@@ -18,8 +23,18 @@ const agoText = (at: number) => {
   return min < 60 ? `${Math.max(1, min)} min ago` : min < 1440 ? `${Math.round(min / 60)} h ago` : `${Math.round(min / 1440)} d ago`;
 };
 
-export function StaysSection({ bookings, onUpload }: { bookings: Booking[]; onUpload: () => void }) {
-  const { trip, members, isAdmin } = useTrip();
+/** Net 👍 minus 👎. */
+const netVotes = (h: HotelOption) => Object.values(h.votes).reduce((n, v) => n + (v === 'up' ? 1 : -1), 0);
+
+/** The stay's hotel booking: the one it links to, else (older bookings) one overlapping its nights. */
+function bookingsOf(stay: Stay, hotels: Booking[]): Booking[] {
+  const linked = hotels.filter((h) => h.id === stay.bookingId || h.stayId === stay.id);
+  if (linked.length) return linked;
+  return hotels.filter((h) => !h.stayId && h.startLocal.slice(0, 10) < stay.checkOut && h.endLocal.slice(0, 10) > stay.checkIn);
+}
+
+export function StaysSection({ bookings, onUpload, onEditBooking }: { bookings: Booking[]; onUpload: () => void; onEditBooking: (b: Booking) => void }) {
+  const { trip, members, me, isAdmin } = useTrip();
   const stays = useQuery(`stays:${trip.id}`, () => paths.stays(trip.id), Stay);
   const [editing, setEditing] = useState<Stay | 'new' | null>(null);
   const [error, setError] = useState('');
@@ -89,8 +104,23 @@ export function StaysSection({ bookings, onUpload }: { bookings: Booking[]; onUp
       ) : stays.loading || planning ? (
         <Spinner label="Planning where you'll stay…" />
       ) : (
-        sorted.map((s) => <StayCard key={s.id} stay={s} booked={hotels.filter((h) => h.startLocal.slice(0, 10) < s.checkOut && h.endLocal.slice(0, 10) > s.checkIn)} onEdit={() => setEditing(s)} onUpload={onUpload} />)
+        sorted.map((s) => <StayCard key={s.id} stay={s} booked={bookingsOf(s, hotels)} journeys={bookings} onEdit={() => setEditing(s)} onUpload={onUpload} />)
       )}
+
+      {/* Hotel bookings that don't belong to any stay (e.g. uploaded before stays were planned). */}
+      {(() => {
+        const shown = new Set(sorted.flatMap((s) => bookingsOf(s, hotels).map((b) => b.id)));
+        const other = hotels.filter((h) => !shown.has(h.id));
+        if (!other.length) return null;
+        return (
+          <section className="space-y-2">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[#6D7A77]">Other hotel bookings</h2>
+            {other.map((b) => (
+              <BookingCard key={b.id} booking={b} canEdit={b.createdBy === me.uid || isAdmin} isMine={b.createdBy === me.uid} onEdit={() => onEditBooking(b)} />
+            ))}
+          </section>
+        );
+      })()}
 
       {isAdmin && (
         <div className="flex flex-wrap gap-2">
@@ -107,14 +137,16 @@ export function StaysSection({ bookings, onUpload }: { bookings: Booking[]; onUp
   );
 }
 
-function StayCard({ stay, booked, onEdit, onUpload }: { stay: Stay; booked: Booking[]; onEdit: () => void; onUpload: () => void }) {
+function StayCard({ stay, booked, journeys, onEdit, onUpload }: { stay: Stay; booked: Booking[]; journeys: Booking[]; onEdit: () => void; onUpload: () => void }) {
   const { trip, isAdmin } = useTrip();
   const options = useQuery(`hotels:${trip.id}:${stay.id}`, () => paths.hotels(trip.id, stay.id), HotelOption);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [all, setAll] = useState(false);
+  const [changing, setChanging] = useState<Booking | null>(null);
   const nights = nightsBetween(stay.checkIn, stay.checkOut);
-  const list = useMemo(() => [...options.data].sort((a, b) => a.rank - b.rank), [options.data]);
+  // What the group prefers first (👍 − 👎), then how well it fits.
+  const list = useMemo(() => [...options.data].sort((a, b) => netVotes(b) - netVotes(a) || a.rank - b.rank), [options.data]);
   const chosen = list.find((h) => h.key === stay.chosenKey);
   const shown = all ? list : list.slice(0, SHOW_FIRST);
   if (chosen && !shown.includes(chosen)) shown.unshift(chosen);
@@ -155,10 +187,36 @@ function StayCard({ stay, booked, onEdit, onUpload }: { stay: Stay; booked: Book
       </div>
 
       {booked.map((b) => (
-        <p key={b.id} className="rounded-xl bg-[#00685F]/5 px-3 py-2 text-sm text-[#161C23]">
-          <Check className="inline w-4 h-4 text-[#00685F] mr-1" />
-          <strong>{b.to.name}</strong> — check-in {formatDay(b.startLocal.slice(0, 10))} {b.startLocal.slice(11)}, out {formatDay(b.endLocal.slice(0, 10))} {b.endLocal.slice(11)}
-        </p>
+        <div key={b.id} className="rounded-xl bg-[#00685F]/5 px-3 py-2 text-sm text-[#161C23] space-y-2">
+          <p>
+            <Check className="inline w-4 h-4 text-[#00685F] mr-1" />
+            <strong>{b.to.name}</strong> — check-in {formatDay(b.startLocal.slice(0, 10))} {b.startLocal.slice(11)}, check-out {formatDay(b.endLocal.slice(0, 10))} {b.endLocal.slice(11)}
+            {b.pnr && <span className="text-[#6D7A77]"> · ref {b.pnr}</span>}
+          </p>
+          {isAdmin && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" className="!min-h-8 !px-3 text-xs" onClick={() => setChanging(b)}>
+                <Pencil className="w-3.5 h-3.5" /> Change dates / times
+              </Button>
+              <Button
+                variant="ghost"
+                className="!min-h-8 !px-3 text-xs text-[#B3261E]"
+                loading={busy}
+                onClick={() => {
+                  if (!confirm(`Cancel the booking at ${b.to.name}? Its check-in and check-out leave the timeline. (Cancel it on the booking site too.)`)) return;
+                  setBusy(true);
+                  setError('');
+                  api
+                    .post('stays/unbook', { id: stay.id, bookingId: b.id }, { tripId: trip.id })
+                    .catch((e) => setError(e instanceof ApiError ? e.message : 'Could not cancel.'))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                <X className="w-3.5 h-3.5" /> Cancel booking
+              </Button>
+            </div>
+          )}
+        </div>
       ))}
 
       {!stay.search ? (
@@ -184,7 +242,7 @@ function StayCard({ stay, booked, onEdit, onUpload }: { stay: Stay; booked: Book
           ) : (
             <ul className="space-y-3">
               {shown.map((h) => (
-                <HotelCard key={h.key} stay={stay} hotel={h} chosen={h.key === stay.chosenKey} booked={booked.length > 0} onUpload={onUpload} />
+                <HotelCard key={h.key} stay={stay} hotel={h} chosen={h.key === stay.chosenKey} booked={booked.length > 0} journeys={journeys} onUpload={onUpload} />
               ))}
             </ul>
           )}
@@ -196,11 +254,21 @@ function StayCard({ stay, booked, onEdit, onUpload }: { stay: Stay; booked: Book
         </>
       )}
       <ErrorBanner>{error}</ErrorBanner>
+      {changing && (
+        <BookSheet
+          stay={stay}
+          hotel={list.find((h) => h.key === stay.chosenKey) ?? list.find((h) => h.name === changing.to.name) ?? null}
+          current={changing}
+          journeys={journeys}
+          onClose={() => setChanging(null)}
+          onUpload={onUpload}
+        />
+      )}
     </Card>
   );
 }
 
-function HotelCard({ stay, hotel: h, chosen, booked, onUpload }: { stay: Stay; hotel: HotelOption; chosen: boolean; booked: boolean; onUpload: () => void }) {
+function HotelCard({ stay, hotel: h, chosen, booked, journeys, onUpload }: { stay: Stay; hotel: HotelOption; chosen: boolean; booked: boolean; journeys: Booking[]; onUpload: () => void }) {
   const { trip, me, members, isAdmin } = useTrip();
   const [offers, setOffers] = useState<{ open: boolean; loading?: boolean }>({ open: false });
   const [markOpen, setMarkOpen] = useState(false);
@@ -326,17 +394,35 @@ function HotelCard({ stay, hotel: h, chosen, booked, onUpload }: { stay: Stay; h
       {chosen && !booked && (
         <div className="border-t border-[#E7DFD5] bg-[#00685F]/5 px-3 py-2.5 flex flex-wrap items-center gap-2">
           <p className="flex-1 min-w-[10rem] text-sm text-[#161C23]">
-            <strong>Picked.</strong> Booked it? Add it so check-in and check-out go on the timeline.
+            {isAdmin ? (
+              <>
+                <strong>Picked.</strong> Booked it? Add it with the real check-in and check-out so they go on the timeline.
+              </>
+            ) : (
+              <>
+                <strong>The admin picked this one.</strong> They'll book it and add it here.
+              </>
+            )}
           </p>
-          <Button className="!min-h-9" onClick={() => setMarkOpen(true)}>
-            I booked it
-          </Button>
+          {isAdmin && (
+            <Button className="!min-h-9" onClick={() => setMarkOpen(true)}>
+              I booked it
+            </Button>
+          )}
         </div>
       )}
+      <div className="px-3 py-2 border-t border-[#E7DFD5]">
+        <CommentThread
+          queryKey={`hotel-comments:${trip.id}:${stay.id}:${h.key}`}
+          path={paths.hotelComments(trip.id, stay.id, h.key)}
+          onSend={(text, mentions) => api.post('stays/comment', { id: stay.id, key: h.key, text, mentions }, { tripId: trip.id })}
+          onDelete={(commentId) => api.post('stays/comment-delete', { id: stay.id, key: h.key, commentId }, { tripId: trip.id })}
+        />
+      </div>
       <div className="px-3">
         <ErrorBanner>{error}</ErrorBanner>
       </div>
-      {markOpen && <MarkBookedSheet stay={stay} hotel={h} onClose={() => setMarkOpen(false)} onUpload={() => (setMarkOpen(false), onUpload())} />}
+      {markOpen && <BookSheet stay={stay} hotel={h} journeys={journeys} onClose={() => setMarkOpen(false)} onUpload={() => (setMarkOpen(false), onUpload())} />}
     </li>
   );
 }
@@ -359,18 +445,65 @@ function VoteBtn({ active, onClick, label, title, danger, children }: { active: 
   );
 }
 
-function MarkBookedSheet({ stay, hotel, onClose, onUpload }: { stay: Stay; hotel: HotelOption; onClose: () => void; onUpload: () => void }) {
+/**
+ * "I booked it" / "Change dates / times" (admin): the real check-in and
+ * check-out, suggested from the hotel's times and moved around the flights
+ * (landing that day → later check-in; leaving that day → earlier check-out).
+ */
+function BookSheet({
+  stay,
+  hotel,
+  current,
+  journeys,
+  onClose,
+  onUpload,
+}: {
+  stay: Stay;
+  hotel: HotelOption | null;
+  current?: Booking;
+  journeys: Booking[];
+  onClose: () => void;
+  onUpload: () => void;
+}) {
   const { trip, members } = useTrip();
-  const [pnr, setPnr] = useState('');
-  const [who, setWho] = useState<string[]>(members.map((m) => m.uid));
+  const [who, setWho] = useState<string[]>(current?.travellerUids ?? members.map((m) => m.uid));
+  const suggested = useMemo(
+    () =>
+      suggestStayTimes(
+        { checkIn: stay.checkIn, checkOut: stay.checkOut, location: hotel?.location ?? current?.to.location ?? stay.center },
+        { checkIn: clockOf(hotel?.checkInTime, '15:00'), checkOut: clockOf(hotel?.checkOutTime, '12:00') },
+        journeys,
+        who,
+      ),
+    // Suggest once, for the travellers ticked when the sheet opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const [checkIn, setCheckIn] = useState(current?.startLocal ?? suggested.checkIn);
+  const [checkOut, setCheckOut] = useState(current?.endLocal ?? suggested.checkOut);
+  const [pnr, setPnr] = useState(current?.pnr ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const name = hotel?.name ?? current?.to.name ?? 'this hotel';
 
   const save = async () => {
     if (!who.length) return setError('Pick who is staying.');
+    if (checkOut <= checkIn) return setError('Check-out must be after check-in.');
+    if (!hotel && !current) return setError('Search hotels again, then pick this one.');
     setSaving(true);
+    setError('');
     try {
-      await api.post('stays/booked', { id: stay.id, key: hotel.key, ...(pnr.trim() ? { pnr: pnr.trim() } : {}), travellerUids: who }, { tripId: trip.id });
+      // A hotel booking added by hand (not from this stay's list): change the booking itself.
+      if (!hotel && current) {
+        const { id: _id, startAt: _s, endAt: _e, source: _src, createdBy: _c, createdAt: _ca, updatedAt: _u, fileRef: _f, parseConfidence: _p, stayId: _st, ...draft } = current;
+        await api.post('bookings/update', { id: current.id, draft: { ...draft, startLocal: checkIn, endLocal: checkOut, travellerUids: who, ...(pnr.trim() ? { pnr: pnr.trim() } : {}) } }, { tripId: trip.id });
+        return onClose();
+      }
+      await api.post(
+        'stays/booked',
+        { id: stay.id, ...(hotel ? { key: hotel.key } : {}), checkIn, checkOut, ...(pnr.trim() ? { pnr: pnr.trim() } : {}), travellerUids: who },
+        { tripId: trip.id },
+      );
       onClose();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not save.');
@@ -378,15 +511,33 @@ function MarkBookedSheet({ stay, hotel, onClose, onUpload }: { stay: Stay; hotel
     }
   };
 
+  const dt = (v: string, set: (x: string) => void, min?: string) => (
+    <div className="grid grid-cols-[1fr_auto] gap-2">
+      <Input type="date" value={v.slice(0, 10)} min={min ?? trip.startDate} max={trip.endDate} onChange={(e) => e.target.value && set(`${e.target.value}T${v.slice(11, 16)}`)} />
+      <Input type="time" value={v.slice(11, 16)} step={300} onChange={(e) => e.target.value && set(`${v.slice(0, 10)}T${e.target.value}`)} className="w-[7.5rem]" />
+    </div>
+  );
+
   return (
-    <Sheet open onClose={onClose} title="I booked it">
+    <Sheet open onClose={onClose} title={current ? `Change booking — ${name}` : 'I booked it'}>
       <div className="space-y-4">
         <p className="text-sm text-[#161C23]">
-          <strong>{hotel.name}</strong>, {formatDay(stay.checkIn)} → {formatDay(stay.checkOut)}. It goes on the timeline as check-in and check-out, and AI Arrange starts each day from here.
+          <strong>{name}</strong>. Check-in and check-out go on the timeline, and AI Arrange starts each day from here. Enter them as on your confirmation, in the hotel's local time.
         </p>
-        <Button variant="secondary" className="w-full" onClick={onUpload}>
-          Upload the confirmation instead (AI reads the exact times)
-        </Button>
+        {!current && (
+          <Button variant="secondary" className="w-full" onClick={onUpload}>
+            Upload the confirmation instead (AI reads the exact times)
+          </Button>
+        )}
+        <Field label="Check-in">{dt(checkIn, setCheckIn)}</Field>
+        <Field label="Check-out">{dt(checkOut, setCheckOut, checkIn.slice(0, 10))}</Field>
+        {!current && suggested.notes.length > 0 && (
+          <ul className="rounded-xl bg-[#FDF3E1] border border-[#F0D7A7] px-3 py-2 text-xs text-[#6B3F06] space-y-0.5">
+            {suggested.notes.map((n) => (
+              <li key={n}>✈ {n}</li>
+            ))}
+          </ul>
+        )}
         <Field label="Booking reference (optional)">
           <Input value={pnr} maxLength={20} onChange={(e) => setPnr(e.target.value)} placeholder="e.g. 1234567890" />
         </Field>
@@ -406,12 +557,22 @@ function MarkBookedSheet({ stay, hotel, onClose, onUpload }: { stay: Stay; hotel
             Cancel
           </Button>
           <Button className="flex-1" loading={saving} onClick={() => void save()}>
-            Add to bookings
+            {current ? 'Save changes' : 'Add to bookings'}
           </Button>
         </div>
       </div>
     </Sheet>
   );
+}
+
+/** "3:00 PM" / "15:00" → "15:00". */
+function clockOf(s: string | undefined, fallback: string): string {
+  const m = s?.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (!m) return fallback;
+  let h = Number(m[1]) % 24;
+  if (m[3]?.toLowerCase() === 'pm' && h < 12) h += 12;
+  if (m[3]?.toLowerCase() === 'am' && h === 12) h = 0;
+  return `${String(h).padStart(2, '0')}:${m[2] ?? '00'}`;
 }
 
 function StayEditor({ stay, onClose }: { stay?: Stay; onClose: () => void }) {
