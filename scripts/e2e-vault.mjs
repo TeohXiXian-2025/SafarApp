@@ -117,7 +117,8 @@ try {
   const pass = s.body.checks.find((c) => c.key === 'passport');
   assert.equal(pass.level, 'bad');
   assert.ok(s.body.checks.some((c) => c.key === 'visa:JP' && c.level === 'todo' && c.link));
-  ok(`checks: “${pass.text}” + visa checklist for Japan`);
+  assert.ok(s.body.checks.some((c) => c.key === 'journey' && c.label === 'No booking to get there and back'));
+  ok(`checks: “${pass.text}” + visa checklist for Japan + “no booking to get there and back”`);
 
   // What the group sees.
   const shared = (await db.doc(`trips/${q.tripId}/readiness/${bob.uid}`).get()).data();

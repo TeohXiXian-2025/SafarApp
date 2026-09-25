@@ -49,7 +49,7 @@ describe('readinessChecks', () => {
       ],
     });
     expect(byKey(c)).toMatchObject({ 'visa:JP': 'bad', insurance: 'warn' });
-    const good = run({ docs: [passport('2030-01-01'), { kind: 'visa', fields: { country: 'JP' } }, { kind: 'insurance', fields: { validFrom: '2026-12-01', validUntil: '2026-12-31' } }] });
+    const good = run({ docs: [passport('2030-01-01'), { kind: 'visa', fields: { country: 'JP' } }, { kind: 'insurance', fields: { validFrom: '2026-12-01', validUntil: '2026-12-31' } }], bookings: [flight([]), flight([], { id: 'f2', startLocal: '2026-12-12T20:00', endLocal: '2026-12-13T01:00' })] });
     expect(readinessStatus(good)).toBe('ready');
   });
 
@@ -72,5 +72,19 @@ describe('toIsoDate', () => {
   it('reads the formats documents print', () => {
     expect(['2027-02-01', '01 FEB 2027', '1 Feb 2027', '01/02/2027', '14 MAR/MAC 1999'].map(toIsoDate)).toEqual(['2027-02-01', '2027-02-01', '2027-02-01', '2027-02-01', '1999-03-14']);
     expect(toIsoDate('31/02/2027')).toBeUndefined();
+  });
+});
+
+describe('journey and dates', () => {
+  const back = { id: 'f2', kind: 'flight', passengerNames: [], travellerUids: ['me'], startLocal: '2026-12-12T20:00', endLocal: '2026-12-13T01:00', to: { name: 'KLIA' } };
+  it('asks for a way there and back', () => {
+    expect(run().find((c) => c.key === 'journey')?.label).toBe('No booking to get there and back');
+    expect(run({ bookings: [flight([])] }).find((c) => c.key === 'journey')?.label).toBe('No booking to get back home');
+    expect(run({ bookings: [flight([]), back] }).some((c) => c.key === 'journey')).toBe(false);
+  });
+  it('flags a booking dated outside the trip, and a hotel under another name', () => {
+    const c = run({ docs: [passport('2030-01-01')], bookings: [flight([], { startLocal: '2027-01-07T09:00', endLocal: '2027-01-07T16:00' }), { ...back, id: 'h', kind: 'hotel', passengerNames: ['SITI AMINAH'], startLocal: '2026-12-07T15:00' }] });
+    expect(c.find((x) => x.key === 'dates:f1')?.level).toBe('warn');
+    expect(c.find((x) => x.key === 'name:h')?.label).toBe('A hotel booking name may not match the passport');
   });
 });

@@ -10,6 +10,7 @@ import { z } from 'zod';
 import {
   avgTravelMin,
   formatMoney,
+  freeBreakfast,
   groupHotelBudget,
   HotelOption,
   HotelVote,
@@ -35,6 +36,8 @@ import type { RouteTable } from '../_lib/routes.js';
 import { loadTripData, type TripData } from '../_lib/schedule.js';
 import { loadTrip, logActivity } from '../_lib/trip.js';
 import { addBooking } from './bookings.js';
+import { Type } from '@google/genai';
+import { extractJson } from '../_lib/gemini.js';
 
 /** Hotels checked for a mosque / halal food nearby (Google Places calls). */
 const MUSLIM_CHECK_TOP = 8;
@@ -88,6 +91,41 @@ function clock(s: string | undefined, fallback: string): string {
   if (m[3]?.toLowerCase() === 'pm' && h < 12) h += 12;
   if (m[3]?.toLowerCase() === 'am' && h === 12) h = 0;
   return `${String(h).padStart(2, '0')}:${m[2] ?? '00'}`;
+}
+
+const NOTE_TOP = 5;
+
+/** One friendly sentence per top hotel on why it suits this group — only from the facts we computed (skipped if the AI is busy). */
+async function whyItFits(
+  top: { base: { key: string; name: string; nightlyMinor?: number; travelMin: number; rating?: number; mosqueM?: number; halalNearby?: number; amenities: string[]; transit?: { name: string; walkMin: number } }; score: number; why: string[] }[],
+  g: { budget: { min: number; max: number } | null; stops: string[]; muslim: boolean; priorities: string[]; money: (m: number) => string },
+): Promise<Map<string, string>> {
+  if (!top.length) return new Map();
+  const facts = top.map((t) => ({
+    key: t.base.key,
+    name: t.base.name,
+    pricePerNight: t.base.nightlyMinor !== undefined ? g.money(t.base.nightlyMinor) : null,
+    minutesToStops: t.base.travelMin,
+    rating: t.base.rating ?? null,
+    nearestMosqueMeters: t.base.mosqueM ?? null,
+    halalPlacesWithin800m: t.base.halalNearby ?? null,
+    station: t.base.transit ?? null,
+    freeBreakfast: freeBreakfast(t.base.amenities),
+    reasons: t.why,
+  }));
+  try {
+    const out = await extractJson({
+      system:
+        'You help a travel group choose a hotel. For each hotel write ONE short sentence (max 22 words) on why it suits THIS group, using only the given facts (budget, the stops they plan, halal food / prayer needs, their priorities). Mention a trade-off if there is one. Never invent facts.',
+      parts: [{ text: JSON.stringify({ group: { budgetPerRoomNight: g.budget, plannedStops: g.stops.slice(0, 8), needsHalalOrPrayer: g.muslim, priorities: [...new Set(g.priorities)] }, hotels: facts }) }],
+      responseSchema: { type: Type.OBJECT, properties: { notes: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { key: { type: Type.STRING }, note: { type: Type.STRING } }, required: ['key', 'note'] } } }, required: ['notes'] },
+      validate: z.object({ notes: z.array(z.object({ key: z.string(), note: z.string() })) }),
+      budgetMs: 10_000,
+    });
+    return new Map(out.notes.filter((n) => top.some((t) => t.base.key === n.key)).map((n) => [n.key, n.note.slice(0, 300)]));
+  } catch {
+    return new Map();
+  }
 }
 
 export const stayRoutes: RouteTable = {
@@ -207,6 +245,8 @@ export const stayRoutes: RouteTable = {
         scored.sort((a, b) => b.score - a.score);
       }
 
+      const notes = await whyItFits(scored.slice(0, NOTE_TOP), { budget, stops: stops.map((s) => s.name), muslim: ctx.muslim, priorities: ctx.priorities.flat(), money: ctx.money });
+
       const db = adminDb();
       const old = await db.collection(paths.hotels(tripId, id)).get();
       const keep = new Map(old.docs.map((d) => HotelOption.safeParse(d.data())).flatMap((r) => (r.success && (Object.keys(r.data.votes).length || r.data.key === stay.chosenKey) ? [[r.data.key, r.data]] : [])));
@@ -220,6 +260,7 @@ export const stayRoutes: RouteTable = {
           priceSource: found.source,
           score: s.score,
           why: s.why,
+          ...(notes.get(s.base.key) ? { note: notes.get(s.base.key) } : {}),
           rank,
           votes: prev?.votes ?? {},
           ...(prev?.offers ? { offers: prev.offers, offersAt: prev.offersAt } : {}),

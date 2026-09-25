@@ -80,6 +80,21 @@ export function PrivacyPage() {
           the booking details. Uploaded files are private to you; other trip members only see the booking details you confirm.
         </li>
         <li>
+          <b>Document Vault (optional)</b> — if you agree on the vault's consent screen, your passport, visa and travel insurance details
+          (name, document number, nationality, date of birth, validity dates, insurer) and, if you choose to keep it, the photo or PDF.
+          Only you can open them — not the trip admin and not other members. We use them only to check your trip readiness (for example
+          passport expiry and the names on your tickets). If you share your status, the group sees only lines like "Passport ✓", never
+          the documents, numbers or dates. You can keep just the details and have the image deleted immediately.
+        </li>
+        <li>
+          <b>Expenses and receipts</b> — amounts, who paid and how costs are split, visible to members of the trip. Receipt photos are
+          stored in your private folder; trip members can open them through short-lived links to check a shared cost.
+        </li>
+        <li>
+          <b>Halal reports</b> — reports and certificate or menu photos you submit about a restaurant are shared (without your name)
+          with every {APP_NAME} user, to build a community view. How often your reports match the consensus is used to weight them.
+        </li>
+        <li>
           <b>Technical data</b> — basic device, browser and error information used to keep the service secure and fix problems. We do
           not use advertising trackers and we do not sell your data.
         </li>
@@ -100,8 +115,8 @@ export function PrivacyPage() {
           <b>Google Firebase</b> (sign-in, database and file storage) and <b>Vercel</b> (hosting and server functions).
         </li>
         <li>
-          <b>Google Gemini API</b> — reads the tickets, screenshots, captions or text you submit to extract booking details and
-          places, and summarises public reviews.
+          <b>Google Gemini API</b> — reads the tickets, receipts, travel documents, screenshots, captions or text you submit to extract
+          their details, and summarises public reviews.
         </li>
         <li>
           <b>Groq</b> — a backup AI provider used for the same tasks when Gemini is unavailable.
@@ -113,8 +128,9 @@ export function PrivacyPage() {
           <b>Sentry</b> (error reports) and <b>Upstash</b> (rate limiting).
         </li>
         <li>
-          Travel data providers we may use for hotel prices and place information (such as LiteAPI, SerpApi and Foursquare) receive
-          only search details like destination and dates — not your account information.
+          Travel data providers for hotel prices, exchange rates, flight status and place information (LiteAPI, SerpApi, Frankfurter,
+          ExchangeRate-API, AviationStack and Foursquare) receive only search details like destination, dates, currencies or a flight
+          number — not your account information or documents.
         </li>
       </ul>
       <p>
@@ -125,14 +141,19 @@ export function PrivacyPage() {
       <h2>Who can see your information</h2>
       <p>
         Members of a trip can see that trip's details, member names and photos, the bookings they are included in, ideas, votes and
-        activity. The trip admin can manage members. Your uploaded files remain visible only to you.
+        activity, expenses, and the hotel options and votes. The trip admin can manage members. Your uploaded files remain visible
+        only to you (receipts can be opened by members through a short-lived link), and your Document Vault is visible only to you.
       </p>
 
       <h2>Retention and deletion</h2>
       <ul>
         <li>We keep your information while your account is active.</li>
         <li>A trip admin can delete a trip at any time, which permanently removes its bookings, ideas and activity.</li>
-        <li>You can delete any booking you added, and leave any trip.</li>
+        <li>You can delete any booking or expense you added, and leave any trip.</li>
+        <li>
+          You can delete any vault document, or your whole vault for a trip, at any time. Leaving a trip deletes your vault for it, and
+          deleting a trip deletes every file uploaded to it.
+        </li>
         <li>
           To delete your account and all personal data, email <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>; we will do so
           within 30 days.

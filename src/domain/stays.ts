@@ -69,6 +69,8 @@ export const HotelOption = z.object({
   halalNearby: z.number().int().nonnegative().optional(),
   score: z.number().int().min(0).max(100),
   why: z.array(z.string().max(120)).max(8),
+  /** One AI sentence on why it fits this group (top options only; from the facts above). */
+  note: z.string().max(300).optional(),
   votes: z.record(z.string(), HotelVote).default({}),
   /** Where to book, per site (loaded when someone opens the hotel). */
   offers: z

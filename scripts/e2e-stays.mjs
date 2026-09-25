@@ -82,11 +82,15 @@ try {
   assert.ok(hotels.filter((h) => h.nightlyMinor).length >= hotels.length / 2, 'most have live prices');
   assert.ok(hotels.slice(0, 8).some((h) => h.mosqueM !== undefined), 'mosque checked for the top ones');
   ok(`${hotels.length} hotels with live prices in ${((Date.now() - t0) / 1000).toFixed(1)}s (SerpApi ${s1.body.usage.used}/${s1.body.usage.cap} this month)`);
-  for (const h of hotels.slice(0, 3)) console.log(`     ${h.score}  ${h.name} — RM ${(h.nightlyMinor ?? 0) / 100}/night · ${h.why.join(' · ')}`);
+  for (const h of hotels.slice(0, 3)) console.log(`     ${h.score}  ${h.name} — RM ${(h.nightlyMinor ?? 0) / 100}/night · ${h.why.join(' · ')}${h.note ? `
+         ✨ ${h.note}` : ''}`);
+  assert.ok(hotels.slice(0, 5).some((h) => h.note), 'AI notes on the top hotels');
+  ok('the top hotels have a one-line “why it fits your group”');
 
   // Cached: a second search doesn't spend another SerpApi search.
   const mid = (await db.doc(`apiUsage/serpapi_${new Date().toISOString().slice(0, 7)}`).get()).get('count');
-  assert.equal(mid, before + 1);
+  // The first search spends one (or none, if these dates were searched in the last 24 h).
+  assert.ok(mid === before + 1 || mid === before, `${before} → ${mid}`);
   assert.equal((await ali.call('stays/search', { id: kl.id }, q)).status, 200);
   assert.equal((await db.doc(`apiUsage/serpapi_${new Date().toISOString().slice(0, 7)}`).get()).get('count'), mid);
   ok('searching again uses the 24 h cache (no extra SerpApi search)');

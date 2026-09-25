@@ -102,6 +102,8 @@ export function toIsoDate(v: string): string | undefined {
   return m >= 1 && m <= 12 && new Date(`${iso}T00:00:00Z`).getUTCDate() === d ? iso : undefined;
 }
 
+const shiftDay = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
 const addMonths = (date: string, n: number) => {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCMonth(d.getUTCMonth() + n);
@@ -173,18 +175,35 @@ export function readinessChecks(input: {
     out.push({ key: 'passport', level: 'ok', text: `Passport valid until ${fmt(passport.fields.validUntil)}.`, label: 'Passport ✓' });
   }
 
-  // Names on my tickets
+  const mineAll = input.bookings.filter((b) => b.travellerUids.includes(input.uid));
+  const what = (b: BookingLike) => (b.kind === 'hotel' ? `${b.to.name} booking` : `${[b.carrier, b.number].filter(Boolean).join(' ') || `${b.kind} to ${b.to.name}`} ticket`);
+
+  // Names on my tickets and hotel bookings
   if (passport?.fields.fullName) {
-    const mine = input.bookings.filter((b) => b.kind !== 'hotel' && b.travellerUids.includes(input.uid) && b.passengerNames.length);
-    for (const b of mine) {
+    for (const b of mineAll.filter((x) => x.passengerNames.length)) {
       if (b.passengerNames.some((n) => namesMatch(n, passport.fields.fullName!))) continue;
-      const what = [b.carrier, b.number].filter(Boolean).join(' ') || `${b.kind} to ${b.to.name}`;
       out.push({
         key: `name:${b.id}`,
         level: 'warn',
-        text: `The ${what} ticket is for ${b.passengerNames.join(', ')}, which doesn't match your passport (${passport.fields.fullName}). Airlines can refuse boarding — ask them to correct it.`,
-        label: 'A ticket name may not match the passport',
+        text: `The ${what(b)} is for ${b.passengerNames.join(', ')}, which doesn't match your passport (${passport.fields.fullName}). ${b.kind === 'hotel' ? 'Hotels may ask for ID at check-in' : 'Airlines can refuse boarding'} — ask them to correct it.`,
+        label: b.kind === 'hotel' ? 'A hotel booking name may not match the passport' : 'A ticket name may not match the passport',
       });
+    }
+  }
+
+  // Getting there and back, and bookings dated outside the trip
+  const moves = mineAll.filter((b) => b.kind !== 'hotel');
+  const near = (date: string, from: number, to: number, ref: string) => date >= shiftDay(ref, from) && date <= shiftDay(ref, to);
+  const there = moves.some((b) => near(b.endLocal.slice(0, 10), -2, 1, trip.startDate));
+  const back = moves.some((b) => near(b.startLocal.slice(0, 10), -1, 2, trip.endDate));
+  if (!there || !back) {
+    const missing = !there && !back ? 'there and back' : !there ? 'there' : 'back home';
+    out.push({ key: 'journey', level: 'todo', text: `No booking for getting ${missing} yet (${!there ? `arriving by ${fmt(trip.startDate)}` : `leaving around ${fmt(trip.endDate)}`}). Add your flight, train or bus in Bookings.`, label: `No booking to get ${missing}` });
+  }
+  for (const b of mineAll) {
+    const d = b.startLocal.slice(0, 10);
+    if (d < shiftDay(trip.startDate, -2) || d > shiftDay(trip.endDate, 2)) {
+      out.push({ key: `dates:${b.id}`, level: 'warn', text: `Your ${what(b)} is on ${fmt(d)}, outside the trip (${fmt(trip.startDate)} – ${fmt(trip.endDate)}). Check the date.`, label: 'A booking is outside the trip dates' });
     }
   }
 

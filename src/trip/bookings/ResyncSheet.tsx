@@ -1,10 +1,13 @@
 // Emergency Resync: a journey is delayed or cancelled → preview what it does to
 // the plan → apply (whoever added it, or the admin) or send it to them.
-import { ArrowRight, TriangleAlert } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowRight, ExternalLink, Loader2, TriangleAlert } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Link } from 'react-router';
 import { fmtClock, Incident, paths, toMin, UNFIT_TEXT, type Booking, type UnfitReason } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
+import { deleteFile, UPLOAD_ACCEPT, uploadTripFile } from '../../lib/storage';
+import { ExpenseSheet } from '../expenses/ExpenseSheet';
 import { Button, cx, ErrorBanner, Field, Input, Sheet } from '../../ui';
 import { useTrip } from '../TripLayout';
 import { bookingTitle, formatDay } from './format';
@@ -13,12 +16,22 @@ type Change = { type: 'delay'; startLocal: string; endLocal: string } | { type: 
 interface Preview {
   days: { day: string; moved: { id: string; name: string; from: string; to: string }[]; removed: { id: string; name: string; reason: UnfitReason }[] }[];
   warnings: string[];
+  nearby?: { at: string; prayer: Spot[]; food: Spot[] };
   canApply: boolean;
 }
+type Spot = { name: string; meters: number; location: { lat: number; lng: number } };
+
+const mapsLink = (s: Spot) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${s.name} ${s.location.lat},${s.location.lng}`)}`;
+const dist = (m: number) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
 
 export function ResyncSheet({ booking, incident, onClose }: { booking: Booking; incident?: Incident; onClose: () => void }) {
-  const { trip, members } = useTrip();
+  const { trip, members, me } = useTrip();
   const reported = incident?.change;
+  const [message, setMessage] = useState('');
+  const [reading, setReading] = useState('');
+  const [readNote, setReadNote] = useState('');
+  const [extraCost, setExtraCost] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [type, setType] = useState<Change['type']>(reported?.type ?? 'delay');
   const [start, setStart] = useState(reported?.type === 'delay' ? reported.startLocal : booking.startLocal);
   const [end, setEnd] = useState(reported?.type === 'delay' ? reported.endLocal : booking.endLocal);
@@ -42,14 +55,67 @@ export function ResyncSheet({ booking, incident, onClose }: { booking: Booking; 
     }
   };
 
+  // The airline's SMS / email / app screenshot → the new times (AI), then the person checks them.
+  const readMessage = async (file?: File) => {
+    setError('');
+    setReadNote('');
+    let path: string | undefined;
+    try {
+      if (file) {
+        setReading('Uploading…');
+        path = await uploadTripFile(trip.id, me.uid, 'disruptions', file);
+      }
+      setReading('Reading the message…');
+      const r = await api.post<{ cancelled: boolean; startLocal?: string; endLocal?: string; confidence: number }>(
+        'resync/read',
+        { bookingId: booking.id, ...(path ? { storagePath: path } : { text: message }) },
+        { tripId: trip.id },
+      );
+      setPreview(null);
+      const none = 'No new times found in that message. Enter them yourself.';
+      if (r.confidence < 0.3) setReadNote(none);
+      else if (r.cancelled) {
+        setType('cancel');
+        setReadNote('The message says it is cancelled. Check, then preview.');
+      } else if (r.startLocal && r.endLocal) {
+        setType('delay');
+        setStart(r.startLocal);
+        setEnd(r.endLocal);
+        setReadNote(`Read: departs ${r.startLocal.replace('T', ' ')}, arrives ${r.endLocal.replace('T', ' ')}. Check them, then preview.`);
+      } else setReadNote(none);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Could not read it.');
+    } finally {
+      if (path) void deleteFile(path);
+      setReading('');
+    }
+  };
+
+  const stuckAt = booking.from ?? booking.to;
+  if (extraCost) {
+    return (
+      <ExpenseSheet
+        preset={{ title: `Extra cost: ${bookingTitle(booking)} ${type === 'cancel' ? 'cancelled' : 'delayed'}`, category: 'transport', date: booking.startLocal.slice(0, 10) }}
+        onClose={onClose}
+      />
+    );
+  }
   return (
     <Sheet open onClose={onClose} title={`${bookingTitle(booking)}: delayed or cancelled?`} wide>
       {done ? (
         <div className="space-y-4">
           <p className="text-sm text-[#161C23]">{done}</p>
-          <Button className="w-full" onClick={onClose}>
-            Done
-          </Button>
+          <div className="grid gap-2">
+            <Link to={`/t/${trip.id}/food?lat=${stuckAt.location.lat}&lng=${stuckAt.location.lng}&near=${encodeURIComponent(stuckAt.name)}`} onClick={onClose}>
+              <Button variant="secondary" className="w-full">
+                Find halal food near {stuckAt.name}
+              </Button>
+            </Link>
+            <Button variant="secondary" onClick={() => setExtraCost(true)}>
+              Log an extra cost (taxi, meal, rebooking)
+            </Button>
+            <Button onClick={onClose}>Done</Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
@@ -65,6 +131,32 @@ export function ResyncSheet({ booking, incident, onClose }: { booking: Booking; 
                 {l}
               </button>
             ))}
+          </div>
+          <div className="rounded-xl border border-dashed border-[#00685F]/40 bg-white p-3 space-y-2">
+            <p className="text-sm font-semibold text-[#161C23]">Got a message from the airline or operator?</p>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              rows={2}
+              maxLength={5000}
+              placeholder="Paste the SMS or email here…"
+              className="w-full rounded-lg border border-[#E7DFD5] px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#00685F]/40"
+            />
+            <input ref={fileInput} type="file" accept={UPLOAD_ACCEPT} className="hidden" onChange={(e) => e.target.files?.[0] && void readMessage(e.target.files[0])} />
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" className="!min-h-9" disabled={!!reading || message.trim().length < 10} onClick={() => void readMessage()}>
+                Read the message
+              </Button>
+              <Button variant="secondary" className="!min-h-9" disabled={!!reading} onClick={() => fileInput.current?.click()}>
+                Upload a screenshot
+              </Button>
+            </div>
+            {reading && (
+              <p className="text-xs text-[#6D7A77] flex items-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> {reading}
+              </p>
+            )}
+            {readNote && <p className="text-xs text-[#00685F]">{readNote}</p>}
           </div>
           {type === 'delay' && (
             <div className="grid grid-cols-2 gap-3">
@@ -84,6 +176,16 @@ export function ResyncSheet({ booking, incident, onClose }: { booking: Booking; 
                   <TriangleAlert className="w-4 h-4 mt-0.5 shrink-0" /> {w}
                 </p>
               ))}
+              {preview.nearby && (preview.nearby.prayer.length > 0 || preview.nearby.food.length > 0) && (
+                <div className="rounded-lg bg-[#FAF8F5] p-2.5 space-y-1">
+                  <p className="text-xs font-bold uppercase tracking-wider text-[#6D7A77]">While you wait near {preview.nearby.at}</p>
+                  {[...preview.nearby.prayer.map((s) => ['🕌', s] as const), ...preview.nearby.food.map((s) => ['🍽️', s] as const)].map(([icon, s]) => (
+                    <a key={`${icon}${s.name}`} href={mapsLink(s)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-sm text-[#161C23] hover:text-[#00685F]">
+                      {icon} {s.name} <span className="text-[#6D7A77]">· {dist(s.meters)}</span> <ExternalLink className="w-3 h-3 text-[#6D7A77]" />
+                    </a>
+                  ))}
+                </div>
+              )}
               {preview.days.map((d) => (
                 <div key={d.day}>
                   <p className="text-xs font-bold uppercase tracking-wider text-[#6D7A77]">{formatDay(d.day)}</p>

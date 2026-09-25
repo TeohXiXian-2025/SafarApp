@@ -5,6 +5,7 @@
 // queue (gone after an hour).
 import { Clock, ExternalLink, LocateFixed, MapPin, Phone, Plus, ShieldCheck, Star } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { FOOD_TABS, fmtClock, Idea, paths, planningDate, ScheduleItem, toMin, type FoodVerdict, type GeoPoint } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
@@ -50,6 +51,15 @@ export function FoodPage() {
   const schedule = useQuery(`schedule:${trip.id}`, () => paths.schedule(trip.id), ScheduleItem);
   const ideas = useQuery(`ideas:${trip.id}`, () => paths.ideas(trip.id), Idea);
   const ideaMap = useMemo(() => new Map(ideas.data.map((i) => [i.id, i])), [ideas.data]);
+  // A link can ask for a specific spot, e.g. Emergency Resync: /food?lat=…&lng=…&near=KLIA
+  const [params] = useSearchParams();
+  const linked = useMemo(() => {
+    const lat = Number(params.get('lat'));
+    const lng = Number(params.get('lng'));
+    return Number.isFinite(lat) && Number.isFinite(lng) && params.get('lat') && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+      ? { key: 'link', label: `Near ${(params.get('near') ?? 'the linked place').slice(0, 80)}`, at: { lat, lng } }
+      : null;
+  }, [params]);
 
   // Where to search: me, today's stops, or a trip city.
   const sources: Source[] = useMemo(() => {
@@ -61,14 +71,15 @@ export function FoodPage() {
         return idea ? [{ key: `stop:${s.id}`, label: `${fmtClock(toMin(s.start))} · near ${idea.place.name}`, at: idea.place.location }] : [];
       });
     return [
+      ...(linked ? [linked] : []),
       { key: 'me', label: 'Near me (GPS)', at: null },
       ...stops,
       ...trip.destinations.map((d, i) => ({ key: `dest:${i}`, label: `In ${d.name}`, at: d.location })),
     ];
-  }, [schedule.data, ideaMap, today, trip.destinations]);
+  }, [schedule.data, ideaMap, today, trip.destinations, linked]);
 
-  const [sourceKey, setSourceKey] = useState('dest:0');
-  const [center, setCenter] = useState<GeoPoint | null>(trip.destinations[0].location);
+  const [sourceKey, setSourceKey] = useState(linked ? 'link' : 'dest:0');
+  const [center, setCenter] = useState<GeoPoint | null>(linked?.at ?? trip.destinations[0].location);
   const [items, setItems] = useState<FoodItem[] | null>(null);
   const [tab, setTab] = useState<(typeof FOOD_TABS)[number]['key']>('halal');
   const [openOnly, setOpenOnly] = useState(false);

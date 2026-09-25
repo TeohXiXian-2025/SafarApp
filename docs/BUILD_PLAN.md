@@ -403,18 +403,21 @@ Rules live in `src/domain/voting.ts` + `split.ts` (unit-tested); API in `api/_ro
 - [x] **Reminders job** `GET /api/cron/reminders` (Bearer `CRON_SECRET`): closes overdue votes, "N h left to vote" and "pick a middle ground" reminders ≤ 12 h before the deadline (once each), nudges the admin when choosing time is up. Vercel Cron runs it daily (01:00 UTC); for exact 12 h timing add an hourly Upstash QStash schedule calling it with the same header.
 
 ### Phase 8 — Hotels + Restaurant tab (week 11)
-- [ ] `HotelRatesProvider` interface + LiteAPI adapter (search by lat/lng → rates for trip dates/occupancy/currency).
-- [ ] `/api/hotels/recommend` scoring (merged budget, rating, transit, mosque + halal food nearby) + Gemini explanation. Hotel voting.
-- [ ] Optional SerpApi Google Hotels cross-check (Booking.com/Agoda prices + links), cached, only on the detail view.
-- [ ] `/api/restaurants/nearby` with 3-tier tabs, walking distance, open now, "Add to Idea Board".
-- [ ] Replace "live wait times" with an honest busy estimate or member reports. Menu photo upload + AI flagging.
-- [ ] Delete `halalRadarData.ts` / `prayerFacilitiesData.ts` mocks and the city presets in `prayerTimeService.ts`.
+Hotels: `src/domain/stays.ts` (unit-tested), `api/_lib/hotels.ts`, `api/_routes/stays.ts`, verified by `npm run e2e:stays` (11 checks). Food: `api/_routes/food.ts`, `npm run e2e:food`.
+- [x] `HotelRatesProvider` interface (`HOTEL_PROVIDERS`). **Primary changed to Google Hotels via SerpApi** — real hotels with live prices for the exact dates (the LiteAPI key is sandbox-only, so its prices are test data). LiteAPI is the fallback, labelled "sample price". Searches cached 24 h per stay; monthly cap `SERPAPI_MONTHLY_CAP` (default 200 of the free 250).
+- [x] **Stays**: one per city block of nights, proposed from booked hotels → the timeline → arrivals → destinations; centred on that stay's planned stops. Admin edits dates / people per room, adds, re-plans. "No place to sleep" for nights no hotel covers.
+- [x] Scoring: group budget overlap (or the middle if budgets don't overlap), travel time to the stay's stops, rating, mosque + halal food nearby (top 8, Google Places), members' hotel priorities (budget first, rating first, transit, breakfast, family rooms). Reason chips + a Gemini "why it fits your group" line for the top 5. Hotel voting 👍/👎, admin picks.
+- [x] Per-site prices + booking links (Agoda, Booking.com, Hotels.com, official site…) when a hotel is opened, cached 12 h. Booking happens on their site; "I booked it" creates the hotel booking (check-in/out on the timeline, AI Arrange's daily base) — or upload the confirmation instead.
+- [x] Food tab (`food/nearby`): near me (GPS), a timeline stop, a trip city or a linked spot; Halal (certified + Muslim-owned) / Pork-free / Not checked; walking time, open now, rating, price; "Check" runs the full Halal Radar; "Add to Idea Board".
+- [x] No fake live wait times: members report "queue ~N min", shown for an hour. Certificate / menu photo → AI reads certifier, expiry, name match or pork/alcohol items → becomes that member's report.
+- [x] Halal Radar v2: two answers (halal? pork on the menu?), restaurant website scan (SSRF-guarded), "certified" only with ≥ 2 agreeing reports (e.g. two members confirming a valid certificate), **reporter trust** (`halalTrust/{uid}`: reports matching the settled consensus weigh up to 1.5×, contradicted ones down to 0.5×).
+- [ ] Delete `halalRadarData.ts` / `prayerFacilitiesData.ts` mocks and the city presets in `prayerTimeService.ts` → when the `/demo` prototype is retired (it still uses them).
 
 ### Phase 9 — Extras (weeks 12–13)
-- [ ] **Vault:** private uploads, extraction, deterministic cross-check rules → `checks/`, share toggle, delete. Consent + privacy page.
-- [ ] **Expenses:** add/split/FX, balances, settle-up, budget vs. actual. Unit tests for the maths.
-- [ ] **Emergency Resync:** form + upload → resync job → diff preview → apply → notify.
-- [ ] Optional: FCM push notifications (votes needed, split proposed, emergency).
+- [x] **Vault** (`src/domain/vault.ts`, `api/_routes/vault.ts`, `npm run e2e:vault` 9 checks): passport / visa / insurance; AI reads the upload, the owner confirms; "keep just the details" deletes the file. Stored outside the trip (`vault/{tripId}_{uid}`, server-only, owner reads through the API). Checks: passport ≥ 6 months after the trip, names on tickets **and hotel bookings** vs passport, visa checklist per destination (IATA link — no invented rules) + visa dates, insurance cover, a booking to get there and back, bookings dated outside the trip, nights without a hotel, late-night check-ins. The group sees only labels (`readiness/{uid}`), only if shared. Consent screen, delete a document or everything; leaving deletes it; deleting a trip deletes all its uploads. Privacy page updated.
+- [x] **Expenses** (`src/domain/expenses.ts`, `npm run e2e:expenses` 11 checks): any currency (Frankfurter → open.er-api fallback, editable rate), split equally / amounts / shares in minor units, receipt scan (AI), link to a timeline stop, balances + fewest transfers to settle up, record / undo payments, per-person paid / share / balance, my daily budget vs actual. Receipts viewable by the group via 10-minute links.
+- [x] **Emergency Resync** (`api/_routes/resync.ts`, `npm run e2e:resync` 9 checks): "Delayed or cancelled?" on journeys → new times typed, or read by AI from the airline's SMS/email/screenshot → preview per affected day (moved / back to backlog with reasons) + knock-on warnings (late hotel check-in, missed connections) + prayer space and halal food where you're stuck → apply (booking creator or admin; others send a report) → everyone notified. After: find halal food there, log an extra cost. Live flight status (AviationStack) from the reminders job raises reports for 30+ min delays / cancellations (never auto-applied), capped monthly.
+- [x] Push notifications — done in Phase 7 with standard Web Push (no FCM needed).
 
 ### Phase 10 — Hardening & launch (week 14)
 - [ ] Playwright e2e for the full flow on desktop + mobile viewports.

@@ -1,6 +1,9 @@
 import { z } from 'zod';
+import { FieldValue } from 'firebase-admin/firestore';
 import {
   HalalReport,
+  HalalTrust,
+  trustWeight,
   HalalSummary,
   HalalTier,
   Id,
@@ -51,16 +54,37 @@ const canManage = (idea: Idea, m: Member) => idea.createdBy === m.uid || m.role 
 async function recomputeSummary(idea: Idea): Promise<HalalSummary> {
   const db = adminDb();
   const reports = (await db.collection(paths.halalReports(idea.placeKey)).get()).docs.map((d) => HalalReport.parse(d.data()));
+  const trustRefs = reports.map((r) => db.doc(`halalTrust/${r.uid}`));
+  const trust = new Map((trustRefs.length ? await db.getAll(...trustRefs) : []).map((s) => [s.id, HalalTrust.safeParse(s.data())]));
+  const weightOf = (uid: string) => {
+    const t = trust.get(uid);
+    return trustWeight(t?.success ? t.data : null);
+  };
   const today = new Date().toISOString().slice(0, 10);
   const cert = reports.find((r) => r.photo?.kind === 'certificate' && r.photo.certifier && r.photo.nameMatches !== false && (!r.photo.expiresOn || r.photo.expiresOn >= today))?.photo;
   const summary = HalalSummary.parse({
     placeKey: idea.placeKey,
     name: idea.place.name,
-    ...summarizeReports(reports),
+    ...summarizeReports(reports, Date.now(), weightOf),
     ...(cert ? { certificate: { certifier: cert.certifier!, ...(cert.expiresOn ? { expiresOn: cert.expiresOn } : {}) } } : {}),
     updatedAt: Date.now(),
   });
-  await db.doc(paths.halalSummary(idea.placeKey)).set(summary);
+  const batch = db.batch();
+  batch.set(db.doc(paths.halalSummary(idea.placeKey)), summary);
+  // Once there's a consensus, each reporter's track record moves with it (a changed report moves it back).
+  if (summary.tier) {
+    for (const r of reports) {
+      const outcome = r.tier === summary.tier ? 'agree' : 'disagree';
+      if (r.countedAs === outcome) continue;
+      batch.set(
+        db.doc(`halalTrust/${r.uid}`),
+        { uid: r.uid, [outcome]: FieldValue.increment(1), ...(r.countedAs ? { [r.countedAs]: FieldValue.increment(-1) } : {}), updatedAt: Date.now() },
+        { merge: true },
+      );
+      batch.update(db.doc(paths.halalReport(idea.placeKey, r.uid)), { countedAs: outcome });
+    }
+  }
+  await batch.commit();
   return summary;
 }
 
@@ -530,6 +554,7 @@ Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMember
               ...(body.kind === 'menu' ? { servesPork: read.porkItems.length > 0, servesAlcohol: read.alcoholItems.length > 0 } : {}),
             },
             ...(prev?.note ? { note: prev.note } : {}),
+            ...(prev?.countedAs ? { countedAs: prev.countedAs } : {}),
             [body.kind === 'certificate' ? 'certificatePhotoPath' : 'menuPhotoPath']: body.storagePath,
             photo,
             createdAt: prev?.createdAt ?? now,
@@ -566,6 +591,8 @@ Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMember
           tier: body.tier,
           flags: body.flags,
           ...(body.note ? { note: body.note } : {}),
+          // Keep the trust bookkeeping so an edited report isn't counted twice.
+          ...(prev.get('countedAs') ? { countedAs: prev.get('countedAs') } : {}),
           createdAt: prev.exists ? Number(prev.data()!.createdAt) : now,
           updatedAt: now,
         }),

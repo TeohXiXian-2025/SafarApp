@@ -6,6 +6,7 @@ import { Link } from 'react-router';
 import {
   EXPENSE_CATEGORIES,
   Expense,
+  Idea,
   balances,
   dailySpend,
   formatMoney,
@@ -27,6 +28,8 @@ export function ExpensesPage() {
   const { trip, members, me } = useTrip();
   const expenses = useQuery(`expenses:${trip.id}`, () => paths.expenses(trip.id), Expense);
   const [editing, setEditing] = useState<Expense | 'new' | null>(null);
+  const ideas = useQuery(`ideas:${trip.id}`, () => paths.ideas(trip.id), Idea);
+  const stopName = (id?: string) => (id ? ideas.data.find((i) => i.id === id)?.place.name : undefined);
   const money = (minor: number) => formatMoney(minor, trip.currency);
   const nameOf = (uid: string) => (uid === me.uid ? 'You' : members.find((m) => m.uid === uid)?.displayName ?? 'Former member');
 
@@ -38,7 +41,15 @@ export function ExpensesPage() {
     for (const e of spending) byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + e.tripAmountMinor);
     const byDay = new Map<string, Expense[]>();
     for (const e of [...list].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)) byDay.set(e.date, [...(byDay.get(e.date) ?? []), e]);
+    const paid: Record<string, number> = {};
+    const share: Record<string, number> = {};
+    for (const e of spending) {
+      paid[e.paidBy] = (paid[e.paidBy] ?? 0) + e.tripAmountMinor;
+      for (const [u, v] of Object.entries(sharesOf(e))) share[u] = (share[u] ?? 0) + v;
+    }
     return {
+      paid,
+      share,
       net,
       transfers: settleUp(net),
       total: spending.reduce((s, e) => s + e.tripAmountMinor, 0),
@@ -84,6 +95,30 @@ export function ExpensesPage() {
           </Card>
 
           <SettleUp transfers={view.transfers} nameOf={nameOf} money={money} />
+
+          {members.length > 1 && (
+            <Card className="p-4 space-y-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[#6D7A77]">Everyone</h2>
+              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1.5 text-sm">
+                <span />
+                <span className="text-[11px] font-bold text-[#6D7A77] text-right">Paid</span>
+                <span className="text-[11px] font-bold text-[#6D7A77] text-right">Share</span>
+                <span className="text-[11px] font-bold text-[#6D7A77] text-right">Balance</span>
+                {[...new Set([...trip.memberIds, ...Object.keys(view.net)])].map((u) => {
+                  const n = view.net[u] ?? 0;
+                  return (
+                    <div key={u} className="contents">
+                      <span className={cx('truncate', u === me.uid ? 'font-bold text-[#161C23]' : 'text-[#161C23]')}>{nameOf(u)}</span>
+                      <span className="text-right text-[#161C23]">{money(view.paid[u] ?? 0)}</span>
+                      <span className="text-right text-[#161C23]">{money(view.share[u] ?? 0)}</span>
+                      <span className={cx('text-right font-semibold', n > 0 ? 'text-[#00685F]' : n < 0 ? 'text-[#B3261E]' : 'text-[#6D7A77]')}>{n ? `${n > 0 ? '+' : '−'}${money(Math.abs(n))}` : '0'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-[#6D7A77]">+ is owed money, − owes. Balances include payments already recorded.</p>
+            </Card>
+          )}
           <Budget daily={view.daily} money={money} />
 
           {view.byCategory.length > 1 && (
@@ -106,7 +141,7 @@ export function ExpensesPage() {
               <h2 className="text-xs font-bold uppercase tracking-wider text-[#6D7A77]">{formatDay(day)}</h2>
               <Card className="divide-y divide-[#E7DFD5]">
                 {list.map((e) => (
-                  <ExpenseRow key={e.id} expense={e} nameOf={nameOf} money={money} onEdit={() => setEditing(e)} />
+                  <ExpenseRow key={e.id} expense={e} nameOf={nameOf} money={money} stop={stopName(e.ideaId)} onEdit={() => setEditing(e)} />
                 ))}
               </Card>
             </section>
@@ -233,7 +268,7 @@ function Budget({ daily, money }: { daily: Record<string, number>; money: (m: nu
   );
 }
 
-function ExpenseRow({ expense: e, nameOf, money, onEdit }: { expense: Expense; nameOf: (uid: string) => string; money: (m: number) => string; onEdit: () => void }) {
+function ExpenseRow({ expense: e, nameOf, money, stop, onEdit }: { expense: Expense; nameOf: (uid: string) => string; money: (m: number) => string; stop?: string; onEdit: () => void }) {
   const { trip, me, isAdmin } = useTrip();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -296,6 +331,7 @@ function ExpenseRow({ expense: e, nameOf, money, onEdit }: { expense: Expense; n
           <p className="text-xs text-[#6D7A77]">
             {nameOf(e.paidBy)} paid {money(e.tripAmountMinor)}
             {e.currency !== trip.currency && ` (${formatMoney(e.amountMinor, e.currency)})`}
+            {stop && ` · at ${stop}`}
             {e.note && ` · ${e.note}`}
           </p>
         </button>

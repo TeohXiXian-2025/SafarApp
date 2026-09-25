@@ -79,6 +79,8 @@ export const HalalReport = z.object({
     })
     .optional(),
   visitedAt: Millis.optional(),
+  /** How this report compared with the settled consensus (feeds the reporter's trust). */
+  countedAs: z.enum(['agree', 'disagree']).optional(),
   createdAt: Millis,
   updatedAt: Millis,
 });
@@ -103,20 +105,36 @@ export type HalalSummary = z.infer<typeof HalalSummary>;
 export const MIN_COMMUNITY_REPORTS = 2;
 const YEAR = 365 * 86_400_000;
 
+/** A reporter's track record: how many of their reports matched the settled consensus. Path: halalTrust/{uid} (server only). */
+export const HalalTrust = z.object({ uid: Id, agree: z.number().int().nonnegative().default(0), disagree: z.number().int().nonnegative().default(0), updatedAt: Millis });
+export type HalalTrust = z.infer<typeof HalalTrust>;
+
+/**
+ * How much a reporter's word counts: 1 for someone new, up to 1.5 for people
+ * whose reports keep matching the consensus, down to 0.5 for people whose
+ * reports keep being contradicted (a miss costs twice a match).
+ */
+export function trustWeight(t?: Pick<HalalTrust, 'agree' | 'disagree'> | null): number {
+  if (!t) return 1;
+  return Math.max(0.5, Math.min(1.5, 1 + (t.agree - 2 * t.disagree) * 0.1));
+}
+
 /**
  * Community consensus from individual reports. Recent reports count fully,
- * reports older than a year count half. A tier wins with ≥ 60% of the weight
- * and at least MIN_COMMUNITY_REPORTS reports; otherwise, with 2+ reports that
- * disagree, the place is "disputed".
+ * reports older than a year count half, and each is scaled by the reporter's
+ * trust. A tier wins with ≥ 60% of the weight and at least
+ * MIN_COMMUNITY_REPORTS reports; otherwise, with 2+ reports that disagree,
+ * the place is "disputed".
  */
 export function summarizeReports(
-  reports: Pick<HalalReport, 'tier' | 'flags' | 'updatedAt'>[],
+  reports: (Pick<HalalReport, 'tier' | 'flags' | 'updatedAt'> & { uid?: string })[],
   now = Date.now(),
+  weightOf: (uid: string) => number = () => 1,
 ): Pick<HalalSummary, 'reportCount' | 'counts' | 'tier' | 'disputed' | 'flags'> {
   const counts: Partial<Record<HalalTier, number>> = {};
   let total = 0;
   for (const r of reports) {
-    const w = now - r.updatedAt > YEAR ? 0.5 : 1;
+    const w = (now - r.updatedAt > YEAR ? 0.5 : 1) * (r.uid ? weightOf(r.uid) : 1);
     counts[r.tier] = (counts[r.tier] ?? 0) + w;
     total += w;
   }

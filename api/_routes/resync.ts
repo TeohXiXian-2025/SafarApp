@@ -4,6 +4,8 @@
 //                   (whoever added the booking, or the admin)
 //   resync/report   anyone else: send it to the admin to review
 //   resync/dismiss  the admin closes a report
+//   resync/read     AI reads the airline's message / a screenshot → the new times
+import { Type, type Part } from '@google/genai';
 import { z } from 'zod';
 import {
   Booking,
@@ -12,11 +14,16 @@ import {
   Incident,
   LocalDateTime,
   paths,
+  metersBetween,
   ScheduleItem,
   type BookingDraft,
+  type GeoPoint,
 } from '../../src/domain/index.js';
 import { withTrip } from '../_lib/auth.js';
-import { adminDb } from '../_lib/firebaseAdmin.js';
+import { adminBucket, adminDb } from '../_lib/firebaseAdmin.js';
+import { extractJson } from '../_lib/gemini.js';
+import { searchNearby, searchNearbyFood } from '../_lib/places.js';
+import { useDailyQuota } from '../_lib/quota.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
 import { notify } from '../_lib/push.js';
 import type { RouteTable } from '../_lib/routes.js';
@@ -114,6 +121,19 @@ async function simulate(tripId: string, data: TripData, booking: Booking, change
   return { days: out, warnings, next };
 }
 
+/** Prayer space and halal food around where the travellers are stuck (Google Places). */
+async function aroundHere(at: GeoPoint) {
+  const [mosques, food] = await Promise.all([searchNearby(at, ['mosque'], 3000, 3), searchNearbyFood(at, ['halal_restaurant'], 2000, 5)]);
+  const pick = (l: { name: string; location: GeoPoint }[] | null) =>
+    (l ?? []).map((p) => ({ name: p.name, meters: Math.round(metersBetween(at, p.location)), location: p.location })).sort((a, b) => a.meters - b.meters).slice(0, 3);
+  return { prayer: pick(mosques), food: pick(food) };
+}
+
+const READ_SYSTEM = `You read an airline / rail / bus disruption message (SMS, email, app screenshot or departure board) for ONE journey.
+Return: cancelled (true if the journey is cancelled), newDeparture and newArrival as LOCAL wall-clock times YYYY-MM-DDTHH:mm exactly as printed.
+If only a new departure time is given, leave newArrival empty. If a year or date is missing, take it from the original journey given.
+confidence 0..1. If the message isn't about this journey, confidence 0.`;
+
 async function tell(data: TripData, tripId: string, actorUid: string, title: string, body: string) {
   await notify(data.trip.memberIds, { kind: 'timeline', title, body, url: `/t/${tripId}/timeline` }, { timeZone: data.trip.destinations[0].timezone, except: actorUid });
 }
@@ -125,7 +145,10 @@ export const resyncRoutes: RouteTable = {
       const [data, booking] = await Promise.all([loadTripData(tripId), loadBooking(tripId, bookingId)]);
       assertChange(booking, change);
       const { days, warnings } = await simulate(tripId, data, booking, change);
-      return json({ days, warnings, canApply: booking.createdBy === member.uid || member.role === 'admin' });
+      // Delayed: you wait where you leave from. Cancelled: you're stuck there too.
+      const stuck = booking.from ?? booking.to;
+      const nearby = { at: stuck.name, ...(await aroundHere(stuck.location)) };
+      return json({ days, warnings, nearby, canApply: booking.createdBy === member.uid || member.role === 'admin' });
     },
     { perMinute: 20 },
   ),
@@ -222,6 +245,47 @@ export const resyncRoutes: RouteTable = {
       return json({ incidentId: ref.id }, { status: 201 });
     },
     { perMinute: 10 },
+  ),
+
+  /** The airline's message (pasted text or an uploaded screenshot) → the new local times. Nothing is saved. */
+  'POST resync/read': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ bookingId: Id, text: z.string().min(10).max(5000).optional(), storagePath: z.string().max(300).optional() }));
+      if (!body.text && !body.storagePath) throw new HttpError(400, 'Paste the message or upload a screenshot');
+      const booking = await loadBooking(tripId, body.bookingId);
+      await useDailyQuota(member.uid, 'bookingParse');
+      const context = `Original journey: ${label(booking)} from ${booking.from?.name ?? '?'} to ${booking.to.name}, departing ${booking.startLocal}, arriving ${booking.endLocal} (local times).`;
+      const parts: Part[] = [{ text: context }];
+      if (body.storagePath) {
+        if (!body.storagePath.startsWith(`trips/${tripId}/users/${member.uid}/`) || body.storagePath.includes('..')) throw new HttpError(403, 'You can only read your own uploads');
+        const file = adminBucket().file(body.storagePath);
+        const [meta] = await file.getMetadata().catch(() => {
+          throw new HttpError(404, 'Upload not found — please upload it again');
+        });
+        const type = String(meta.contentType ?? '');
+        if (!/^(application\/pdf|image\/(jpeg|png|webp|heic|heif))$/.test(type)) throw new HttpError(415, 'Upload a screenshot or PDF');
+        const [buf] = await file.download();
+        parts.push({ inlineData: { mimeType: type, data: buf.toString('base64') } });
+      }
+      if (body.text) parts.push({ text: `Message:\n${body.text}` });
+      const r = await extractJson({
+        system: READ_SYSTEM,
+        parts,
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: { cancelled: { type: Type.BOOLEAN }, newDeparture: { type: Type.STRING }, newArrival: { type: Type.STRING }, confidence: { type: Type.NUMBER } },
+          required: ['cancelled', 'confidence'],
+        },
+        validate: z.object({ cancelled: z.boolean(), newDeparture: z.string().optional(), newArrival: z.string().optional(), confidence: z.number().catch(0) }),
+      });
+      const ok = (s?: string) => (s && LocalDateTime.safeParse(s.slice(0, 16)).success ? s.slice(0, 16) : undefined);
+      const dep = ok(r.newDeparture);
+      let arr = ok(r.newArrival);
+      // Only a new departure: keep the journey's length.
+      if (dep && !arr) arr = new Date(Date.parse(`${dep}:00Z`) + (Date.parse(`${booking.endLocal}:00Z`) - Date.parse(`${booking.startLocal}:00Z`))).toISOString().slice(0, 16);
+      return json({ cancelled: r.cancelled, ...(dep ? { startLocal: dep } : {}), ...(arr ? { endLocal: arr } : {}), confidence: r.confidence });
+    },
+    { perMinute: 6 },
   ),
 
   'POST resync/dismiss': withTrip(

@@ -184,20 +184,39 @@ async function liteHotels(q: SearchQuery): Promise<RawHotel[] | null> {
   }
 }
 
-/** Live Google Hotels results (cached 24 h), else LiteAPI sample prices. */
+/**
+ * A source of hotels with prices for a stay. Swap or add providers here
+ * without touching the routes or the UI.
+ */
+export interface HotelRatesProvider {
+  /** google = live prices; sample = test prices (shown as such). */
+  source: 'google' | 'sample';
+  /** Worth caching (paid / capped searches). */
+  cache: boolean;
+  search(q: SearchQuery): Promise<RawHotel[] | null>;
+}
+
+/** In order of preference. */
+export const HOTEL_PROVIDERS: HotelRatesProvider[] = [
+  { source: 'google', cache: true, search: googleHotels },
+  { source: 'sample', cache: false, search: liteHotels },
+];
+
+/** The first provider with results (live Google Hotels, cached 24 h), else LiteAPI sample prices. */
 export async function searchHotels(q: SearchQuery, opts: { refresh?: boolean } = {}): Promise<{ hotels: RawHotel[]; source: 'google' | 'sample' } | null> {
   const id = hotelKey(JSON.stringify([q.near.toLowerCase(), q.checkIn, q.checkOut, q.adults, q.currency]));
   const ref = adminDb().doc(`hotelSearchCache/${id}`);
   const cached = (await ref.get()).data();
   if (!opts.refresh && cached && Date.now() - Number(cached.at) < CACHE_MS) return { hotels: cached.hotels as RawHotel[], source: 'google' };
-  const google = await googleHotels(q);
-  if (google?.length) {
-    await ref.set({ at: Date.now(), hotels: google });
-    return { hotels: google, source: 'google' };
+  for (const p of HOTEL_PROVIDERS) {
+    // Yesterday's live prices beat sample ones.
+    if (p.source === 'sample' && cached) return { hotels: cached.hotels as RawHotel[], source: 'google' };
+    const hotels = await p.search(q);
+    if (!hotels?.length) continue;
+    if (p.cache) await ref.set({ at: Date.now(), hotels });
+    return { hotels, source: p.source };
   }
-  if (cached) return { hotels: cached.hotels as RawHotel[], source: 'google' }; // yesterday's live prices beat sample ones
-  const lite = await liteHotels(q);
-  return lite?.length ? { hotels: lite, source: 'sample' } : null;
+  return cached ? { hotels: cached.hotels as RawHotel[], source: 'google' } : null;
 }
 
 export interface Offer {

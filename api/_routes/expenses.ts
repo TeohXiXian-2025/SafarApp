@@ -134,6 +134,7 @@ async function build(tripId: string, body: ExpenseBody, uploaderUid: string) {
   if (body.receiptPath && (!body.receiptPath.startsWith(`trips/${tripId}/users/${uploaderUid}/`) || body.receiptPath.includes('..'))) {
     throw new HttpError(403, 'Invalid receipt');
   }
+  if (body.ideaId && !(await adminDb().doc(paths.idea(tripId, body.ideaId)).get()).exists) throw new HttpError(400, 'That stop is no longer on the trip');
   const rate = body.currency === trip.currency ? 1 : body.rate;
   return { trip, split, rate, tripAmountMinor: convertMinor(body.amountMinor, body.currency, trip.currency, rate) };
 }

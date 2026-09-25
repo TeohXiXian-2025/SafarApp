@@ -265,6 +265,7 @@ function HotelCard({ stay, hotel: h, chosen, booked, onUpload }: { stay: Stay; h
         </div>
       </div>
 
+      {h.note && <p className="px-3 pb-2 text-sm text-[#161C23]">✨ {h.note}</p>}
       <div className="px-3 pb-2 flex flex-wrap gap-1.5">
         {h.why.map((w) => (
           <span key={w} className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', /over budget/.test(w) ? 'bg-[#FDECEA] text-[#8C1D18]' : 'bg-[#F3EFE9] text-[#161C23]')}>

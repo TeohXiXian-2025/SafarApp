@@ -103,7 +103,9 @@ try {
   assert.equal(bad.status, 400);
   const stranger = await add(bob, { title: 'Outsider', amountMinor: 100, currency: 'MYR', paidBy: bob.uid, split: { mode: 'equal', uids: ['notAMember123'] } });
   assert.equal(stranger.status, 400);
-  ok(`amounts that don't add up, and people outside the trip, are refused (“${bad.body.error}”)`);
+  const foreignStop = await add(bob, { title: 'Stop', amountMinor: 100, currency: 'MYR', paidBy: bob.uid, split: { mode: 'equal', uids: all }, ideaId: 'notAnIdeaHere1' });
+  assert.equal(foreignStop.status, 400);
+  ok(`amounts that don't add up, people outside the trip and unknown stops are refused (“${bad.body.error}”)`);
 
   // Only creator / payer / admin can edit.
   const taxi = (await db.collection(`trips/${q.tripId}/expenses`).where('title', '==', 'Taxi').get()).docs[0].data();

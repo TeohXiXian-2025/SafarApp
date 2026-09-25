@@ -91,6 +91,15 @@ try {
   console.log(`     warnings: ${p.body.warnings.join(' | ')}`);
   assert.equal((await db.collection(`trips/${q.tripId}/schedule`).where('ref.kind', '==', 'idea').get()).size, 2);
   ok('previewing changes nothing');
+  assert.equal(p.body.nearby.at, 'Singapore Changi Airport');
+  assert.ok(p.body.nearby.prayer.length + p.body.nearby.food.length > 0, JSON.stringify(p.body.nearby));
+  ok(`while you wait at Changi: ${[...p.body.nearby.prayer, ...p.body.nearby.food].map((s) => `${s.name} (${s.meters} m)`).join(', ')}`);
+
+  const read = await bob.call('resync/read', { bookingId: flight.body.id, text: 'Dear customer, MH602 SIN-KUL on 07DEC has been rescheduled. New departure 2225hrs, arrival 2330hrs. We apologise for the inconvenience.' }, q);
+  assert.equal(read.status, 200, JSON.stringify(read.body));
+  assert.equal(read.body.startLocal, change.startLocal);
+  assert.equal(read.body.endLocal, change.endLocal);
+  ok(`AI read the airline SMS: ${read.body.startLocal} → ${read.body.endLocal}`);
 
   assert.equal((await bob.call('resync/apply', { bookingId: flight.body.id, change }, q)).status, 403);
   const rep = await bob.call('resync/report', { bookingId: flight.body.id, change }, q);

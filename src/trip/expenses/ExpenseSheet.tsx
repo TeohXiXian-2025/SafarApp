@@ -4,7 +4,12 @@ import { Camera, Loader2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   EXPENSE_CATEGORIES,
+  Idea,
+  ScheduleItem,
   convertMinor,
+  fmtClock,
+  paths,
+  toMin,
   currencyChoices,
   formatMoney,
   minorUnits,
@@ -15,6 +20,7 @@ import {
   type ExpenseSplit,
 } from '../../domain';
 import { api, ApiError } from '../../lib/api';
+import { useQuery } from '../../lib/firestore';
 import { deleteFile, UPLOAD_ACCEPT, uploadTripFile } from '../../lib/storage';
 import { Avatar, Button, Chip, cx, ErrorBanner, Field, Input, Select, Sheet } from '../../ui';
 import { useTrip } from '../TripLayout';
@@ -39,7 +45,15 @@ export function tripToday(trip: { startDate: string; endDate: string; destinatio
 const LAST_CURRENCY = (tripId: string) => `safar:lastCurrency:${tripId}`;
 const major = (minor: number, currency: string) => String(minor / minorUnits(currency));
 
-export function ExpenseSheet({ expense, onClose }: { expense?: Expense; onClose: () => void }) {
+/** Starting values for a new expense (e.g. an extra cost from Emergency Resync). */
+export interface ExpensePreset {
+  title?: string;
+  category?: ExpenseCategory;
+  date?: string;
+  note?: string;
+}
+
+export function ExpenseSheet({ expense, preset, onClose }: { expense?: Expense; preset?: ExpensePreset; onClose: () => void }) {
   const { trip, members, me } = useTrip();
   const choices = useMemo(
     () => [...new Set([...currencyChoices(trip.currency, trip.destinations.map((d) => d.countryCode)), ...(expense ? [expense.currency] : [])])],
@@ -47,7 +61,7 @@ export function ExpenseSheet({ expense, onClose }: { expense?: Expense; onClose:
   );
   const everyone = members.map((m) => m.uid);
 
-  const [title, setTitle] = useState(expense?.title ?? '');
+  const [title, setTitle] = useState(expense?.title ?? preset?.title ?? '');
   const [currency, setCurrency] = useState(() => {
     if (expense) return expense.currency;
     try {
@@ -60,9 +74,21 @@ export function ExpenseSheet({ expense, onClose }: { expense?: Expense; onClose:
   const [rate, setRate] = useState(expense && expense.currency !== trip.currency ? String(expense.rate) : '');
   const [rateInfo, setRateInfo] = useState<{ loading?: boolean; source?: string; error?: string }>({});
   const [paidBy, setPaidBy] = useState(expense?.paidBy ?? me.uid);
-  const [category, setCategory] = useState<ExpenseCategory>(expense?.category ?? 'food');
-  const [date, setDate] = useState(expense?.date ?? tripToday(trip));
-  const [note, setNote] = useState(expense?.note ?? '');
+  const [category, setCategory] = useState<ExpenseCategory>(expense?.category ?? preset?.category ?? 'food');
+  const [date, setDate] = useState(expense?.date ?? (preset?.date && preset.date >= trip.startDate && preset.date <= trip.endDate ? preset.date : tripToday(trip)));
+  const [note, setNote] = useState(expense?.note ?? preset?.note ?? '');
+  const [ideaId, setIdeaId] = useState(expense?.ideaId ?? '');
+  const schedule = useQuery(`schedule:${trip.id}`, () => paths.schedule(trip.id), ScheduleItem);
+  const ideas = useQuery(`ideas:${trip.id}`, () => paths.ideas(trip.id), Idea);
+  // Stops on the timeline that day (to link the cost to one).
+  const stops = schedule.data
+    .filter((s) => s.day === date && s.ref.kind === 'idea')
+    .sort((a, b) => a.start.localeCompare(b.start))
+    .flatMap((s) => {
+      const ref = s.ref;
+      const idea = ref.kind === 'idea' ? ideas.data.find((i) => i.id === ref.ideaId) : undefined;
+      return idea ? [{ id: idea.id, label: `${fmtClock(toMin(s.start))} · ${idea.place.name}` }] : [];
+    });
   const [mode, setMode] = useState<Mode>(expense?.split.mode ?? 'equal');
   const [equalUids, setEqualUids] = useState<string[]>(expense?.split.mode === 'equal' ? expense.split.uids : everyone);
   // Exact: amounts in the expense currency (major units, as typed). Shares: weights.
@@ -163,7 +189,7 @@ export function ExpenseSheet({ expense, onClose }: { expense?: Expense; onClose:
       date,
       ...(receiptPath ? { receiptPath } : {}),
       ...(note.trim() ? { note: note.trim() } : {}),
-      ...(expense?.ideaId ? { ideaId: expense.ideaId } : {}),
+      ...(ideaId ? { ideaId } : {}),
     };
     try {
       if (expense) await api.post('expenses/update', { id: expense.id, ...body }, { tripId: trip.id });
@@ -302,6 +328,20 @@ export function ExpenseSheet({ expense, onClose }: { expense?: Expense; onClose:
           )}
           {mode === 'shares' && <p className="text-xs text-[#6D7A77]">E.g. 2 for a couple and 1 for everyone else.</p>}
         </Field>
+
+        {(stops.length > 0 || ideaId) && (
+          <Field label="For a stop on the timeline (optional)">
+            <Select value={ideaId} onChange={(e) => setIdeaId(e.target.value)}>
+              <option value="">— Not linked —</option>
+              {ideaId && !stops.some((s) => s.id === ideaId) && <option value={ideaId}>{ideas.data.find((i) => i.id === ideaId)?.place.name ?? 'A stop'}</option>}
+              {stops.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
 
         <Field label="Note (optional)">
           <Input value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="Includes the tip" />
