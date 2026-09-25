@@ -8,22 +8,31 @@ import { Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
 import { useTrip } from '../TripLayout';
 import { AddIdeaSheet } from './AddIdeaSheet';
 import { IdeaCard } from './IdeaCard';
+import { NeedsYouStrip, useNeeds } from './NeedsYou';
 
-type Filter = 'voting' | 'backlog' | 'mixed' | 'rejected';
+type Filter = 'voting' | 'backlog' | 'mixed' | 'backup' | 'rejected';
 
 const FILTERS: { key: Filter; label: string; statuses: IdeaStatus[]; empty: string }[] = [
   { key: 'voting', label: 'Voting', statuses: ['voting'], empty: 'Nothing to vote on. Add places from TikTok, Instagram, Xiaohongshu or search.' },
-  { key: 'backlog', label: 'Backlog', statuses: ['backlog', 'scheduled'], empty: 'Ideas everyone approves land here, ready for the timeline.' },
+  { key: 'backlog', label: 'Backlog', statuses: ['backlog', 'scheduled'], empty: 'Ideas the group accepted land here, ready for the timeline.' },
   { key: 'mixed', label: 'Split votes', statuses: ['mixed', 'split_pending'], empty: 'No disagreements so far.' },
+  { key: 'backup', label: 'Backup', statuses: ['backup'], empty: 'No backups. The admin can keep split-vote places here as a plan B.' },
   { key: 'rejected', label: 'Rejected', statuses: ['rejected'], empty: 'Nothing rejected.' },
 ];
+const isFilter = (v: string | null): v is Filter => FILTERS.some((f) => f.key === v);
 
 export function IdeasPage() {
-  const { trip, me } = useTrip();
-  const [filter, setFilter] = useState<Filter>('voting');
+  const ctx = useTrip();
+  const { trip, me } = ctx;
+  const [params, setParams] = useSearchParams();
+  const fromUrl = params.get('filter');
+  const [filter, setFilter] = useState<Filter>(isFilter(fromUrl) ? fromUrl : 'voting');
+  useEffect(() => {
+    if (isFilter(fromUrl)) setFilter(fromUrl);
+  }, [fromUrl]);
+  const { needs } = useNeeds(ctx);
   const [adding, setAdding] = useState(false);
   // Arrived from the share sheet (/share → ?share=…): open the import pre-filled.
-  const [params, setParams] = useSearchParams();
   const [sharedText, setSharedText] = useState<string>();
   useEffect(() => {
     const shared = params.get('share');
@@ -37,7 +46,10 @@ export function IdeasPage() {
   const ideas = useQuery(`ideas:${trip.id}`, () => paths.ideas(trip.id), Idea);
   const splits = useQuery(`splits:${trip.id}`, () => paths.splits(trip.id), Split);
   const schedule = useQuery(`schedule:${trip.id}`, () => paths.schedule(trip.id), ScheduleItem);
-  const splitById = useMemo(() => new Map(splits.data.filter((s) => s.status !== 'rejected').map((s) => [s.id, s])), [splits.data]);
+  const splitById = useMemo(() => new Map(splits.data.filter((s) => s.status === 'approved').map((s) => [s.id, s])), [splits.data]);
+  // Alternatives of a split are shown inside their main idea's card, not on their own.
+  const altIds = useMemo(() => new Set([...splitById.values()].flatMap((s) => s.tracks.filter((t) => t.key !== 'A' && t.ideaId).map((t) => t.ideaId!))), [splitById]);
+  const board = useMemo(() => ideas.data.filter((i) => !altIds.has(i.id)), [ideas.data, altIds]);
   const ideaById = useMemo(() => new Map(ideas.data.map((i) => [i.id, i])), [ideas.data]);
   const dayOf = useMemo(() => new Map(schedule.data.flatMap((s) => (s.ref.kind === 'idea' ? [[s.ref.ideaId, s.day] as const] : []))), [schedule.data]);
   // Google place details may only be cached for 30 days — refresh old ones once per visit.
@@ -49,20 +61,27 @@ export function IdeasPage() {
       void api.post('ideas/refresh', {}, { tripId: trip.id }).catch(() => {});
     }
   }, [hasStale, trip.id]);
+  // Voting that ran past its 24 h closes when someone opens the board.
+  const swept = useRef('');
+  const overdue = !ideas.loading && ideas.data.some((i) => i.status === 'voting' && i.votingEndsAt && i.votingEndsAt <= Date.now());
+  useEffect(() => {
+    if (overdue && navigator.onLine && swept.current !== trip.id) {
+      swept.current = trip.id;
+      void api.post('ideas/sweep', {}, { tripId: trip.id }).catch(() => {});
+    }
+  }, [overdue, trip.id]);
 
   const counts = useMemo(
-    () => Object.fromEntries(FILTERS.map((f) => [f.key, ideas.data.filter((i) => f.statuses.includes(i.status)).length])) as Record<Filter, number>,
-    [ideas.data],
+    () => Object.fromEntries(FILTERS.map((f) => [f.key, board.filter((i) => f.statuses.includes(i.status)).length])) as Record<Filter, number>,
+    [board],
   );
-  const needsMyVote = ideas.data.filter((i) => i.status === 'voting' && !i.votes[me.uid]).length;
+  const needsMyVote = needs.filter((n) => n.kind === 'vote').length;
   const active = FILTERS.find((f) => f.key === filter)!;
   const cardSplit = (i: Idea) => {
     const split = i.splitId ? splitById.get(i.splitId) : undefined;
-    if (!split) return {};
-    const otherId = split.trackA.ideaId === i.id ? split.trackB.ideaId : split.trackA.ideaId;
-    return { split, splitOther: ideaById.get(otherId) };
+    return split ? { split, alts: ideaById } : { alts: ideaById };
   };
-  const shown = ideas.data
+  const shown = board
     .filter((i) => active.statuses.includes(i.status))
     // Ones still needing my vote first, then newest.
     .sort((a, b) => Number(!!a.votes[me.uid]) - Number(!!b.votes[me.uid]) || b.createdAt - a.createdAt);
@@ -87,7 +106,13 @@ export function IdeasPage() {
             key={f.key}
             role="tab"
             aria-selected={filter === f.key}
-            onClick={() => setFilter(f.key)}
+            onClick={() => {
+              setFilter(f.key);
+              if (params.has('filter')) {
+                params.delete('filter');
+                setParams(params, { replace: true });
+              }
+            }}
             className={cx(
               'shrink-0 inline-flex items-center gap-1.5 px-3.5 min-h-9 rounded-full text-sm font-semibold border',
               filter === f.key ? 'bg-[#161C23] border-[#161C23] text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]',
@@ -98,6 +123,8 @@ export function IdeasPage() {
           </button>
         ))}
       </div>
+
+      <NeedsYouStrip needs={needs} tripId={trip.id} />
 
       {ideas.error && <ErrorBanner>Could not load ideas: {ideas.error.message}</ErrorBanner>}
 

@@ -14,6 +14,7 @@ export const paths = {
   idea: (tripId: string, ideaId: string) => `trips/${tripId}/ideas/${ideaId}`,
   votes: (tripId: string, ideaId: string) => `trips/${tripId}/ideas/${ideaId}/votes`,
   vote: (tripId: string, ideaId: string, uid: string) => `trips/${tripId}/ideas/${ideaId}/votes/${uid}`,
+  comments: (tripId: string, ideaId: string) => `trips/${tripId}/ideas/${ideaId}/comments`,
   splits: (tripId: string) => `trips/${tripId}/splits`,
   schedule: (tripId: string) => `trips/${tripId}/schedule`,
   expenses: (tripId: string) => `trips/${tripId}/expenses`,

@@ -21,14 +21,32 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { conflictKey, HalalSummary, ideaConflicts, paths, tallyVotes, visitPlan, windowText, type Conflict, type Idea, type NearbyPlace, type Split } from '../../domain';
+import {
+  conflictKey,
+  HalalSummary,
+  ideaConflicts,
+  mustConfirm,
+  needsReconfirm,
+  OPEN_STATUSES,
+  paths,
+  tallyIdea,
+  visitPlan,
+  windowText,
+  type Conflict,
+  type Idea,
+  type NearbyPlace,
+  type Split,
+  type VoteReasonTag,
+} from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useDoc } from '../../lib/firestore';
 import { Avatar, Badge, cx, ErrorBanner } from '../../ui';
 import { useTrip } from '../TripLayout';
 import { EVIDENCE_SOURCE, halalLabel, placePhotoUrl, type Tone } from './halalLabel';
 import { ReportHalalSheet } from './ReportHalalSheet';
-import { SplitBox } from './SplitBox';
+import { Comments } from './Comments';
+import { DecisionBox, StepOutSheet } from './DecisionBox';
+import { ConfirmGoSheet, DownVoteSheet } from './VoteSheets';
 
 const TONE: Record<Tone, string> = {
   good: 'bg-[#E3F4EC] text-[#0B6B45] border-[#B7E1CB]',
@@ -65,7 +83,7 @@ const fmtDay = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateStrin
 /** Checks run one after another, so a big import can take a few minutes to finish. */
 const STALE_MS = 4 * 60_000;
 
-export function IdeaCard({ idea, split, splitOther, scheduledDay }: { idea: Idea; split?: Split | null; splitOther?: Idea; scheduledDay?: string }) {
+export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; split?: Split | null; alts?: Map<string, Idea>; scheduledDay?: string }) {
   const { trip, members, me, isAdmin } = useTrip();
   const community = useDoc(paths.halalSummary(idea.placeKey), HalalSummary);
   const [busy, setBusy] = useState<string | null>(null);
@@ -100,18 +118,33 @@ export function IdeaCard({ idea, split, splitOther, scheduledDay }: { idea: Idea
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stale]);
 
-  const tally = tallyVotes(idea.votes, trip.memberIds);
+  const tally = tallyIdea(idea, trip.memberIds);
   const myVote = idea.votes[me.uid]?.value ?? 0;
-  // Split ideas are decided through the split, not by votes.
-  const closed = !!idea.decidedBy || idea.status === 'scheduled' || !!idea.splitId;
+  // Votes can change while voting or split, until the admin decides.
+  const closed = !OPEN_STATUSES.includes(idea.status) || !!idea.decidedBy;
+  const [downSheet, setDownSheet] = useState<VoteReasonTag | true | null>(null);
+  const [confirmSheet, setConfirmSheet] = useState<'vote' | 'again' | null>(null);
+  const [steppingOut, setSteppingOut] = useState(false);
   const byUid = new Map(members.map((m) => [m.uid, m]));
-  const vote = (value: 1 | -1) => act(`vote${value}`, () => api.post('ideas/vote', { ideaId: idea.id, value: myVote === value ? 0 : value }, q));
-  const decide = (action: 'close' | 'backlog' | 'reject' | 'reopen') => {
+  const sendVote = (body: Record<string, unknown>) => api.post('ideas/vote', { ideaId: idea.id, ...body }, q);
+  const decide = (action: 'close' | 'backlog' | 'backup' | 'reject' | 'reopen') => {
     setMenu(false);
     return act(action, () => api.post('ideas/decide', { ideaId: idea.id, action }, q));
   };
 
   const conflicts = ideaConflicts(idea, members, { currency: trip.currency, trip, day: scheduledDay, ...(community.data?.tier ? { communityTier: community.data.tier } : {}) });
+  const myConflicts = conflicts.filter((c) => c.uid === me.uid);
+  const toConfirm = mustConfirm(myConflicts);
+  const reconfirm = ['voting', 'mixed', 'backlog', 'scheduled'].includes(idea.status) && needsReconfirm(idea.votes[me.uid], myConflicts);
+  // 👍 despite a conflict asks first; 👎 asks why; tapping your current vote takes it back.
+  const vote = (value: 1 | -1) => {
+    if (myVote === value) return act(`vote${value}`, () => sendVote({ value: 0 }));
+    if (value === -1) return setDownSheet(true);
+    if (toConfirm.length) return setConfirmSheet('vote');
+    return act('vote1', () => sendVote({ value: 1 }));
+  };
+  const votingLeft = idea.status === 'voting' && idea.votingEndsAt ? Math.ceil((idea.votingEndsAt - Date.now()) / 3_600_000) : null;
+  const muslimCheck = idea.status === 'voting' && !!me.prefs?.halalRequired;
   const cKey = conflictKey(conflicts);
   const accepted = ACCEPTED.includes(idea.status);
   const suggestions = idea.resolution?.key === cKey ? idea.resolution.suggestions : null;
@@ -198,10 +231,11 @@ export function IdeaCard({ idea, split, splitOther, scheduledDay }: { idea: Idea
                 <MenuItem icon={<RefreshCw className="w-4 h-4" />} onClick={() => (setMenu(false), act('recheck', () => api.post('ideas/analyze', { ideaId: idea.id, force: true }, q)))}>
                   Re-check halal & reviews
                 </MenuItem>
-                {isAdmin && !closed && idea.status === 'voting' && <MenuItem onClick={() => decide('close')}>Close voting now</MenuItem>}
-                {isAdmin && !idea.splitId && idea.status !== 'scheduled' && idea.status !== 'backlog' && <MenuItem onClick={() => decide('backlog')}>Move to backlog</MenuItem>}
-                {isAdmin && !idea.splitId && idea.status !== 'scheduled' && idea.status !== 'rejected' && <MenuItem onClick={() => decide('reject')}>Reject</MenuItem>}
-                {isAdmin && !idea.splitId && idea.status !== 'scheduled' && closed && <MenuItem onClick={() => decide('reopen')}>Reopen voting</MenuItem>}
+                {isAdmin && idea.status === 'voting' && <MenuItem onClick={() => decide('close')}>Close voting now</MenuItem>}
+                {isAdmin && ['voting', 'backup', 'rejected'].includes(idea.status) && <MenuItem onClick={() => decide('backlog')}>Accept (move to backlog)</MenuItem>}
+                {isAdmin && ['voting', 'backlog', 'rejected'].includes(idea.status) && <MenuItem onClick={() => decide('backup')}>Keep as backup</MenuItem>}
+                {isAdmin && ['voting', 'backlog', 'backup'].includes(idea.status) && <MenuItem onClick={() => decide('reject')}>Reject</MenuItem>}
+                {isAdmin && ['backlog', 'backup', 'rejected', 'mixed'].includes(idea.status) && <MenuItem onClick={() => decide('reopen')}>Reopen voting</MenuItem>}
                 {canManage && (
                   <MenuItem
                     danger
@@ -267,8 +301,10 @@ export function IdeaCard({ idea, split, splitOther, scheduledDay }: { idea: Idea
           </div>
         )}
         {askRestaurant && phone && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-            <span className="text-[#6D7A77]">Not sure? Ask them:</span>
+          <div className={cx('flex flex-wrap items-center gap-x-3 gap-y-1 text-xs', muslimCheck && 'rounded-xl border border-[#C4E0DD] bg-[#EAF4F3] p-3 text-sm')}>
+            <span className={muslimCheck ? 'w-full font-semibold text-[#00685F]' : 'text-[#6D7A77]'}>
+              {muslimCheck ? 'Check with the restaurant before you vote:' : 'Not sure? Ask them:'}
+            </span>
             <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-1 font-bold text-[#00685F]">
               <Phone className="w-3.5 h-3.5" /> {phone}
             </a>
@@ -321,7 +357,17 @@ export function IdeaCard({ idea, split, splitOther, scheduledDay }: { idea: Idea
           </div>
         )}
 
-        <SplitBox idea={idea} split={split ?? null} other={splitOther} conflicts={conflicts} />
+        {reconfirm && (
+          <div className="rounded-xl border border-[#F0C987] bg-[#FDF3E1] p-3 text-sm flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-[#96590B] shrink-0" />
+            <span className="flex-1 text-[#7A4A06]">Something changed since you said 👍 — still going?</span>
+            <button type="button" className="font-bold text-[#00685F] shrink-0" onClick={() => setConfirmSheet('again')}>
+              Review
+            </button>
+          </div>
+        )}
+
+        <DecisionBox idea={idea} split={split ?? null} alts={alts ?? new Map()} />
 
         {!!conflicts.length && (
           <ConflictBox conflicts={conflicts} accepted={accepted} suggestions={suggestions} busy={busy === 'resolve'} canResolve={mayResolve} onResolve={() => resolve(!!suggestions)} />
@@ -375,14 +421,40 @@ export function IdeaCard({ idea, split, splitOther, scheduledDay }: { idea: Idea
               Waiting for {tally.pending.map((u) => (u === me.uid ? 'you' : byUid.get(u)?.displayName ?? 'someone')).join(', ')}
             </p>
           )}
-          {idea.status === 'mixed' && !idea.splitId && <p className="text-[11px] text-[#96590B]">Votes are split — suggest a split above, or the admin can move it to the backlog or reject it.</p>}
+          {votingLeft !== null && votingLeft > 0 && <p className="text-[11px] text-[#6D7A77]">Voting closes in {votingLeft} h — anyone who hasn't voted by then abstains.</p>}
+          {idea.status === 'backup' && <p className="text-[11px] text-[#6D7A77]">Kept as a backup — the admin can bring it back any time.</p>}
           {idea.status === 'scheduled' && scheduledDay && <p className="text-[11px] text-[#6D7A77]">On the timeline · {fmtDay(scheduledDay)}</p>}
           {closed && idea.decidedBy && <p className="text-[11px] text-[#6D7A77]">Decided by {byUid.get(idea.decidedBy)?.displayName ?? 'the admin'}.</p>}
         </div>
+        <Comments idea={idea} />
         <ErrorBanner>{error}</ErrorBanner>
       </div>
 
       {reporting && <ReportHalalSheet idea={idea} community={community.data} onClose={() => setReporting(false)} />}
+      {downSheet && (
+        <DownVoteSheet
+          idea={idea}
+          defaultTag={downSheet === true ? undefined : downSheet}
+          onClose={() => setDownSheet(null)}
+          onVote={async (tag, reason) => void (await sendVote({ value: -1, tag, ...(reason ? { reason } : {}) }))}
+        />
+      )}
+      {confirmSheet && (
+        <ConfirmGoSheet
+          idea={idea}
+          conflicts={toConfirm}
+          again={confirmSheet === 'again'}
+          onClose={() => setConfirmSheet(null)}
+          onConfirm={async (text) => void (await sendVote({ value: 1, ack: text }))}
+          onDecline={() => {
+            setConfirmSheet(null);
+            // Still voting → vote 👎 (halal); already accepted → step out to a middle ground.
+            if (OPEN_STATUSES.includes(idea.status)) setDownSheet('halal');
+            else setSteppingOut(true);
+          }}
+        />
+      )}
+      {steppingOut && <StepOutSheet idea={idea} onClose={() => setSteppingOut(false)} />}
     </article>
   );
 }

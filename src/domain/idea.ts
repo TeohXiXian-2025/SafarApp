@@ -150,16 +150,75 @@ export const IdeaSource = z.object({
 });
 export type IdeaSource = z.infer<typeof IdeaSource>;
 
-export const IdeaStatus = z.enum(['voting', 'backlog', 'mixed', 'split_pending', 'rejected', 'scheduled']);
+/**
+ * voting → backlog (everyone 👍) | rejected (everyone 👎) | mixed (split votes:
+ * the people not going pick a middle ground, then the admin accepts / backs up / rejects).
+ * backup = kept as a plan B. split_pending is legacy (old two-way split proposals).
+ */
+export const IdeaStatus = z.enum(['voting', 'backlog', 'mixed', 'split_pending', 'rejected', 'scheduled', 'backup']);
 export type IdeaStatus = z.infer<typeof IdeaStatus>;
+
+/** Why someone voted 👎 — shapes the middle grounds offered to them. */
+export const VOTE_REASONS = {
+  not_interested: 'Not interested',
+  too_expensive: 'Too expensive',
+  too_far: 'Too far',
+  halal: 'Halal / food needs',
+  been_before: 'Been before',
+  timing: 'Too tiring / timing',
+  other: 'Other',
+} as const;
+export const VoteReasonTag = z.enum(['not_interested', 'too_expensive', 'too_far', 'halal', 'been_before', 'timing', 'other']);
+export type VoteReasonTag = z.infer<typeof VoteReasonTag>;
 
 /** Doc id of the voter is the map key. */
 export const Vote = z.object({
   value: z.union([z.literal(1), z.literal(-1)]),
+  /** 👎 needs a reason: a tag, plus free text (required for "other"). */
+  tag: VoteReasonTag.optional(),
   reason: z.string().max(300).optional(),
+  /**
+   * 👍 despite a conflict (e.g. "I called — they're halal"): what they
+   * confirmed. `key` identifies the conflicts at the time; if they change,
+   * the member is asked again.
+   */
+  ack: z.object({ key: z.string().max(200), text: z.string().max(300), at: Millis }).optional(),
   at: Millis,
 });
 export type Vote = z.infer<typeof Vote>;
+
+/** A middle ground someone not going can pick. Every option turns into something on the timeline. */
+export const MiddleOption = z.object({
+  id: z.string().min(1).max(40),
+  type: z.enum(['alternative', 'timing', 'join', 'free_time']),
+  title: z.string().max(160),
+  detail: z.string().max(300),
+  /** alternative: the nearby place. */
+  place: z
+    .object({ placeId: z.string().max(300), name: z.string().max(200), location: GeoPoint, walkMin: z.number().int().nonnegative(), halalListed: z.boolean().optional() })
+    .optional(),
+  /** timing: when the whole group would go instead ("HH:MM"). */
+  window: z.object({ start: z.string().max(5), end: z.string().max(5) }).optional(),
+});
+export type MiddleOption = z.infer<typeof MiddleOption>;
+
+export const Choice = z.object({
+  optionId: z.string().min(1).max(40),
+  note: z.string().max(300).optional(),
+  /** Picked for them when the 24 h ran out. */
+  auto: z.boolean().optional(),
+  at: Millis,
+});
+export type Choice = z.infer<typeof Choice>;
+
+/** A comment on an idea. Path: trips/{id}/ideas/{ideaId}/comments/{commentId} */
+export const IdeaComment = z.object({
+  id: Id,
+  uid: Id,
+  text: z.string().min(1).max(500),
+  at: Millis,
+});
+export type IdeaComment = z.infer<typeof IdeaComment>;
 
 export const IdeaPlace = PlaceRef.extend({
   category: IdeaCategory,
@@ -198,6 +257,17 @@ export const Idea = z.object({
   analysis: z.object({ status: z.enum(['pending', 'done', 'error']), at: Millis, error: z.string().max(300).optional() }).optional(),
   status: IdeaStatus,
   votes: z.record(z.string(), Vote).default({}),
+  /** Who must vote: the members when it was added (later joiners may vote but aren't waited for). */
+  voters: z.array(Id).max(50).optional(),
+  /** Voting closes then (non-voters abstain). */
+  votingEndsAt: Millis.optional(),
+  /** Split votes: middle grounds for the people not going, and what they picked. */
+  options: z.array(MiddleOption).max(6).optional(),
+  choices: z.record(z.string(), Choice).default({}),
+  /** Choosing closes then (anyone who hasn't picked gets free time). */
+  choiceEndsAt: Millis.optional(),
+  /** A timing middle ground the admin accepted: the group visits in this window. */
+  window: z.object({ start: z.string().max(5), end: z.string().max(5) }).optional(),
   /** Set when the admin closes voting early or overrides the result. */
   decidedBy: Id.optional(),
   /** Part of a split pair (the original or its alternative). */
@@ -228,34 +298,3 @@ export type Idea = z.infer<typeof Idea>;
 export const placeIsStale = (idea: Pick<Idea, 'place' | 'createdAt'>, now = Date.now()) =>
   !!idea.place.placeId && now - (idea.place.fetchedAt ?? idea.createdAt) > PLACE_REFRESH_MS;
 
-export interface VoteTally {
-  up: number;
-  down: number;
-  pending: string[]; // member uids who haven't voted
-}
-
-export function tallyVotes(votes: Record<string, Vote>, memberUids: string[]): VoteTally {
-  const current = memberUids.filter((u) => votes[u]);
-  return {
-    up: current.filter((u) => votes[u].value === 1).length,
-    down: current.filter((u) => votes[u].value === -1).length,
-    pending: memberUids.filter((u) => !votes[u]),
-  };
-}
-
-/**
- * Where an idea stands after a vote.
- * - Everyone 👍 → backlog (ready for the timeline)
- * - Everyone 👎 → rejected
- * - Everyone voted, opinions split → mixed (Split Track candidate)
- * - Otherwise still voting — unless `closed` (admin closed voting early),
- *   in which case non-voters are treated as abstaining.
- */
-export function ideaStatusFromVotes(t: VoteTally, closed = false): 'voting' | 'backlog' | 'mixed' | 'rejected' {
-  const total = t.up + t.down;
-  if (!closed && t.pending.length) return 'voting';
-  if (total === 0) return closed ? 'rejected' : 'voting';
-  if (t.down === 0) return 'backlog';
-  if (t.up === 0) return 'rejected';
-  return 'mixed';
-}

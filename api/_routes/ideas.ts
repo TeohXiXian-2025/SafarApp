@@ -1,4 +1,3 @@
-import { FieldValue } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import {
   HalalReport,
@@ -7,12 +6,11 @@ import {
   Id,
   Idea,
   IdeaSource,
-  ideaStatusFromVotes,
   paths,
   summarizeReports,
-  tallyVotes,
   placeIsStale,
   ideaItemId,
+  VOTE_WINDOW_MS,
   Split,
   conflictKey,
   ideaConflicts,
@@ -35,7 +33,7 @@ import { transcribe } from '../_lib/groq.js';
 import type { Part } from '@google/genai';
 import { loadTrip, logActivity } from '../_lib/trip.js';
 import { useDailyQuota } from '../_lib/quota.js';
-import { dissolveSplit } from './splits.js';
+import { applyMove, dissolve } from '../_lib/splits.js';
 
 const ANALYSIS_TTL = 14 * 86_400_000;
 /** Bump when the analysis format changes so cached results are redone. */
@@ -227,6 +225,7 @@ export const ideaRoutes: RouteTable = {
         z.object({ placeId: z.string().min(3).max(300), source: IdeaSource.default({ type: 'manual' }), notes: z.string().max(1000).optional() }),
       );
       const placeKey = paths.placeKey({ placeId: body.placeId });
+      const trip = await loadTrip(tripId);
       await useDailyQuota(member.uid, 'addIdea');
       const existing = await adminDb().collection(paths.ideas(tripId)).where('placeKey', '==', placeKey).limit(1).get();
       if (!existing.empty) return json({ id: existing.docs[0].id, duplicate: true });
@@ -248,6 +247,9 @@ export const ideaRoutes: RouteTable = {
         analysis: { status: 'pending', at: now },
         status: 'voting',
         votes: {},
+        voters: trip.memberIds,
+        votingEndsAt: now + VOTE_WINDOW_MS,
+        choices: {},
         createdBy: member.uid,
         createdAt: now,
         updatedAt: now,
@@ -402,83 +404,31 @@ Each: short title (≤ 8 words), a concrete 1–2 sentence detail, and forMember
     { perMinute: 20 },
   ),
 
-  /** 👍 / 👎 (value 1 / -1), or 0 to take your vote back. Recomputes the idea's status. */
-  'POST ideas/vote': withTrip(
-    async (req, { tripId, member }) => {
-      const body = await readJson(req, z.object({ ideaId: Id, value: z.union([z.literal(1), z.literal(-1), z.literal(0)]), reason: z.string().max(300).optional() }));
-      const db = adminDb();
-      const status = await db.runTransaction(async (tx) => {
-        const trip = await loadTrip(tripId, tx);
-        const snap = await tx.get(ideaRef(tripId, body.ideaId));
-        if (!snap.exists) throw new HttpError(404, 'Idea not found');
-        const idea = Idea.parse(snap.data());
-        if (!['voting', 'mixed', 'backlog', 'rejected'].includes(idea.status) || idea.decidedBy || idea.splitId) {
-          throw new HttpError(409, idea.splitId ? 'This idea is part of a split — the admin decides on the split' : 'Voting on this idea is closed');
-        }
-        const votes = { ...idea.votes };
-        if (body.value === 0) delete votes[member.uid];
-        else votes[member.uid] = { value: body.value, ...(body.reason ? { reason: body.reason } : {}), at: Date.now() };
-        const next = ideaStatusFromVotes(tallyVotes(votes, trip.memberIds));
-        tx.update(snap.ref, { votes, status: next, updatedAt: Date.now() });
-        if (next !== idea.status && next !== 'voting') {
-          const label = { backlog: 'everyone approved it — added to the backlog', rejected: 'everyone passed on it', mixed: 'votes are split' }[next];
-          logActivity(tx, tripId, 'system', `${idea.place.name}: ${label}`);
-        }
-        return next;
-      });
-      return json({ status });
-    },
-    { perMinute: 60 },
-  ),
-
-  /** Admin: close voting early, or force the outcome. */
-  'POST ideas/decide': withTrip(
-    async (req, { tripId, member }) => {
-      const { ideaId, action } = await readJson(req, z.object({ ideaId: Id, action: z.enum(['close', 'backlog', 'reject', 'reopen']) }));
-      const db = adminDb();
-      const status = await db.runTransaction(async (tx) => {
-        const trip = await loadTrip(tripId, tx);
-        const snap = await tx.get(ideaRef(tripId, ideaId));
-        if (!snap.exists) throw new HttpError(404, 'Idea not found');
-        const idea = Idea.parse(snap.data());
-        if (idea.status === 'scheduled') throw new HttpError(409, `${idea.place.name} is on the timeline — take it off first`);
-        if (idea.splitId) throw new HttpError(409, `${idea.place.name} is part of a split — approve, reject or cancel the split instead`);
-        const tally = tallyVotes(idea.votes, trip.memberIds);
-        const next =
-          action === 'close' ? ideaStatusFromVotes(tally, true) : action === 'backlog' ? 'backlog' : action === 'reject' ? 'rejected' : ideaStatusFromVotes(tally);
-        tx.update(snap.ref, {
-          status: next,
-          // Delete, not null: the schema allows the field to be absent, not null.
-          ...(action === 'reopen' ? { decidedBy: FieldValue.delete() } : { decidedBy: member.uid }),
-          updatedAt: Date.now(),
-        });
-        const verb = { close: `closed voting on ${idea.place.name} (${next})`, backlog: `moved ${idea.place.name} to the backlog`, reject: `rejected ${idea.place.name}`, reopen: `reopened voting on ${idea.place.name}` }[action];
-        logActivity(tx, tripId, member.uid, `${member.displayName} ${verb}`);
-        return next;
-      });
-      return json({ status });
-    },
-    { admin: true, perMinute: 30 },
-  ),
-
-  /** Remove an idea (its author or the admin). */
+  /** Remove an idea (its author or the admin). Its comments, timeline stop and any split go with it. */
   'POST ideas/delete': withTrip(
     async (req, { tripId, member }) => {
       const { ideaId } = await readJson(req, z.object({ ideaId: Id }));
       const idea = await loadIdea(tripId, ideaId);
       if (!canManage(idea, member)) throw new HttpError(403, 'Only the person who suggested this, or the admin, can remove it');
-      const batch = adminDb().batch();
-      // Removing either half of a split removes the split: the alternative goes, the original stays (unless it's the one deleted).
       const split = idea.splitId ? Split.safeParse((await adminDb().doc(`${paths.splits(tripId)}/${idea.splitId}`).get()).data()) : null;
-      if (split?.success && split.data.status !== 'rejected') {
-        const s = split.data;
-        dissolveSplit(batch, tripId, s, { restoreOriginal: s.trackA.ideaId !== ideaId });
-        batch.delete(adminDb().doc(`${paths.schedule(tripId)}/${ideaItemId(s.trackA.ideaId)}`));
+      const s = split?.success && split.data.status !== 'rejected' ? split.data : null;
+      const side = s?.tracks.find((t) => t.key !== 'A' && t.ideaId === ideaId);
+      if (s && side) {
+        // Deleting an alternative: its group rejoins the main group (the alternative goes with the move).
+        await applyMove(tripId, s.tracks.find((t) => t.key === 'A')!.ideaId!, side.memberUids, { kind: 'main' }, member.uid);
+        const b = adminDb().batch();
+        logActivity(b, tripId, member.uid, `${member.displayName} removed ${idea.place.name}`);
+        await b.commit();
+        return json({ ok: true });
       }
-      batch.delete(ideaRef(tripId, ideaId));
-      batch.delete(adminDb().doc(`${paths.schedule(tripId)}/${ideaItemId(ideaId)}`)); // and its timeline slot
+      const batch = adminDb().batch();
+      if (s) {
+        dissolve(batch, tripId, s);
+      }
+      batch.delete(adminDb().doc(`${paths.schedule(tripId)}/${ideaItemId(ideaId)}`)); // its timeline slot
       logActivity(batch, tripId, member.uid, `${member.displayName} removed ${idea.place.name}`);
       await batch.commit();
+      await adminDb().recursiveDelete(ideaRef(tripId, ideaId)); // the idea + its comments
       return json({ ok: true });
     },
     { perMinute: 30 },

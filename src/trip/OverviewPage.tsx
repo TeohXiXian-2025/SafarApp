@@ -7,9 +7,12 @@ import { useQuery } from '../lib/firestore';
 import { daysUntil, localTimeIn, timeAgo, tripLengthDays } from '../lib/format';
 import { Avatar, Badge, Button, Card } from '../ui';
 import { useTrip } from './TripLayout';
+import { NeedsYouStrip, useNeeds } from './ideas/NeedsYou';
 
 export function OverviewPage() {
-  const { trip, members, me, isAdmin } = useTrip();
+  const ctx = useTrip();
+  const { trip, members, me, isAdmin } = ctx;
+  const { needs } = useNeeds(ctx);
   const bookings = useQuery(`bookings:${trip.id}`, () => paths.bookings(trip.id), Booking);
   const activity = useQuery(
     `activity:${trip.id}`,
@@ -22,6 +25,7 @@ export function OverviewPage() {
   return (
     <div className="grid gap-4 md:grid-cols-[1fr_320px]">
       <div className="space-y-4">
+        <NeedsYouStrip needs={needs} tripId={trip.id} />
         {!me.prefs && (
           <Nudge to="preferences" icon={<SlidersHorizontal className="w-5 h-5" />} title="Set your travel preferences" text="Budget, halal needs, prayer breaks and pace — the plan balances everyone's." />
         )}

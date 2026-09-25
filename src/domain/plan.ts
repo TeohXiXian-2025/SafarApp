@@ -52,30 +52,56 @@ export type Booking = z.infer<typeof Booking>;
 
 // ─── Split tracks ───────────────────────────────────────────────────────────
 
+/**
+ * One group of a split. A = the original place (everyone not stepping out),
+ * B / C = a nearby alternative (its own idea), F = free time nearby (no place).
+ */
+export const SplitTrackKey = z.enum(['A', 'B', 'C', 'F']);
+export type SplitTrackKey = z.infer<typeof SplitTrackKey>;
 export const SplitTrack = z.object({
-  ideaId: Id,
-  memberUids: z.array(Id).min(1),
-});
-
-export const Split = z.object({
-  id: Id,
-  /** The idea that received mixed votes (or clashes with someone's halal needs). */
-  sourceIdeaId: Id,
-  /** Its status before the split, restored if the split is rejected. */
-  sourceStatus: z.enum(['voting', 'backlog', 'mixed']).default('mixed'),
-  reason: z.enum(['mixed_votes', 'halal_conflict']),
-  trackA: SplitTrack, // original idea
-  trackB: SplitTrack, // nearby alternative (created as an idea with source "split")
-  /** Everyone meets back at the original place this long after the pair starts. */
-  reunion: z.object({ place: PlaceRef, afterMinutes: z.number().int().positive() }),
-  /** Walk between the two places, one way. */
+  key: SplitTrackKey,
+  ideaId: Id.optional(),
+  memberUids: z.array(Id).max(50),
+  label: z.string().max(200),
+  /** One way from the original place. */
   walkMin: z.number().int().nonnegative().default(0),
-  explanation: z.string().max(1000),
-  status: z.enum(['proposed', 'approved', 'rejected']),
-  createdBy: Id.optional(),
-  decidedBy: Id.optional(),
-  createdAt: Millis,
+  /** Time spent there. */
+  durationMin: z.number().int().nonnegative().default(0),
 });
+export type SplitTrack = z.infer<typeof SplitTrack>;
+
+/** Old two-way splits (trackA / trackB) read as tracks. */
+function legacySplit(raw: unknown) {
+  const r = raw as Record<string, any> | null;
+  if (!r || r.tracks || !r.trackA) return raw;
+  return {
+    ...r,
+    tracks: [
+      { key: 'A', ideaId: r.trackA.ideaId, memberUids: r.trackA.memberUids, label: r.reunion?.place?.name ?? 'Original' },
+      { key: 'B', ideaId: r.trackB.ideaId, memberUids: r.trackB.memberUids, label: 'Alternative', walkMin: r.walkMin ?? 0 },
+    ],
+  };
+}
+
+export const Split = z.preprocess(
+  legacySplit,
+  z.object({
+    id: Id,
+    /** The idea the group split over. */
+    sourceIdeaId: Id,
+    reason: z.enum(['mixed_votes', 'halal_conflict', 'opt_out']),
+    tracks: z.array(SplitTrack).min(1).max(4),
+    /** Everyone meets back at the original place this long after the split starts. */
+    reunion: z.object({ place: PlaceRef, afterMinutes: z.number().int().positive() }),
+    explanation: z.string().max(1000),
+    /** proposed is legacy; splits are created approved (the admin accepted the idea with its groups). */
+    status: z.enum(['proposed', 'approved', 'rejected']),
+    createdBy: Id.optional(),
+    decidedBy: Id.optional(),
+    createdAt: Millis,
+    updatedAt: Millis.optional(),
+  }),
+);
 export type Split = z.infer<typeof Split>;
 
 // ─── Scheduled timeline ─────────────────────────────────────────────────────

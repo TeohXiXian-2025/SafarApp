@@ -37,7 +37,9 @@ import {
   dayItems,
   framesFor,
   ideaDocRef,
+  isAltOfSplit,
   isPrayerItem,
+  leadIdea,
   isTrackB,
   itemEnds,
   itemRef,
@@ -86,7 +88,7 @@ export const scheduleRoutes: RouteTable = {
       if (idea.status !== 'backlog') throw new HttpError(409, 'Only ideas in the backlog can go on the timeline');
 
       const split = approvedSplit(data, idea);
-      const lead = split ? data.ideas.get(split.trackA.ideaId)! : idea;
+      const lead = leadIdea(data, idea);
       const day = (await dayItems(tripId, body.day)).filter((i) => !isPrayerItem(i));
       const duration = unitFor(lead, split).duration;
       const start = body.start ? toMin(body.start) : toMin(nextSlot(day, duration).start);
@@ -122,7 +124,8 @@ export const scheduleRoutes: RouteTable = {
       const split = approvedSplit(data, leadIdea);
 
       const duration = split ? split.reunion.afterMinutes : (body.durationMin ?? toMin(item.end) - toMin(item.start));
-      let start = body.start ? toMin(body.start) - (isTrackB(item) && split ? split.walkMin : 0) : toMin(lead.start);
+      // Editing a side group's time moves the whole split: keep its offset from the main group.
+      let start = body.start ? toMin(body.start) - (toMin(item.start) - toMin(lead.start)) : toMin(lead.start);
       let orderIndex = lead.orderIndex;
       if (moved) {
         const target = (await dayItems(tripId, day)).filter((i) => !isPrayerItem(i));
@@ -316,12 +319,6 @@ export const scheduleRoutes: RouteTable = {
     { admin: true, perMinute: 30 },
   ),
 };
-
-/** The alternative half of a split is planned together with its original. */
-function isAltOfSplit(data: TripData, idea: Idea) {
-  const s = idea.splitId ? data.splits.get(idea.splitId) : undefined;
-  return s?.status === 'approved' && s.trackB.ideaId === idea.id;
-}
 
 /** One friendly sentence per day from the AI (skipped quietly if it's busy). */
 async function addNotes(plan: ArrangeJob['plan'], data: TripData) {

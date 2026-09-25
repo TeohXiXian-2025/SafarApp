@@ -10,3 +10,4 @@ export * from './prayer.js';
 export * from './timeline.js';
 export * from './arrange.js';
 export * from './split.js';
+export * from './voting.js';

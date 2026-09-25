@@ -389,12 +389,17 @@ Estimates assume 3 people working part-time. Each phase ends with something usab
 - [ ] Filler suggestions for non-praying members are "free time" only (no specific place yet).
 - [ ] Delete `aiPlannerService.ts` mocks → when `/demo` is retired.
 
-### Phase 7 — Split Tracks (week 10)
-- [x] `splits/propose`: groups from votes (👎) and halal blockers (`splitGroups()`); alternative within 1.2 km — halal-listed food from the Halal Radar for halal needs, else the same kind of place; reunion = at the original after `max(A, walk + B + walk)`. "Another option" swaps the alternative. The alternative gets its own Halal Radar check.
-- [x] `splits/decide` (admin): approve (both → backlog as a pair), reject, or cancel an approved split. Votes/decisions on split ideas are locked; deleting either half dissolves the split.
-- [x] Timeline: the pair is one stop (both groups side by side, your group highlighted, reunion time); add/move/reorder/remove move both. Legs and warnings follow track A.
-- [x] AI Arrange and prayer pairing plan a pair as one unit.
-- [x] Verified in `npm run e2e:phase6`.
+### Phase 7 — Voting, middle grounds & Split Tracks (week 10) — "Option 3"
+Rules live in `src/domain/voting.ts` + `split.ts` (unit-tested); API in `api/_routes/decisions.ts`; verified by `npm run e2e:voting` (19 checks) and `e2e:phase6`.
+- [x] **Vote:** 👎 needs a reason (chips or typed). 👍 despite a conflict (not halal enough, pork, alcohol…) must be confirmed with a reason — the staff phone check sits in that popup and on voting cards for members who need halal. If the conflict changes later, the member is asked again ("Needs you").
+- [x] **Who votes / when it closes:** members at the time the idea was added (later joiners may vote, aren't waited for); closes when all voted, after 24 h, or when the admin closes it (non-voters abstain). Until then votes can change; taking a vote back means "wait for me" again.
+- [x] **Split votes:** the people who voted 👎 pick a middle ground within 24 h — up to 2 nearby alternatives (halal-listed for halal needs; "something different" for not interested / been before), a timing option (between prayers), "I'll join after all", or free time. "More" swaps unpicked places.
+- [x] **Admin decides once:** sees the groups that would form (who goes where, anyone on their own, a requested time) → Accept (builds up to 3 groups + free time; undecided people get free time) · Keep as backup · Reject. Backup is a new status (plan B); reopen puts it back to a vote.
+- [x] **After acceptance:** "Can't make it? Step out" → alternative / free time without approval; "Rejoin the main group". Empty groups disappear; with no one outside the main group the split ends.
+- [x] **Leaving / removal:** votes and choices removed, open ideas re-tallied (may settle), removed from groups and timeline stops.
+- [x] Comments on idea cards; "Needs you" strip (Overview + Ideas) and a badge on the Ideas tab.
+- [x] Timeline + map: groups in their own colours side by side, 🚩 meeting time, dashed side trips, 🕌 prayer pins, tap a stop to focus it on the map.
+- [ ] Push notifications + precise 12 h reminders (needs an FCM web-push key and QStash) — in-app badges for now.
 
 ### Phase 8 — Hotels + Restaurant tab (week 11)
 - [ ] `HotelRatesProvider` interface + LiteAPI adapter (search by lat/lng → rates for trip dates/occupancy/currency).

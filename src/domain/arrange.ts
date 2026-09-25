@@ -28,6 +28,8 @@ export interface Unit {
   hours?: string[];
   /** Walk to the nearest prayer space from here (unknown → PRAYER_WALK_DEFAULT). */
   prayerWalkMin?: number;
+  /** Must happen within this window (a timing middle ground the admin accepted). */
+  window?: [number, number];
 }
 
 export interface Block {
@@ -159,7 +161,11 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
     while (pending[0] && pending[0].t <= cursor + move) pray(pending.shift()!, prev);
 
     let start = ceil5(cursor + move);
-    const open = openingRanges(u.hours, frame.day);
+    const hoursOpen = openingRanges(u.hours, frame.day);
+    // A required window narrows the opening hours (or stands in for them).
+    const open = u.window
+      ? (hoursOpen ?? [[0, 24 * 60] as [number, number]]).map(([o, c]) => [Math.max(o, u.window![0]), Math.min(c, u.window![1])] as [number, number]).filter(([o, c]) => c > o)
+      : hoursOpen;
     if (open?.length === 0 && opts.strict) {
       out.unfit.push({ id: u.id, reason: 'closed' });
       continue;

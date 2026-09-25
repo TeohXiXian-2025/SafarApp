@@ -1,4 +1,5 @@
 import { CalendarDays, LayoutDashboard, Lightbulb, Settings, Ticket, Users } from 'lucide-react';
+import { useMemo } from 'react';
 import { Link, NavLink, Outlet, useOutletContext, useParams } from 'react-router';
 import { useAuth } from '../auth/auth';
 import { AppHeader } from '../components/live/AppHeader';
@@ -6,6 +7,7 @@ import { Member, paths, Trip } from '../domain';
 import { useDoc, useQuery } from '../lib/firestore';
 import { formatDateRange } from '../lib/format';
 import { Button, Card, cx, Spinner } from '../ui';
+import { useNeeds } from './ideas/NeedsYou';
 
 export interface TripCtx {
   trip: Trip;
@@ -37,6 +39,13 @@ export function TripLayout() {
   const awaitingServer = navigator.onLine && ((!me && members.fromCache) || (!trip.data && trip.fromCache));
   const loading = trip.loading || members.loading || awaitingServer;
 
+  const ctx: TripCtx | null = useMemo(
+    () => (trip.data && me ? { trip: trip.data, members: sortMembers(members.data), me, isAdmin: me.role === 'admin' } : null),
+    [trip.data, me, members.data],
+  );
+  // Things waiting on me (votes, middle grounds, decisions) → a badge on the Ideas tab.
+  const badge = useNeeds(ctx).needs.length;
+
   if (!loading && (!trip.data || !me)) {
     // Not found, no permission, or just removed from the trip.
     return (
@@ -55,8 +64,6 @@ export function TripLayout() {
     );
   }
 
-  const ctx: TripCtx | null =
-    trip.data && me ? { trip: trip.data, members: sortMembers(members.data), me, isAdmin: me.role === 'admin' } : null;
 
   return (
     <div className="min-h-dvh bg-[#FAF8F5]">
@@ -85,6 +92,7 @@ export function TripLayout() {
               }
             >
               <t.icon className="w-4 h-4" /> {t.label}
+              {t.to === 'ideas' && badge > 0 && <Badge count={badge} />}
             </NavLink>
           ))}
         </div>
@@ -106,12 +114,27 @@ export function TripLayout() {
                 cx('flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold', isActive ? 'text-[#00685F]' : 'text-[#6D7A77]')
               }
             >
-              <t.icon className="w-5 h-5" /> {t.label}
+              <span className="relative">
+                <t.icon className="w-5 h-5" />
+                {t.to === 'ideas' && badge > 0 && <Badge count={badge} floating />}
+              </span>
+              {t.label}
             </NavLink>
           ))}
         </div>
       </nav>
     </div>
+  );
+}
+
+function Badge({ count, floating }: { count: number; floating?: boolean }) {
+  return (
+    <span
+      aria-label={`${count} waiting for you`}
+      className={cx('min-w-4 h-4 px-1 rounded-full bg-[#B3261E] text-white text-[10px] font-bold leading-4 text-center', floating && 'absolute -top-1.5 -right-2.5')}
+    >
+      {count > 9 ? '9+' : count}
+    </span>
   );
 }
 

@@ -20,7 +20,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { AlertTriangle, Car, Footprints, GitFork, GripVertical, Lock, Map as MapIcon, MapPin, Plus, Sparkles, TrainFront, Undo2 } from 'lucide-react';
+import { AlertTriangle, Car, Footprints, GitFork, GripVertical, Lock, Map as MapIcon, MapPin, Pencil, Plus, Sparkles, TrainFront, Undo2 } from 'lucide-react';
 import { collection, limit, orderBy, query } from 'firebase/firestore';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -55,7 +55,8 @@ import { Badge, Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
 import { bookingTitle, formatDay, KIND, tzCity } from '../bookings/format';
 import { placePhotoUrl } from '../ideas/halalLabel';
 import { useTrip } from '../TripLayout';
-import { DayMap, type MapStop } from './DayMap';
+import { TRACK_COLOR, trackKeyOf } from '../trackColors';
+import { DayMap, type MapLink, type MapStop } from './DayMap';
 import { ArrangeSheet } from './ArrangeSheet';
 import { AddStopSheet, EditStopSheet } from './StopSheets';
 
@@ -70,9 +71,12 @@ interface Row {
   out?: GeoPoint;
   /** An automatic prayer break. */
   prayer?: boolean;
-  /** The other half of a split pair, running in parallel. */
-  side?: Row;
+  /** The other groups of a split (B, C, free time), running alongside this main-group row. */
+  sides?: Row[];
 }
+
+/** A split group other than the main one. */
+const isSide = (track: string) => track !== 'all' && !track.endsWith(':A');
 
 const prayerWalkOf = (idea?: Idea) => (idea?.halal?.prayer ? (idea.halal.prayer.access === 'onsite' ? 0 : idea.halal.prayer.places[0]?.walkMin) : undefined);
 
@@ -127,27 +131,28 @@ export function TimelinePage() {
       const row = toRow(it, ideaMap, bookingMap);
       if (row) out.set(it.day, [...(out.get(it.day) ?? []), row]);
     }
-    // Track B of a split rides along with its track A row.
+    // The other groups of a split ride along with its main-group row.
     for (const [d, list] of out) {
-      const main = list.filter((r) => !r.item.track.endsWith(':B'));
-      for (const b of list.filter((r) => r.item.track.endsWith(':B'))) {
-        const a = main.find((m) => m.item.track === b.item.track.replace(/:B$/, ':A'));
-        if (a) a.side = b;
+      const main = list.filter((r) => !isSide(r.item.track));
+      for (const b of list.filter((r) => isSide(r.item.track))) {
+        const a = main.find((m) => m.item.track === `${b.item.track.split(':')[0]}:A`);
+        if (a) (a.sides ??= []).push(b);
         else main.push(b);
       }
+      main.forEach((r) => r.sides?.sort((x, y) => x.item.track.localeCompare(y.item.track)));
       out.set(d, main);
     }
     return out;
   }, [schedule.data, ideaMap, bookingMap]);
   const approved = useMemo(() => splits.data.filter((s) => s.status === 'approved'), [splits.data]);
-  // The alternative half of a split is added together with its original.
-  const backlog = useMemo(
-    () => ideas.data.filter((i) => i.status === 'backlog' && !approved.some((s) => s.trackB.ideaId === i.id)).sort((a, b) => a.createdAt - b.createdAt),
-    [ideas.data, approved],
-  );
+  // A split's alternatives are added together with its main idea (one grouped backlog card).
+  const altIds = useMemo(() => new Set(approved.flatMap((s) => s.tracks.filter((t) => t.key !== 'A' && t.ideaId).map((t) => t.ideaId!))), [approved]);
+  const backlog = useMemo(() => ideas.data.filter((i) => i.status === 'backlog' && !altIds.has(i.id)).sort((a, b) => a.createdAt - b.createdAt), [ideas.data, altIds]);
   const pairName = (ideaId: string) => {
-    const s = approved.find((x) => x.trackA.ideaId === ideaId);
-    return s ? ideaMap.get(s.trackB.ideaId)?.place.name : undefined;
+    const s = approved.find((x) => x.tracks.some((t) => t.key === 'A' && t.ideaId === ideaId));
+    if (!s) return undefined;
+    const others = s.tracks.filter((t) => t.key !== 'A').map((t) => (t.key === 'F' ? 'free time' : (ideaMap.get(t.ideaId ?? '')?.place.name ?? t.label)));
+    return `${s.tracks.length} groups: ${others.join(' · ')}`;
   };
 
   // Order shown while a reorder is on its way to the server.
@@ -164,10 +169,10 @@ export function TimelinePage() {
 
   const warnings = useMemo(() => {
     const byItem = new Map<string, DayWarning[]>();
-    const all = rows.flatMap((r) => [r, ...(r.side ? [r.side] : [])]);
+    const all = rows.flatMap((r) => [r, ...(r.sides ?? [])]);
     const list = dayWarnings(
       day,
-      all.map((r) => ({ ...r.item, transitMin: r.item.transitFromPrev?.minutes, ...(r.prayer ? { kind: 'prayer' as const } : r.item.track.endsWith(':B') ? { kind: 'side' as const } : {}) })),
+      all.map((r) => ({ ...r.item, transitMin: r.item.transitFromPrev?.minutes, ...(r.prayer ? { kind: 'prayer' as const } : isSide(r.item.track) ? { kind: 'side' as const } : {}) })),
       (id) => all.find((r) => r.item.id === id)?.idea?.place.openingHours,
     );
     for (const w of list) byItem.set(w.itemId, [...(byItem.get(w.itemId) ?? []), w]);
@@ -197,6 +202,13 @@ export function TimelinePage() {
 
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<Row | null>(null);
+  // Tapping a stop focuses it on the map (on phones the map view opens).
+  const [selected, setSelected] = useState<string | null>(null);
+  useEffect(() => setSelected(null), [day]);
+  const select = (id: string) => {
+    setSelected(id);
+    if (window.matchMedia('(max-width: 767px)').matches) setShowMap(true);
+  };
   const [adding, setAdding] = useState<Idea | null>(null);
   const [dragging, setDragging] = useState<{ title: string } | null>(null);
   const [showMap, setShowMap] = useState(false);
@@ -248,12 +260,22 @@ export function TimelinePage() {
   };
 
   const mapStops: MapStop[] = [];
+  const mapLinks: MapLink[] = [];
+  let stopNo = 0;
   rows.forEach((r) => {
     const at = r.in ?? r.out;
-    if (!at || r.prayer) return;
-    const n = mapStops.filter((s) => !s.booking && !s.label.endsWith('b')).length + 1;
-    mapStops.push({ id: r.item.id, label: r.item.locked ? '•' : String(n), title: r.title, location: at, booking: r.item.locked });
-    if (r.side?.in) mapStops.push({ id: r.side.item.id, label: `${n}b`, title: r.side.title, location: r.side.in });
+    if (!at) return;
+    if (r.prayer) return void mapStops.push({ id: r.item.id, kind: 'prayer', label: '🕌', title: r.item.prayer?.facility?.name ?? r.title, location: at, color: '#0F766E' });
+    if (r.item.locked) return void mapStops.push({ id: r.item.id, kind: 'booking', label: '•', title: r.title, location: at, color: '#6D7A77' });
+    stopNo++;
+    const split = !!r.sides?.length;
+    mapStops.push({ id: r.item.id, kind: 'stop', label: String(stopNo), title: r.title, location: at, color: TRACK_COLOR.A.main, ...(split ? { meet: `Meet ${fmtClock(toMin(r.item.end))}` } : {}) });
+    for (const s of r.sides ?? []) {
+      const k = trackKeyOf(s.item.track);
+      if (!k || k === 'F' || !s.in) continue;
+      mapStops.push({ id: s.item.id, kind: 'side', label: `${stopNo}${k.toLowerCase()}`, title: s.title, location: s.in, color: TRACK_COLOR[k].main });
+      mapLinks.push({ from: at, to: s.in, color: TRACK_COLOR[k].main });
+    }
   });
   const loading = schedule.loading || ideas.loading || bookings.loading;
 
@@ -322,16 +344,18 @@ export function TimelinePage() {
                     return (
                       <div key={r.item.id}>
                         {r.prayer ? (
-                          <PrayerRow row={r} people={people} me={me.uid} />
+                          <PrayerRow row={r} people={people} me={me.uid} selected={selected === r.item.id} onSelect={() => select(r.item.id)} />
                         ) : (
                           <>
                             {prev && <TravelRow leg={r.item.transitFromPrev} a={prev.out} b={r.in} />}
                             <StopRow
                               row={r}
-                              warnings={[...(warnings.get(r.item.id) ?? []), ...(r.side ? (warnings.get(r.side.item.id) ?? []) : [])]}
+                              warnings={[...(warnings.get(r.item.id) ?? []), ...(r.sides ?? []).flatMap((s) => warnings.get(s.item.id) ?? [])]}
                               people={people}
                               me={me.uid}
-                              onOpen={() => !r.item.locked && setEditing(r)}
+                              selected={selected === r.item.id || !!r.sides?.some((s) => s.item.id === selected)}
+                              onSelect={() => select(r.item.id)}
+                              onEdit={() => setEditing(r)}
                             />
                           </>
                         )}
@@ -345,7 +369,7 @@ export function TimelinePage() {
 
           <div className="space-y-4 md:sticky md:top-4">
             <Card className={cx('overflow-hidden h-72 md:h-80', !showMap && 'hidden md:block')}>
-              <DayMap stops={mapStops} onSelect={(id) => setEditing(rows.find((r) => (r.item.id === id || r.side?.item.id === id) && !r.item.locked) ?? null)} />
+              <DayMap stops={mapStops} links={mapLinks} selectedId={selected} onSelect={setSelected} />
             </Card>
             <Backlog ideas={backlog} pairName={pairName} onAdd={setAdding} />
           </div>
@@ -359,8 +383,8 @@ export function TimelinePage() {
       <EditStopSheet
         item={editing?.item ?? null}
         idea={editing?.idea}
-        title={editing?.side ? `Split: ${editing.title} / ${editing.side.title}` : (editing?.title ?? '')}
-        fixedLength={!!editing?.side}
+        title={editing?.sides?.length ? `Split: ${[editing.title, ...editing.sides.map((s) => s.title)].join(' / ')}` : (editing?.title ?? '')}
+        fixedLength={!!editing?.sides?.length}
         days={days}
         onClose={() => setEditing(null)}
         onSave={async (patch) => {
@@ -433,30 +457,51 @@ function DayList({ empty, children }: { empty: boolean; children: ReactNode }) {
   );
 }
 
-function StopRow({ row, warnings, people, me, onOpen }: { row: Row; warnings: DayWarning[]; people: Map<string, Member>; me: string; onOpen: () => void }) {
+function StopRow({
+  row,
+  warnings,
+  people,
+  me,
+  selected,
+  onSelect,
+  onEdit,
+}: {
+  row: Row;
+  warnings: DayWarning[];
+  people: Map<string, Member>;
+  me: string;
+  selected: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+}) {
   const { item } = row;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: item.locked, data: { title: row.title } });
   const moment = item.start === item.end;
   return (
     <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={cx(isDragging && 'opacity-40')}>
-      <Card className={cx('flex items-stretch', item.locked && 'bg-[#F3EFE9]')}>
+      <Card className={cx('flex items-stretch', item.locked && 'bg-[#F3EFE9]', selected && 'ring-2 ring-[#00685F]/50')}>
         <div className="w-[4.75rem] shrink-0 py-3 pl-3 text-xs font-bold text-[#161C23] tabular-nums">
           <p>{fmtClock(toMin(item.start))}</p>
           {!moment && <p className="text-[#6D7A77] font-semibold">{fmtClock(toMin(item.end))}</p>}
         </div>
-        <button type="button" onClick={onOpen} disabled={item.locked} className="flex-1 min-w-0 py-3 pr-2 text-left disabled:cursor-default">
+        <button type="button" onClick={onSelect} aria-pressed={selected} className="flex-1 min-w-0 py-3 pr-2 text-left">
           <p className="flex items-center gap-1.5 font-semibold text-[#161C23]">
             <span className="text-[#00685F] shrink-0">{row.icon}</span>
             <span className="truncate">{row.title}</span>
           </p>
-          {row.subtitle && !row.side && <p className="text-xs text-[#6D7A77] truncate">{row.subtitle}</p>}
-          {row.side && <SplitHalves a={row} b={row.side} people={people} me={me} />}
+          {row.subtitle && !row.sides?.length && <p className="text-xs text-[#6D7A77] truncate">{row.subtitle}</p>}
+          {!!row.sides?.length && <SplitGroups a={row} sides={row.sides} people={people} me={me} />}
           {warnings.map((w) => (
             <p key={`${w.itemId}-${w.kind}`} className="mt-1 flex items-start gap-1 text-xs text-[#8A5A00]">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" /> {w.text}
             </p>
           ))}
         </button>
+        {!item.locked && (
+          <button type="button" onClick={onEdit} aria-label={`Change ${row.title}`} className="w-9 shrink-0 flex items-center justify-center text-[#6D7A77] hover:text-[#00685F]">
+            <Pencil className="w-4 h-4" />
+          </button>
+        )}
         {item.locked ? (
           <span className="w-11 shrink-0 flex items-center justify-center text-[#9AA5A3]" title="Booking — fixed time">
             <Lock className="w-4 h-4" />
@@ -560,40 +605,42 @@ function BacklogItem({ idea, pair, onAdd }: { idea: Idea; pair?: string; onAdd: 
   );
 }
 
-function SplitHalves({ a, b, people, me }: { a: Row; b: Row; people: Map<string, Member>; me: string }) {
-  const half = (r: Row, label: string) => {
+function SplitGroups({ a, sides, people, me }: { a: Row; sides: Row[]; people: Map<string, Member>; me: string }) {
+  const group = (r: Row) => {
+    const k = trackKeyOf(r.item.track) ?? 'A';
+    const c = TRACK_COLOR[k];
     const mine = r.item.memberUids.includes(me);
     return (
-      <div className={cx('rounded-lg px-2 py-1.5 min-w-0', mine ? 'bg-[#E8F1FB] ring-1 ring-[#1D4E89]/30' : 'bg-[#F6F4F0]')}>
-        <p className="text-[11px] font-bold text-[#1D4E89]">
-          {label} · {fmtClock(toMin(r.item.start))}–{fmtClock(toMin(r.item.end))}
+      <div key={r.item.id} className={cx('rounded-lg px-2 py-1.5 min-w-0 border-l-4', mine && 'ring-1 ring-black/10')} style={{ background: c.soft, borderColor: c.main }}>
+        <p className="text-[11px] font-bold" style={{ color: c.main }}>
+          {k === 'A' ? 'Main group' : k === 'F' ? 'Free time' : c.label} · {fmtClock(toMin(r.item.start))}–{fmtClock(toMin(r.item.end))}
           {mine && ' · you'}
         </p>
-        <p className="text-xs font-semibold text-[#161C23] truncate">{r.title}</p>
+        <p className="text-xs font-semibold text-[#161C23] truncate">{k === 'F' ? 'Explore nearby' : r.title}</p>
         <p className="text-[11px] text-[#6D7A77] truncate">{r.item.memberUids.map((u) => people.get(u)?.displayName ?? '?').join(', ')}</p>
       </div>
     );
   };
   return (
     <div className="mt-1.5 space-y-1">
-      <p className="text-[11px] text-[#1D4E89] flex items-center gap-1">
-        <GitFork className="w-3 h-3" /> Split — everyone meets back here at {fmtClock(toMin(a.item.end))}
+      <p className="text-[11px] font-semibold text-[#161C23] flex items-center gap-1">
+        <GitFork className="w-3 h-3" /> Split into {sides.length + 1} groups — 🚩 everyone meets back here at {fmtClock(toMin(a.item.end))}
       </p>
       <div className="grid grid-cols-2 gap-1.5">
-        {half(a, 'Group A')}
-        {half(b, 'Group B')}
+        {group(a)}
+        {sides.map(group)}
       </div>
     </div>
   );
 }
 
-function PrayerRow({ row, people, me }: { row: Row; people: Map<string, Member>; me: string }) {
+function PrayerRow({ row, people, me, selected, onSelect }: { row: Row; people: Map<string, Member>; me: string; selected: boolean; onSelect: () => void }) {
   const p = row.item.prayer!;
   const f = p.facility;
   const mine = row.item.memberUids.includes(me);
   const who = row.item.memberUids.map((u) => people.get(u)?.displayName ?? '?').join(', ');
   return (
-    <div className="flex items-stretch rounded-2xl border border-[#CFE7E2] bg-[#EEF7F5] my-1">
+    <button type="button" onClick={onSelect} aria-pressed={selected} className={cx('w-full text-left flex items-stretch rounded-2xl border border-[#CFE7E2] bg-[#EEF7F5] my-1', selected && 'ring-2 ring-[#0F766E]/50')}>
       <div className="w-[4.75rem] shrink-0 py-2.5 pl-3 text-xs font-bold text-[#00685F] tabular-nums">
         <p>{fmtClock(toMin(row.item.start))}</p>
         <p className="font-semibold opacity-70">{fmtClock(toMin(row.item.end))}</p>
@@ -605,6 +652,6 @@ function PrayerRow({ row, people, me }: { row: Row; people: Map<string, Member>;
           {!mine && ` · ${who}`}
         </p>
       </div>
-    </div>
+    </button>
   );
 }

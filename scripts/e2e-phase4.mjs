@@ -123,7 +123,7 @@ try {
   ok('3/3 👍 → backlog');
 
   await alice.call('ideas/vote', { ideaId: idea2, value: 1 }, q);
-  await bob.call('ideas/vote', { ideaId: idea2, value: -1, reason: 'too expensive' }, q);
+  await bob.call('ideas/vote', { ideaId: idea2, value: -1, tag: 'too_expensive', reason: 'too expensive' }, q);
   assert.equal((await cara.call('ideas/vote', { ideaId: idea2, value: 1 }, q)).body.status, 'mixed');
   assert.equal((await idea(tripId, idea2)).votes[bob.uid].reason, 'too expensive');
   ok('2 👍 + 1 👎 → mixed (Split Track candidate), reason stored');
@@ -135,7 +135,7 @@ try {
   assert.equal((await bob.call('ideas/decide', { ideaId: idea2, action: 'backlog' }, q)).status, 403);
   const dec = await alice.call('ideas/decide', { ideaId: idea2, action: 'close' }, q);
   assert.equal(dec.body.status, 'backlog');
-  assert.equal((await bob.call('ideas/vote', { ideaId: idea2, value: -1 }, q)).status, 409);
+  assert.equal((await bob.call('ideas/vote', { ideaId: idea2, value: -1, tag: 'too_expensive' }, q)).status, 409);
   ok('admin closed voting early (non-voters abstain) → backlog; members can no longer vote; non-admin decide → 403');
 
   // Member leaves → pending vote no longer blocks

@@ -10,6 +10,8 @@ export const DAILY_LIMITS = {
   bookingParse: { limit: 20, label: 'ticket readings' },
   addIdea: { limit: 150, label: 'ideas added' },
   arrange: { limit: 400, label: 'timeline changes' },
+  options: { limit: 60, label: 'middle-ground searches' },
+  comment: { limit: 200, label: 'comments' },
 } as const;
 export type QuotaKind = keyof typeof DAILY_LIMITS;
 

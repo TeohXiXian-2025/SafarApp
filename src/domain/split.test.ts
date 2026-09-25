@@ -1,34 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { reunionMinutes, splitExplanation, splitGroups } from './split';
+import { aloneIn, reunionAfter, splitExplanation } from './split';
 
-const members = [{ uid: 'ali', displayName: 'Ali' }, { uid: 'bob', displayName: 'Bob' }, { uid: 'cara', displayName: 'Cara' }];
-const up = { value: 1 as const, at: 1 };
-const down = { value: -1 as const, at: 1 };
+const members = [{ uid: 'ali', displayName: 'Ali' }, { uid: 'bob', displayName: 'Bob' }, { uid: 'cara', displayName: 'Cara' }, { uid: 'dan', displayName: 'Dan' }];
 
-describe('splitGroups', () => {
-  it('sends 👎 voters to the alternative', () => {
-    expect(splitGroups({ votes: { ali: up, bob: down, cara: up } }, members, [])).toEqual({ a: ['ali', 'cara'], b: ['bob'], reason: 'mixed_votes' });
+describe('reunionAfter', () => {
+  it('waits for the slowest group, walking there and back included', () => {
+    expect(reunionAfter([{ key: 'A', walkMin: 0, durationMin: 90 }, { key: 'B', walkMin: 8, durationMin: 60 }])).toBe(90);
+    expect(reunionAfter([{ key: 'A', walkMin: 0, durationMin: 60 }, { key: 'B', walkMin: 8, durationMin: 60 }, { key: 'C', walkMin: 12, durationMin: 75 }])).toBe(100);
   });
 
-  it('sends members who cannot go (halal blocker) to the alternative even if they liked it', () => {
-    const r = splitGroups({ votes: { ali: up, bob: up, cara: up } }, members, [{ uid: 'ali', severity: 'blocker' }, { uid: 'cara', severity: 'warning' }]);
-    expect(r).toEqual({ a: ['bob', 'cara'], b: ['ali'], reason: 'halal_conflict' });
-  });
-
-  it('has nothing to split when everyone is on one side', () => {
-    expect(splitGroups({ votes: { ali: up, bob: up, cara: up } }, members, [])).toBeNull();
-    expect(splitGroups({ votes: { ali: down, bob: down, cara: down } }, members, [])).toBeNull();
+  it('free time lasts as long as the main visit', () => {
+    expect(reunionAfter([{ key: 'A', walkMin: 0, durationMin: 75 }, { key: 'F', walkMin: 0, durationMin: 75 }])).toBe(75);
   });
 });
 
-describe('reunion', () => {
-  it('waits for the slower group, walking included', () => {
-    expect(reunionMinutes(90, 60, 8)).toBe(90);
-    expect(reunionMinutes(60, 60, 8)).toBe(80);
+describe('splitExplanation', () => {
+  it('describes every group and the meeting point', () => {
+    const text = splitExplanation(
+      [
+        { key: 'A', label: 'Ramen Ya', memberUids: ['bob', 'cara'], walkMin: 0 },
+        { key: 'B', label: 'Halal Ramen', memberUids: ['ali'], walkMin: 6 },
+        { key: 'F', label: 'Free time', memberUids: ['dan'], walkMin: 0 },
+      ],
+      members,
+      90,
+    );
+    expect(text).toBe('Bob and Cara go to Ramen Ya. Ali goes to Halal Ramen, 6 min walk away. Dan has free time nearby. Everyone meets back at Ramen Ya after 1 h 30 min.');
   });
 
-  it('explains who goes where', () => {
-    const text = splitExplanation({ groups: { a: ['bob', 'cara'], b: ['ali'], reason: 'halal_conflict' }, members, original: 'Ramen Ya', alternative: 'Halal Ramen', walkMin: 6, afterMinutes: 90, why: ['Ali needs certified halal food'] });
-    expect(text).toBe('Bob and Cara go to Ramen Ya. Ali goes to Halal Ramen, 6 min walk away. Ali needs certified halal food. Everyone meets back at Ramen Ya after 1 h 30 min.');
+  it('flags people who would be on their own', () => {
+    expect(aloneIn([{ key: 'A', memberUids: ['bob'] }, { key: 'B', memberUids: ['ali'] }, { key: 'C', memberUids: ['cara', 'dan'] }]).map((t) => t.key)).toEqual(['B']);
   });
 });

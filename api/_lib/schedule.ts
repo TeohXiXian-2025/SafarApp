@@ -42,7 +42,8 @@ export const ideaDocRef = (tripId: string, id: string) => adminDb().doc(paths.id
 export const splitRef = (tripId: string, id: string) => adminDb().doc(`${paths.splits(tripId)}/${id}`);
 
 export const isPrayerItem = (it: Pick<ScheduleItem, 'prayer'>) => !!it.prayer;
-export const isTrackB = (it: Pick<ScheduleItem, 'track'>) => it.track.endsWith(':B');
+/** A split group other than the main one (B, C or free time) — runs alongside track A. */
+export const isTrackB = (it: Pick<ScheduleItem, 'track'>) => it.track !== 'all' && !it.track.endsWith(':A');
 export const prayerItemId = (day: string, key: PrayerKey) => `pr_${day}_${key}`;
 
 const parseAll = <T>(docs: FirebaseFirestore.QueryDocumentSnapshot[], schema: { safeParse: (v: unknown) => { success: boolean; data?: T } }) =>
@@ -93,6 +94,19 @@ export function approvedSplit(data: TripData, idea: Idea): Split | undefined {
   return s?.status === 'approved' ? s : undefined;
 }
 
+/** The main (track A) idea of an idea's split, or the idea itself. */
+export function leadIdea(data: TripData, idea: Idea): Idea {
+  const s = approvedSplit(data, idea);
+  const a = s?.tracks.find((t) => t.key === 'A')?.ideaId;
+  return (a && data.ideas.get(a)) || idea;
+}
+
+/** An alternative half of an approved split (planned together with its main idea). */
+export const isAltOfSplit = (data: TripData, idea: Idea) => {
+  const s = approvedSplit(data, idea);
+  return !!s && s.tracks.some((t) => t.key !== 'A' && t.ideaId === idea.id);
+};
+
 export function prayerWalk(idea: Idea): number | undefined {
   const p = idea.halal?.prayer;
   if (!p) return undefined;
@@ -106,6 +120,7 @@ export function unitFor(idea: Idea, split?: Split): Unit {
     loc: idea.place.location,
     duration: split ? split.reunion.afterMinutes : idea.estDurationMin,
     food: idea.place.category === 'food',
+    ...(idea.window ? { window: [toMin(idea.window.start), toMin(idea.window.end)] as [number, number] } : {}),
     ...(idea.place.openingHours ? { hours: idea.place.openingHours } : {}),
     ...(prayerWalk(idea) !== undefined ? { prayerWalkMin: prayerWalk(idea) } : {}),
   };
@@ -119,16 +134,18 @@ export async function dayItems(tripId: string, day: string): Promise<ScheduleIte
 // ─── Split pairs ────────────────────────────────────────────────────────────
 
 /**
- * Writes an idea's timeline stop — or, for a split pair, both stops: track A
- * at the original place until everyone meets again, track B from arriving at
- * the alternative until leaving it.
+ * Writes an idea's timeline stop — or, for a split, one stop per group, all
+ * starting together: the main group (A) stays until everyone meets again,
+ * alternative groups (B, C) from arriving until leaving, free time (F) for
+ * as long as the main visit.
  */
 export function writeStops(
   batch: WriteBatch,
   tripId: string,
   opts: { data: TripData; idea: Idea; day: string; start: number; durationMin?: number; orderIndex: number; actor: string },
 ): string[] {
-  const { data, idea, day, start } = opts;
+  const { data, day, start } = opts;
+  const idea = leadIdea(data, opts.idea);
   const split = approvedSplit(data, idea);
   const base = { day, locked: false, orderIndex: opts.orderIndex, updatedBy: opts.actor, updatedAt: Date.now() };
   if (!split) {
@@ -139,19 +156,24 @@ export function writeStops(
     );
     return [idea.id];
   }
-  const a = data.ideas.get(split.trackA.ideaId);
-  const b = data.ideas.get(split.trackB.ideaId);
-  if (!a || !b) return [];
-  const bStart = start + split.walkMin;
-  batch.set(
-    itemRef(tripId, ideaItemId(a.id)),
-    ScheduleItem.parse({ ...base, id: ideaItemId(a.id), start: toClock(start), end: toClock(start + split.reunion.afterMinutes), ref: { kind: 'idea', ideaId: a.id }, track: `${split.id}:A`, memberUids: split.trackA.memberUids }),
-  );
-  batch.set(
-    itemRef(tripId, ideaItemId(b.id)),
-    ScheduleItem.parse({ ...base, id: ideaItemId(b.id), start: toClock(bStart), end: toClock(bStart + b.estDurationMin), ref: { kind: 'idea', ideaId: b.id }, track: `${split.id}:B`, memberUids: split.trackB.memberUids }),
-  );
-  return [a.id, b.id];
+  const placed: string[] = [];
+  for (const t of split.tracks) {
+    const track = `${split.id}:${t.key}`;
+    if (t.key === 'F') {
+      batch.set(
+        itemRef(tripId, `free_${split.id}`),
+        ScheduleItem.parse({ ...base, id: `free_${split.id}`, start: toClock(start), end: toClock(start + split.reunion.afterMinutes), ref: { kind: 'custom', title: 'Free time nearby' }, track, memberUids: t.memberUids }),
+      );
+      continue;
+    }
+    const tIdea = t.ideaId ? data.ideas.get(t.ideaId) : undefined;
+    if (!tIdea) continue;
+    const s = t.key === 'A' ? start : start + t.walkMin;
+    const e = t.key === 'A' ? start + split.reunion.afterMinutes : s + tIdea.estDurationMin;
+    batch.set(itemRef(tripId, ideaItemId(tIdea.id)), ScheduleItem.parse({ ...base, id: ideaItemId(tIdea.id), start: toClock(s), end: toClock(e), ref: { kind: 'idea', ideaId: tIdea.id }, track, memberUids: t.memberUids }));
+    placed.push(tIdea.id);
+  }
+  return placed;
 }
 
 /** The stop ids an edit touches: both halves of a split pair. */

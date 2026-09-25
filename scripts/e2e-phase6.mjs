@@ -100,33 +100,35 @@ try {
   assert.ok(an.body.halal.flags.servesPork || an.body.halal.tier === 'not_halal', `radar: ${JSON.stringify(an.body.halal.flags)} ${an.body.halal.tier}`);
   ok(`Halal Radar: Din Tai Fung → ${an.body.halal.tier ?? 'no tier'}${an.body.halal.flags.servesPork ? ', serves pork' : ''}`);
 
-  await alice.call('ideas/vote', { ideaId: dtfId, value: 1 }, q);
+  // Bob likes it; Alice can't eat there → 👎 (halal) → split votes → middle grounds.
   await bob.call('ideas/vote', { ideaId: dtfId, value: 1 }, q);
-  const p1 = await bob.call('splits/propose', { ideaId: dtfId }, q);
-  assert.equal(p1.status, 201, JSON.stringify(p1.body));
-  const split = p1.body.split;
-  assert.equal(split.reason, 'halal_conflict');
-  assert.deepEqual(split.trackB.memberUids, [alice.uid]);
-  assert.deepEqual(split.trackA.memberUids, [bob.uid]);
-  assert.ok(split.walkMin <= 25);
-  const alt = await ideaDoc(tripId, p1.body.altIdeaId);
-  ok(`split proposed: Bob → Din Tai Fung, Alice → ${alt.place.name} (${split.walkMin} min walk), meet after ${split.reunion.afterMinutes} min`);
+  assert.equal((await alice.call('ideas/vote', { ideaId: dtfId, value: -1, tag: 'halal' }, q)).body.status, 'mixed');
+  let dIdea = await ideaDoc(tripId, dtfId);
+  const halalAlts = dIdea.options.filter((o) => o.type === 'alternative');
+  assert.ok(halalAlts.length >= 1 && halalAlts.every((o) => o.place.halalListed), JSON.stringify(dIdea.options.map((o) => o.title)));
+  ok(`split votes → halal middle grounds for Alice: ${halalAlts.map((o) => `${o.place.name} (${o.place.walkMin} min)`).join(', ')}`);
+
+  // "More options" swaps alternatives nobody picked.
+  const more = await alice.call('ideas/options', { ideaId: dtfId, more: true }, q);
+  assert.equal(more.status, 200);
+  const moreAlts = more.body.options.filter((o) => o.type === 'alternative');
+  assert.ok(moreAlts.every((o) => !halalAlts.some((h) => h.place.placeId === o.place.placeId)) || !moreAlts.length);
+  const pick = moreAlts[0] ?? halalAlts[0];
+  ok(`“more options” shows different places → ${moreAlts.map((o) => o.place.name).join(', ') || '(none left nearby)'}`);
+  assert.equal((await alice.call('ideas/choose', { ideaId: dtfId, optionId: pick.id }, q)).status, 200);
+
+  assert.equal((await bob.call('ideas/decide', { ideaId: dtfId, action: 'accept' }, q)).status, 403);
+  assert.equal((await alice.call('ideas/decide', { ideaId: dtfId, action: 'accept' }, q)).status, 200);
+  dIdea = await ideaDoc(tripId, dtfId);
+  const split = (await db.doc(`trips/${tripId}/splits/${dIdea.splitId}`).get()).data();
+  const trackB = split.tracks.find((t) => t.key === 'B');
+  assert.deepEqual(split.tracks.find((t) => t.key === 'A').memberUids, [bob.uid]);
+  assert.deepEqual(trackB.memberUids, [alice.uid]);
+  const altId = trackB.ideaId;
+  assert.equal((await ideaDoc(tripId, altId)).status, 'backlog');
+  assert.equal(dIdea.status, 'backlog');
+  ok(`admin accepted: Bob → Din Tai Fung, Alice → ${trackB.label} (${trackB.walkMin} min walk), meet after ${split.reunion.afterMinutes} min`);
   console.log(`     “${split.explanation}”`);
-
-  // Another option: the first alternative is replaced.
-  const p2 = await bob.call('splits/propose', { ideaId: dtfId, exclude: [alt.place.placeId] }, q);
-  assert.equal(p2.status, 201, JSON.stringify(p2.body));
-  assert.equal(await ideaDoc(tripId, p1.body.altIdeaId), undefined);
-  const alt2 = await ideaDoc(tripId, p2.body.altIdeaId);
-  assert.notEqual(alt2.place.placeId, alt.place.placeId);
-  ok(`“another option” replaces the alternative → ${alt2.place.name}`);
-
-  assert.equal((await bob.call('splits/decide', { splitId: p2.body.splitId, action: 'approve' }, q)).status, 403);
-  assert.equal((await alice.call('ideas/vote', { ideaId: dtfId, value: -1 }, q)).status, 409);
-  assert.equal((await alice.call('splits/decide', { splitId: p2.body.splitId, action: 'approve' }, q)).status, 200);
-  assert.equal((await ideaDoc(tripId, dtfId)).status, 'backlog');
-  assert.equal((await ideaDoc(tripId, p2.body.altIdeaId)).status, 'backlog');
-  ok('only the admin approves; votes are closed on split ideas; approved pair → backlog');
 
   // ── AI Arrange ────────────────────────────────────────────────────────────
   assert.equal((await bob.call('schedule/arrange', {}, q)).status, 403);
@@ -136,7 +138,7 @@ try {
   const plan = ar.body.plan;
   const planned = plan.days.flatMap((d) => d.stops.map((s) => s.ideaId));
   assert.equal(planned.length + plan.unplaced.length, queries.length + 1, 'every stop placed or explained (pair counts once)');
-  assert.ok(!planned.includes(p2.body.altIdeaId), 'the alternative is planned with its original');
+  assert.ok(!planned.includes(altId), 'the alternative is planned with its original');
   assert.ok(plan.days.some((d) => d.prayers.length), 'prayer breaks for Alice');
   for (const d of plan.days) {
     const all = [...d.stops.map((s) => [s.start, s.end, s.ideaId]), ...d.prayers.map((p) => [p.start, p.end, p.key])].sort();
@@ -151,18 +153,18 @@ try {
   assert.equal(ap.status, 200, JSON.stringify(ap.body));
   let items = await schedule(tripId);
   const pair = items.filter((i) => i.track !== 'all');
-  assert.equal(pair.length, 2, 'split pair on the timeline');
+  assert.equal(pair.length, split.tracks.length, 'split groups on the timeline');
   const a = pair.find((i) => i.track.endsWith(':A'));
   const b = pair.find((i) => i.track.endsWith(':B'));
   assert.deepEqual(b.memberUids, [alice.uid]);
-  assert.equal(toMin(b.start) - toMin(a.start), p2.body.split.walkMin);
+  assert.equal(toMin(b.start) - toMin(a.start), trackB.walkMin);
   const prayers = items.filter((i) => i.prayer);
   assert.ok(prayers.length >= 1);
   assert.ok(prayers.every((p) => p.memberUids.length === 1 && p.memberUids[0] === alice.uid));
   assert.ok(prayers.some((p) => p.prayer.facility), 'a mosque / prayer room found');
   for (const day of DAYS) noOverlap(items.filter((i) => i.day === day && !i.locked));
   assert.equal((await ideaDoc(tripId, dtfId)).status, 'scheduled');
-  assert.equal((await ideaDoc(tripId, p2.body.altIdeaId)).status, 'scheduled');
+  assert.equal((await ideaDoc(tripId, altId)).status, 'scheduled');
   ok(`applied: pair A ${a.start}–${a.end} / B ${b.start}–${b.end}; prayers ${prayers.map((p) => `${p.prayer.prayer} ${p.start} @ ${p.prayer.facility?.name ?? '?'} (${p.prayer.facility?.walkMin ?? '?'} min)`).join(', ')}`);
   const legs = items.filter((i) => i.transitFromPrev);
   assert.ok(legs.length >= 2);
@@ -190,7 +192,7 @@ try {
   assert.equal(mv.status, 200, JSON.stringify(mv.body));
   items = await schedule(tripId);
   assert.equal(items.find((i) => i.id === a.id).day, items.find((i) => i.id === b.id).day);
-  assert.equal(toMin(items.find((i) => i.id === a.id).start), 10 * 60 - p2.body.split.walkMin); // B arrives at 10:00
+  assert.equal(toMin(items.find((i) => i.id === a.id).start), 10 * 60 - trackB.walkMin); // B arrives at 10:00
   ok(`moving track B moves the pair (A now ${items.find((i) => i.id === a.id).day} ${items.find((i) => i.id === a.id).start})`);
 
   // ── Undo ──────────────────────────────────────────────────────────────────
@@ -201,17 +203,13 @@ try {
   assert.equal((await ideaDoc(tripId, dtfId)).status, 'backlog');
   ok('undo restores the timeline as it was (empty) and the ideas to the backlog');
 
-  // ── Cancelling a split ────────────────────────────────────────────────────
-  assert.equal((await alice.call('splits/decide', { splitId: p2.body.splitId, action: 'reject' }, q)).status, 200);
-  assert.equal(await ideaDoc(tripId, p2.body.altIdeaId), undefined);
+  // ── Alice rejoins the main group → the split ends ──────────────────────────
+  assert.equal((await alice.call('ideas/optin', { ideaId: dtfId }, q)).status, 200);
+  assert.equal(await ideaDoc(tripId, altId), undefined);
   const orig = await ideaDoc(tripId, dtfId);
   assert.equal(orig.status, 'backlog');
   assert.equal(orig.splitId, undefined);
-  ok('cancelling the split removes the alternative and restores the original');
-
-  const bad = await alice.call('splits/propose', { ideaId: ids['Petronas Twin Towers'] }, q);
-  assert.equal(bad.status, 409);
-  ok('nothing to split when everyone agrees and nobody is blocked');
+  ok('when Alice rejoins the group the alternative goes and the split ends');
 
   console.log(`\n${passed} checks passed.\n`);
 } catch (err) {
