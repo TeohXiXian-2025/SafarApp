@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Conflict } from './conflicts';
 import type { Idea, MiddleOption } from './idea';
-import { ackKey, groupChoices, needsReconfirm, needsYou, nonGoers, readyForAdmin, statusFromTally, tallyIdea, waitingToChoose } from './voting';
+import { ackKey, goodForWhilePraying, groupChoices, needsReconfirm, needsYou, nonGoers, readyForAdmin, statusFromTally, tallyIdea, waitingToChoose } from './voting';
 
 const up = { value: 1 as const, at: 1 };
 const down = { value: -1 as const, tag: 'too_expensive' as const, at: 1 };
@@ -114,5 +114,17 @@ describe('needsYou', () => {
     const conflicts = (i: { id: string }) => (i.id === 'r' ? [halalBlock] : []);
     expect(needsYou(ideas, 'ali', ALL, false, conflicts, 0).map((n) => `${n.kind}:${n.ideaId}`)).toEqual(['vote:v', 'choose:m', 'reconfirm:r']);
     expect(needsYou(ideas, 'bob', ALL, true, () => [], 20).map((n) => `${n.kind}:${n.ideaId}`)).toEqual(['vote:v', 'decide:m']);
+  });
+});
+
+describe('goodForWhilePraying', () => {
+  it('backlog unless they said no; backup only if they all said yes', () => {
+    const v = { ali: up, bob: down };
+    expect(goodForWhilePraying({ status: 'backlog', votes: v }, ['ali'])).toBe(true);
+    expect(goodForWhilePraying({ status: 'backlog', votes: v }, ['bob'])).toBe(false);
+    expect(goodForWhilePraying({ status: 'backup', votes: v }, ['ali'])).toBe(true);
+    expect(goodForWhilePraying({ status: 'backup', votes: v }, ['ali', 'bob'])).toBe(false);
+    expect(goodForWhilePraying({ status: 'backup', votes: {} }, ['cara'])).toBe(false);
+    expect(goodForWhilePraying({ status: 'voting', votes: v }, ['ali'])).toBe(false);
   });
 });

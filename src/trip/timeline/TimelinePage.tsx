@@ -77,6 +77,7 @@ import { ArrangeSheet } from './ArrangeSheet';
 import { AddStopSheet, CANDIDATE, EditStopSheet, type Checker } from './StopSheets';
 import { FixDaySheet } from './FixDaySheet';
 import { useForecast } from './useForecast';
+import { PrayerPickSheet } from './PrayerPickSheet';
 import { JourneyPrayerList } from '../JourneyPrayerList';
 
 interface Row {
@@ -401,6 +402,7 @@ export function TimelinePage() {
     if (window.matchMedia('(max-width: 767px)').matches) setShowMap(true);
   };
   const [adding, setAdding] = useState<Idea | null>(null);
+  const [picking, setPicking] = useState<ScheduleItem | null>(null);
   const [dragging, setDragging] = useState<{ title: string } | null>(null);
   const [showMap, setShowMap] = useState(false);
 
@@ -459,11 +461,15 @@ export function TimelinePage() {
     if (r.prayer) {
       mapStops.push({ id: r.item.id, kind: 'prayer', label: '🕌', title: r.item.prayer?.facility?.name ?? r.title, location: at, color: '#0F766E' });
       // What the people not praying do meanwhile: a dashed side trip.
-      const filler = r.item.prayer?.fillerPlace;
-      if (filler) {
-        mapStops.push({ id: `${r.item.id}:filler`, kind: 'side', label: '☕', title: `While others pray: ${filler.name}`, location: filler.location, color: TRACK_COLOR.F.main });
-        mapLinks.push({ from: at, to: filler.location, color: TRACK_COLOR.F.main });
-      }
+      // What the others do meanwhile: their picks (else the suggestion), as dashed side trips.
+      const picked = Object.values(r.item.prayer?.fillerPicks ?? {}).flatMap((pk: NonNullable<ScheduleItem['prayer']>['fillerPicks'][string]) => (pk.place ? [pk.place] : []));
+      const places = picked.length ? picked : r.item.prayer?.fillerPlace ? [r.item.prayer.fillerPlace] : [];
+      places
+        .filter((pl, k) => places.findIndex((x) => x.name === pl.name) === k)
+        .forEach((pl, k) => {
+          mapStops.push({ id: `${r.item.id}:filler${k}`, kind: 'side', label: '☕', title: `While others pray: ${pl.name}`, location: pl.location, color: TRACK_COLOR.F.main });
+          mapLinks.push({ from: at, to: pl.location, color: TRACK_COLOR.F.main });
+        });
       return;
     }
     if (r.item.locked) {
@@ -635,6 +641,8 @@ export function TimelinePage() {
                             row={r}
                             people={people}
                             me={me.uid}
+                            iPray={prays(me)}
+                            onPick={() => setPicking(r.item)}
                             selected={selected === r.item.id}
                             onSelect={() => select(r.item.id)}
                             before={rows.slice(0, i).reverse().find((x) => !x.prayer)?.title}
@@ -691,6 +699,14 @@ export function TimelinePage() {
         }}
         onRemove={() => api.post('schedule/remove', { id: editing!.item.id }, { tripId: trip.id })}
       />
+      {picking && (
+        <PrayerPickSheet
+          item={schedule.data.find((i) => i.id === picking.id) ?? picking}
+          tripId={trip.id}
+          myPick={(schedule.data.find((i) => i.id === picking.id) ?? picking).prayer?.fillerPicks?.[me.uid]?.title}
+          onClose={() => setPicking(null)}
+        />
+      )}
       {fixing && <FixDaySheet day={day} tripId={trip.id} rows={rows} onClose={() => setFixing(false)} />}
       {preview && (
         <ArrangeSheet
@@ -1051,12 +1067,36 @@ function SplitGroups({ a, sides, people, me }: { a: Row; sides: Row[]; people: M
  * where to pray follows the plan — the place on the way from the stop before
  * to the stop after.
  */
-function PrayerRow({ row, people, me, selected, onSelect, before, after }: { row: Row; people: Map<string, Member>; me: string; selected: boolean; onSelect: () => void; before?: string; after?: string }) {
+function PrayerRow({
+  row,
+  people,
+  me,
+  iPray,
+  selected,
+  onSelect,
+  onPick,
+  before,
+  after,
+}: {
+  row: Row;
+  people: Map<string, Member>;
+  me: string;
+  iPray: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  onPick: () => void;
+  before?: string;
+  after?: string;
+}) {
   const p = row.item.prayer!;
   const f = p.facility;
   const mine = row.item.memberUids.includes(me);
   const who = row.item.memberUids.map((u) => people.get(u)?.displayName ?? '?').join(', ');
   const route = before && after && before !== after ? `on the way from ${before} to ${after}` : before ? `near ${before}` : after ? `before ${after}` : '';
+  // What the others chose, grouped: "Café X — Chen, Bob · Rest — Dan".
+  const picks = new Map<string, string[]>();
+  for (const [uid, pk] of Object.entries(p.fillerPicks ?? {})) picks.set(pk.title, [...(picks.get(pk.title) ?? []), uid === me ? 'you' : (people.get(uid)?.displayName ?? '?')]);
+  const myPick = p.fillerPicks?.[me];
   return (
     <Card className={cx('flex items-stretch bg-[#EEF7F5] border-[#CFE7E2] my-1', selected && 'ring-2 ring-[#0F766E]/50')}>
       <div className="w-[4.75rem] shrink-0 py-3 pl-3 text-xs font-bold text-[#00685F] tabular-nums">
@@ -1064,20 +1104,28 @@ function PrayerRow({ row, people, me, selected, onSelect, before, after }: { row
         <p className="font-semibold opacity-70">{fmtClock(toMin(row.item.end))}</p>
         <p className="mt-0.5 text-[10px] leading-tight font-semibold opacity-70">Fixed time</p>
       </div>
-      <button type="button" onClick={onSelect} aria-pressed={selected} className="flex-1 min-w-0 py-3 pr-2 text-left">
-        <p className="font-semibold text-[#00685F] truncate">🕌 {mine ? `${p.prayer} prayer` : `Free time — ${p.prayer} prayer break`}</p>
-        <p className="text-xs text-[#3F6B64]">
-          {f ? `${f.name} · ${f.walkMin ? `${f.walkMin} min walk` : 'on site'}` : 'No mosque found nearby — any clean, quiet spot works'}
-          {f && route && <span className="text-[#6D7A77]"> · {route}</span>}
-          {!mine && ` · ${who}`}
-        </p>
-        {p.fillerPlace && (
-          <p className="text-xs text-[#1D4E89] truncate">
-            {mine ? `Meanwhile the others can visit ${p.fillerPlace.name}` : `While they pray: ${p.fillerPlace.name} nearby — from your backlog`}
+      <div className="flex-1 min-w-0 py-3 pr-2">
+        <button type="button" onClick={onSelect} aria-pressed={selected} className="block w-full text-left">
+          <p className="font-semibold text-[#00685F] truncate">🕌 {mine ? `${p.prayer} prayer` : `${p.prayer} prayer break — others pray`}</p>
+          <p className="text-xs text-[#3F6B64]">
+            {f ? `${f.name} · ${f.walkMin ? `${f.walkMin} min walk` : 'on site'}` : 'No mosque found nearby — any clean, quiet spot works'}
+            {f && route && <span className="text-[#6D7A77]"> · {route}</span>}
+            {!mine && ` · ${who}`}
           </p>
+        </button>
+        {picks.size > 0 ? (
+          <p className="mt-0.5 text-xs text-[#1D4E89]">
+            ☕ Meanwhile: {[...picks].map(([title, names]) => `${title} — ${names.join(', ')}`).join(' · ')}
+          </p>
+        ) : p.fillerPlace ? (
+          <p className="mt-0.5 text-xs text-[#1D4E89] truncate">☕ Suggested for the others: {p.fillerPlace.name} nearby</p>
+        ) : null}
+        {!iPray && (
+          <button type="button" onClick={onPick} className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#1D4E89] px-2.5 py-1 text-xs font-semibold text-white">
+            ☕ {myPick ? `You: ${myPick.title} — change` : 'Choose what to do meanwhile'}
+          </button>
         )}
-        {!p.fillerPlace && !mine && <p className="text-xs text-[#6D7A77] truncate">Free time nearby — or rest and meet back after.</p>}
-      </button>
+      </div>
       <span className="w-11 shrink-0 flex items-center justify-center text-[#0F766E]/70" title="Prayer time — fixed like a booking; the place follows your plan">
         <Lock className="w-4 h-4" />
       </span>

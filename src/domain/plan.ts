@@ -135,6 +135,22 @@ export const PrayerPairing = z.object({
   /** Suggested activity for non-praying members during the prayer break. */
   fillerIdeaId: Id.optional(),
   fillerPlace: PlaceRef.optional(),
+  /**
+   * What each member who isn't praying chose to do during the break (their
+   * own short side-track; everyone meets back at the prayer place after).
+   */
+  fillerPicks: z
+    .record(
+      z.string(),
+      z.object({
+        kind: z.enum(['idea', 'place', 'rest']),
+        title: z.string().max(200),
+        ideaId: Id.optional(),
+        place: PlaceRef.optional(),
+        at: Millis,
+      }),
+    )
+    .default({}),
 });
 export type PrayerPairing = z.infer<typeof PrayerPairing>;
 

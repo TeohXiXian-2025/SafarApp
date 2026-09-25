@@ -315,6 +315,8 @@ export const Idea = z.object({
   decidedBy: Id.optional(),
   /** Part of a split pair (the original or its alternative). */
   splitId: Id.optional(),
+  /** Members who pray marked this as good for the others to do while they pray. */
+  goodWhilePraying: z.array(Id).max(50).default([]),
   /** AI middle-ground suggestions for preference conflicts (keyed by the conflict set). */
   resolution: z
     .object({

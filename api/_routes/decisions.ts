@@ -206,6 +206,18 @@ export const decisionRoutes: RouteTable = {
     { perMinute: 20 },
   ),
 
+  /** A member who prays marks (or unmarks) an idea as good for the others to do while they pray. */
+  'POST ideas/while-praying': withTrip(
+    async (req, { tripId, member }) => {
+      const { ideaId, on } = await readJson(req, z.object({ ideaId: Id, on: z.boolean() }));
+      const idea = await loadFresh(tripId, ideaId);
+      if (!['backlog', 'backup', 'scheduled'].includes(idea.status)) throw new HttpError(409, 'Only accepted or backup ideas can be marked');
+      await ideaDocRef(tripId, ideaId).update({ goodWhilePraying: on ? FieldValue.arrayUnion(member.uid) : FieldValue.arrayRemove(member.uid), updatedAt: Date.now() });
+      return json({ ok: true });
+    },
+    { perMinute: 30 },
+  ),
+
   /** Admin: accept (with the groups people picked) · backup · reject · close voting now · reopen. */
   'POST ideas/decide': withTrip(
     async (req, { tripId, member }) => {

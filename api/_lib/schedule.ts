@@ -18,6 +18,8 @@ import {
   PRAYER_LABEL,
   planDay,
   journeySpans,
+  goodForWhilePraying,
+  openingRanges,
   prayerPlaceOnRoute,
   PRAYER_REACH_M,
   prays,
@@ -309,15 +311,20 @@ const FILLER_M = 700;
  * backlog or backup idea near where the others pray that none of them voted
  * against (liked ones first, then nearest). Not already on the timeline.
  */
-function fillerFor(data: TripData, near: GeoPoint, used: Set<string>, onDay: Set<string>): Idea | undefined {
+function fillerFor(data: TripData, near: GeoPoint, used: Set<string>, onDay: Set<string>, slot: PrayerSlot, day: string): Idea | undefined {
   const others = data.members.filter((m) => !prays(m)).map((m) => m.uid);
-  if (!others.length) return undefined;
+  // Subuh is before the day starts — nothing to suggest.
+  if (!others.length || slot.key === 'fajr') return undefined;
+  const openThen = (hours?: string[]) => {
+    const r = openingRanges(hours, day);
+    return r === null || r.some(([o, c]) => o <= slot.start && c >= slot.end);
+  };
   return [...data.ideas.values()]
-    .filter((i) => (i.status === 'backlog' || i.status === 'backup') && !used.has(i.id) && !onDay.has(i.id) && !isAltOfSplit(data, i))
+    .filter((i) => !used.has(i.id) && !onDay.has(i.id) && !isAltOfSplit(data, i) && goodForWhilePraying(i, others) && openThen(i.place.openingHours))
     .filter((i) => metersBetween(i.place.location, near) <= FILLER_M)
-    .filter((i) => !others.some((u) => i.votes[u]?.value === -1))
-    .map((i) => ({ i, likes: others.filter((u) => i.votes[u]?.value === 1).length, d: metersBetween(i.place.location, near) }))
-    .sort((a, b) => b.likes - a.likes || a.d - b.d)[0]?.i;
+    // Marked "good while we pray" first, then the most liked, then the nearest.
+    .map((i) => ({ i, marked: i.goodWhilePraying.length, likes: others.filter((u) => i.votes[u]?.value === 1).length, d: metersBetween(i.place.location, near) }))
+    .sort((a, b) => b.marked - a.marked || b.likes - a.likes || a.d - b.d)[0]?.i;
 }
 
 /**
@@ -355,7 +362,7 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
   for (const slot of prayers) {
     const facility = await facilityFor(data, slot, stops, ends, [...previous, ...found], lookups);
     if (facility) found.push({ prayer: { prayer: PRAYER_LABEL[slot.key], at: toClock(slot.start), facility } } as ScheduleItem);
-    const filler = fillerFor(data, facility?.location ?? slot.at, used, onDay);
+    const filler = fillerFor(data, facility?.location ?? slot.at, used, onDay, slot, day);
     if (filler) used.add(filler.id);
     const id = prayerItemId(day, slot.key);
     batch.set(
@@ -372,6 +379,8 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
           prayer: PRAYER_LABEL[slot.key],
           at: toClock(slot.start),
           ...(facility ? { facility } : {}),
+          // What the others chose for this break survives re-planning.
+          fillerPicks: previous.find((p) => p.id === id)?.prayer?.fillerPicks ?? {},
           ...(filler ? { fillerIdeaId: filler.id, fillerPlace: { name: filler.place.name, location: filler.place.location, ...(filler.place.placeId ? { placeId: filler.place.placeId } : {}) } } : {}),
         },
         locked: false,

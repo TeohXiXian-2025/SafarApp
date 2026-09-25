@@ -171,3 +171,17 @@ export const REASON_HINT: Partial<Record<VoteReasonTag, string>> = {
   too_far: 'free time or a closer option',
   timing: 'a better time, or a rest',
 };
+
+// ─── Something to do while the others pray ──────────────────────────────────
+
+/**
+ * Whether members who don't pray may do this idea during a prayer break
+ * without a new vote: a backlog idea (the group accepted it) that none of
+ * them voted 👎 on, or a backup idea every one of them voted 👍 on.
+ */
+export function goodForWhilePraying(idea: Pick<Idea, 'status' | 'votes'>, uids: string[]): boolean {
+  if (!uids.length) return false;
+  if (idea.status === 'backlog') return uids.every((u) => idea.votes[u]?.value !== -1);
+  if (idea.status === 'backup') return uids.every((u) => idea.votes[u]?.value === 1);
+  return false;
+}

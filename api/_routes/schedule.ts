@@ -20,18 +20,23 @@ import {
   paths,
   ScheduleItem,
   estimateTravelMin,
+  GeoPoint,
+  goodForWhilePraying,
+  openingRanges,
+  prays,
   isOutdoor,
   metersBetween,
   timeSequence,
   toClock,
   toMin,
   tripDays,
-  type GeoPoint,
   type Idea,
   type Trip,
   type Unit,
 } from '../../src/domain/index.js';
+import { FieldValue } from 'firebase-admin/firestore';
 import { withTrip } from '../_lib/auth.js';
+import { searchNearbyFood, type NearbyFood } from '../_lib/places.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { extractJson } from '../_lib/gemini.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
@@ -63,6 +68,11 @@ import { notify } from '../_lib/push.js';
 import { logActivity } from '../_lib/trip.js';
 
 const jobRef = (tripId: string, id: string) => adminDb().doc(paths.job(tripId, id));
+
+/** "Right by the prayer place": ~5–7 min on foot. */
+const QUICK_M = 600;
+/** Short things to do while the others pray. */
+const QUICK_TYPES = ['cafe', 'coffee_shop', 'bakery', 'dessert_shop', 'ice_cream_shop', 'tea_house', 'juice_shop', 'book_store', 'gift_shop'];
 
 function assertTripDay(trip: Trip, day: string) {
   if (day < trip.startDate || day > trip.endDate) throw new HttpError(400, 'That day is outside the trip dates');
@@ -357,6 +367,106 @@ export const scheduleRoutes: RouteTable = {
       return json({ stops, removed });
     },
     { perMinute: 20 },
+  ),
+
+  /**
+   * What the members who don't pray can do during one prayer break: ideas the
+   * group already has (backlog — unless you said no; backup — if you said
+   * yes), ones praying members marked "good while we pray" first, all within
+   * a few minutes' walk of the prayer place and open then; plus quick places
+   * right there (cafés, desserts, shops) so there's always something.
+   */
+  'POST prayer/options': withTrip(
+    async (req, { tripId, member }) => {
+      const { itemId } = await readJson(req, z.object({ itemId: Id }));
+      const snap = await itemRef(tripId, itemId).get();
+      const item = snap.exists ? ScheduleItem.parse(snap.data()) : null;
+      if (!item?.prayer) throw new HttpError(404, 'That prayer break is no longer on the timeline');
+      const data = await loadTripData(tripId);
+      const at = item.prayer.facility?.location ?? (item.ref.kind === 'custom' ? item.ref.place?.location : undefined);
+      if (!at) return json({ ideas: [], nearby: [] });
+      const start = toMin(item.start);
+      const end = toMin(item.end);
+      const openThen = (hours?: string[]) => {
+        const r = openingRanges(hours, item.day);
+        return r === null || r.some(([o, c]) => o <= start && c >= end);
+      };
+      const ideas = [...data.ideas.values()]
+        .filter((i) => goodForWhilePraying(i, [member.uid]) && !isAltOfSplit(data, i) && metersBetween(i.place.location, at) <= QUICK_M && openThen(i.place.openingHours))
+        .map((i) => ({
+          ideaId: i.id,
+          name: i.place.name,
+          typeLabel: i.place.typeLabel ?? i.place.category,
+          walkMin: estimateTravelMin(at, i.place.location),
+          status: i.status,
+          marked: i.goodWhilePraying.length,
+          liked: i.votes[member.uid]?.value === 1,
+          short: i.estDurationMin <= end - start + 10,
+          location: i.place.location,
+        }))
+        .sort((a, b) => b.marked - a.marked || Number(b.liked) - Number(a.liked) || a.walkMin - b.walkMin)
+        .slice(0, 8);
+      // Quick places right by the prayer place (cached per spot for a day).
+      const cell = `${at.lat.toFixed(3)}_${at.lng.toFixed(3)}`;
+      const cacheRef = adminDb().doc(`quickNearby/${cell}`);
+      const cached = (await cacheRef.get()).data();
+      let nearby = cached && Date.now() - Number(cached.at) < 86_400_000 ? (cached.places as NearbyFood[]) : null;
+      if (!nearby) {
+        nearby = (await searchNearbyFood(at, QUICK_TYPES, QUICK_M, 10)) ?? [];
+        await cacheRef.set({ at: Date.now(), places: nearby }).catch(() => {});
+      }
+      return json({
+        ideas,
+        nearby: nearby.map((p) => ({ placeId: p.placeId, name: p.name, location: p.location, typeLabel: p.typeLabel, rating: p.rating, walkMin: estimateTravelMin(at, p.location) })),
+      });
+    },
+    { perMinute: 20 },
+  ),
+
+  /**
+   * A member who doesn't pray picks what they'll do during a prayer break (or
+   * clears it with null). No vote needed — it's their own 30 minutes and
+   * everyone meets back at the prayer place.
+   */
+  'POST prayer/pick': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(
+        req,
+        z.object({
+          itemId: Id,
+          pick: z
+            .discriminatedUnion('kind', [
+              z.object({ kind: z.literal('idea'), ideaId: Id }),
+              z.object({ kind: z.literal('place'), place: z.object({ name: z.string().min(1).max(200), location: GeoPoint, placeId: z.string().max(300).optional() }) }),
+              z.object({ kind: z.literal('rest') }),
+            ])
+            .nullable(),
+        }),
+      );
+      const data = await loadTripData(tripId);
+      if (prays(data.members.find((m) => m.uid === member.uid) ?? member)) {
+        throw new HttpError(409, 'This is for members who don’t pray — turn prayer breaks off in your preferences first.');
+      }
+      const ref = itemRef(tripId, body.itemId);
+      const snap = await ref.get();
+      const item = snap.exists ? ScheduleItem.parse(snap.data()) : null;
+      if (!item?.prayer) throw new HttpError(404, 'That prayer break is no longer on the timeline');
+      let pick: NonNullable<ScheduleItem['prayer']>['fillerPicks'][string] | null = null;
+      if (body.pick?.kind === 'idea') {
+        const idea = data.ideas.get(body.pick.ideaId);
+        if (!idea || !goodForWhilePraying(idea, [member.uid])) throw new HttpError(400, 'Pick one of the ideas you accepted (or a backup you liked)');
+        pick = { kind: 'idea', title: idea.place.name, ideaId: idea.id, place: { name: idea.place.name, location: idea.place.location, ...(idea.place.placeId ? { placeId: idea.place.placeId } : {}) }, at: Date.now() };
+      } else if (body.pick?.kind === 'place') {
+        const loc = item.prayer.facility?.location;
+        if (loc && metersBetween(loc, body.pick.place.location) > 3000) throw new HttpError(400, 'Pick somewhere close to the prayer place — you meet back there after the break.');
+        pick = { kind: 'place', title: body.pick.place.name, place: body.pick.place, at: Date.now() };
+      } else if (body.pick?.kind === 'rest') {
+        pick = { kind: 'rest', title: 'Rest / wait nearby', at: Date.now() };
+      }
+      await ref.update({ [`prayer.fillerPicks.${member.uid}`]: pick ?? FieldValue.delete(), updatedAt: Date.now() });
+      return json({ ok: true });
+    },
+    { perMinute: 30 },
   ),
 
   /** Re-place a day's prayer breaks and travel legs (e.g. saved before prayer times were locked). */

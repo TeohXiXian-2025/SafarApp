@@ -18,8 +18,7 @@ import {
   Star,
   ThumbsDown,
   ThumbsUp,
-  Trash2,
-} from 'lucide-react';
+  Trash2, Coffee } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   conflictKey,
@@ -29,6 +28,7 @@ import {
   needsReconfirm,
   OPEN_STATUSES,
   paths,
+  prays,
   tallyIdea,
   visitPlan,
   windowText,
@@ -234,6 +234,14 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
                     Report halal status
                   </MenuItem>
                 )}
+                {prays(me) && ['backlog', 'backup', 'scheduled'].includes(idea.status) && (
+                  <MenuItem
+                    icon={<Coffee className="w-4 h-4" />}
+                    onClick={() => (setMenu(false), act('wp', () => api.post('ideas/while-praying', { ideaId: idea.id, on: !idea.goodWhilePraying.includes(me.uid) }, q)))}
+                  >
+                    {idea.goodWhilePraying.includes(me.uid) ? '✓ Good for the others while we pray' : 'Good for the others while we pray'}
+                  </MenuItem>
+                )}
                 <MenuItem icon={<RefreshCw className="w-4 h-4" />} onClick={() => (setMenu(false), act('recheck', () => api.post('ideas/analyze', { ideaId: idea.id, force: true }, q)))}>
                   Re-check halal & reviews
                 </MenuItem>
@@ -395,6 +403,12 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
             {!!idea.sentiment.pros.length && <p className="text-xs text-[#0B6B45]">+ {idea.sentiment.pros.join(' · ')}</p>}
             {!!idea.sentiment.cons.length && <p className="text-xs text-[#B3261E]">− {idea.sentiment.cons.join(' · ')}</p>}
           </div>
+        )}
+
+        {idea.goodWhilePraying.length > 0 && (
+          <p className="text-xs text-[#1D4E89] flex items-center gap-1.5">
+            <Coffee className="w-3.5 h-3.5" /> Good for the others while we pray — marked by {idea.goodWhilePraying.map((u) => byUid.get(u)?.displayName ?? 'someone').join(', ')}
+          </p>
         )}
 
         {/* Source */}
