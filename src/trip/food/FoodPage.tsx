@@ -4,7 +4,7 @@
 // Radar on a place; "Add" puts it on the Idea Board; people can report the
 // queue (gone after an hour).
 import { Clock, ExternalLink, LocateFixed, MapPin, Phone, Plus, ShieldCheck, Star, UtensilsCrossed } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { FOOD_TABS, fmtClock, Idea, paths, planningDate, ScheduleItem, toMin, type FoodVerdict, type GeoPoint } from '../../domain';
 import { api, ApiError } from '../../lib/api';
@@ -33,6 +33,7 @@ interface FoodItem {
   ideaId?: string;
   checked: boolean;
   photo?: string;
+  photoName?: string;
 }
 
 const TONE: Record<FoodVerdict['bucket'], string> = {
@@ -127,6 +128,20 @@ export function FoodPage() {
   // Certified first within the Halal tab, then nearest.
   shown.sort((a, b) => Number(b.verdict.bucket === 'certified') - Number(a.verdict.bucket === 'certified') || a.distanceM - b.distanceM);
   const notHalal = (items ?? []).filter((i) => i.verdict.bucket === 'not_halal').length;
+  // Photos for the cards being looked at (the search only fills in a few).
+  const needPhotos = shown.filter((i) => !i.photo && i.photoName).slice(0, 30);
+  const photoKey = needPhotos.map((i) => i.placeKey).join();
+  const asked = useRef(new Set<string>());
+  useEffect(() => {
+    const ask = needPhotos.filter((i) => !asked.current.has(i.placeKey));
+    if (!ask.length) return;
+    ask.forEach((i) => asked.current.add(i.placeKey));
+    void api
+      .post<{ photos: Record<string, string> }>('food/photos', { items: ask.map((i) => ({ placeKey: i.placeKey, photoName: i.photoName! })) }, q)
+      .then((r) => setItems((xs) => xs?.map((x) => (r.photos[x.placeKey] ? { ...x, photo: r.photos[x.placeKey] } : x)) ?? null))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photoKey]);
 
   return (
     <div className="space-y-4 max-w-3xl">

@@ -31,7 +31,8 @@ const MAX_TEXT_M = 3000;
 const CACHE_MS = 30 * 60_000;
 /** A place's photo link, resolved once (one billed call) and reused. */
 const PHOTO_TTL_MS = 7 * 86_400_000;
-const PHOTOS_PER_SEARCH = 24;
+const PHOTOS_PER_SEARCH = 12;
+const PHOTOS_PER_REQUEST = 30;
 const waitRef = (placeKey: string) => adminDb().collection(`waitReports/${placeKey}/reports`);
 
 /** Restaurants around a point from several angles: nearest, most popular, halal-typed, and "halal" by name / cuisine. */
@@ -63,7 +64,7 @@ async function findFood(at: GeoPoint): Promise<{ places: NearbyFood[]; halalIds:
 }
 
 /** Direct photo links for the list (cached per place; a few new ones resolved per search). */
-async function photosFor(items: { placeKey: string; photoName?: string }[]): Promise<Map<string, string>> {
+async function photosFor(items: { placeKey: string; photoName?: string }[], max = PHOTOS_PER_SEARCH): Promise<Map<string, string>> {
   const db = adminDb();
   const withPhoto = items.filter((i) => i.photoName);
   if (!withPhoto.length) return new Map();
@@ -76,7 +77,7 @@ async function photosFor(items: { placeKey: string; photoName?: string }[]): Pro
     else missing.push(withPhoto[k]);
   });
   await Promise.all(
-    missing.slice(0, PHOTOS_PER_SEARCH).map(async (i) => {
+    missing.slice(0, max).map(async (i) => {
       const url = await photoUrl(i.photoName!, 400);
       if (!url) return;
       out.set(i.placeKey, url);
@@ -163,6 +164,17 @@ export const foodRoutes: RouteTable = {
       return json({ items: items.map((i) => (photos.has(i.placeKey) ? { ...i, photo: photos.get(i.placeKey) } : i)) });
     },
     { perMinute: 12 },
+  ),
+
+  /** Photos for the cards on screen (cached ones free; new ones resolved once and cached 7 days). */
+  'POST food/photos': withTrip(
+    async (req) => {
+      const { items } = await readJson(req, z.object({ items: z.array(z.object({ placeKey: z.string().max(320), photoName: z.string().max(500) })).max(PHOTOS_PER_REQUEST) }));
+      const valid = items.filter((i) => /^places\/[^/]+\/photos\/[^/]+$/.test(i.photoName));
+      const photos = await photosFor(valid, PHOTOS_PER_REQUEST);
+      return json({ photos: Object.fromEntries(photos) });
+    },
+    { perMinute: 20 },
   ),
 
   /** Full Halal Radar for one restaurant (reviews, website, listings, nearby mosques). */

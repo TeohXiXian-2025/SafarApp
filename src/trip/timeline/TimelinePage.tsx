@@ -49,6 +49,7 @@ import {
   openingRanges,
   estimateTravelMin,
   metersBetween,
+  sameJourney,
   fmtClock,
   Idea,
   paths,
@@ -90,6 +91,8 @@ interface Row {
   prayer?: boolean;
   /** Timezone the row's clock times are in (bookings: the station / airport's own). */
   zone?: string;
+  /** An extra line that must not be cut off (e.g. when to be at the airport). */
+  note?: string;
   /** Where to pray around this journey (departure rows, when someone prays). */
   journey?: JourneyPrayer[];
   /** The other groups of a split (B, C, free time), running alongside this main-group row. */
@@ -110,6 +113,7 @@ function warningsFor(day: string, rows: Row[]): DayWarning[] {
   const travel = (r: Row) => {
     const i = chain.indexOf(r);
     const prev = i > 0 ? chain[i - 1] : undefined;
+    if (sameJourney(prev?.item, r.item)) return undefined;
     if (r.item.transitFromPrev && r.item.transitFromPrev.fromId === prev?.item.id) return r.item.transitFromPrev.minutes;
     return prev?.out && r.in ? estimateTravelMin(prev.out, r.in) : undefined;
   };
@@ -197,12 +201,13 @@ function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<strin
     const zone = r.event === 'depart' ? (b.from?.timezone ?? b.to.timezone) : b.to.timezone;
     // When to be at the airport / station, on that place's clock.
     const leave = (r.event === 'depart' || r.event === 'span') && b.kind !== 'hotel'
-      ? ` · be at ${b.from?.name ?? 'the station'} by ${fmtClock(toMin(item.start) - leaveBeforeMin(b.kind))} ${tzCity(zone)} time`
+      ? `Be at ${b.from?.name ?? 'the station'} by ${fmtClock(toMin(item.start) - leaveBeforeMin(b.kind))} (${tzCity(b.from?.timezone ?? zone)} time)`
       : '';
     return {
       item,
       title: [EVENT_LABEL[r.event], bookingTitle(b)].filter(Boolean).join(' · '),
-      subtitle: b.kind === 'hotel' ? b.to.address ?? b.to.name : `${route}${leave}`,
+      subtitle: b.kind === 'hotel' ? b.to.address ?? b.to.name : route,
+      ...(leave ? { note: leave } : {}),
       icon: <Icon className="w-4 h-4" />,
       in: inAt,
       out: outAt,
@@ -311,7 +316,8 @@ export function TimelinePage() {
       ),
     [day, bookings.data, trip.destinations, members, firstStop],
   );
-  const tz = nearestDestination(trip.destinations, frame.baseKnown ? frame.base : (firstStop ?? frame.base)).timezone;
+  const dayDest = nearestDestination(trip.destinations, frame.baseKnown ? frame.base : (firstStop ?? frame.base));
+  const tz = dayDest.timezone;
   // Prayer breaks saved before prayer times were locked (or with stale times) → re-place them once.
   const expected = useMemo(
     () =>
@@ -511,13 +517,13 @@ export function TimelinePage() {
 
         <div className="text-xs text-[#6D7A77] space-y-1">
           <p>
-            Times are local to {tzCity(tz)} ({tz}).
+            Times are local to {dayDest.name} ({tz}).
             {rows.some((r) => r.zone && r.zone !== tz) && ' Flight and train times are on their own airport / station clock — marked under the time.'}
           </p>
           {outlook && <p>Weather: {outlook}</p>}
           {frame.prayers && (
             <p>
-              🔒 Prayer times ({tzCity(tz)}): {(['dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => `${PRAYER_LABEL[k]} ${fmtClock(frame.prayers!.times[k])}`).join(' · ')} — fixed like bookings; stops are planned around them.
+              🔒 Prayer times ({dayDest.name}): {(['dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => `${PRAYER_LABEL[k]} ${fmtClock(frame.prayers!.times[k])}`).join(' · ')} — fixed like bookings; stops are planned around them.
             </p>
           )}
         </div>
@@ -604,7 +610,7 @@ export function TimelinePage() {
           </div>
         )}
 
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px] items-start">
+        <div className="grid gap-4 grid-cols-[minmax(0,1fr)] md:grid-cols-[minmax(0,1fr)_320px] items-start">
           <div className={cx('space-y-2', showMap && 'hidden md:block')}>
             {loading ? (
               <Spinner label="Loading timeline…" />
@@ -620,7 +626,7 @@ export function TimelinePage() {
                           <PrayerRow row={r} people={people} me={me.uid} selected={selected === r.item.id} onSelect={() => select(r.item.id)} />
                         ) : (
                           <>
-                            {prev && <TravelRow leg={r.item.transitFromPrev} a={prev.out} b={r.in} />}
+                            {prev && (sameJourney(prev.item, r.item) ? <OnBoardRow booking={r.item.ref.kind === 'booking' ? bookingMap.get(r.item.ref.bookingId) : undefined} /> : <TravelRow leg={r.item.transitFromPrev} a={prev.out} b={r.in} />)}
                             <StopRow
                               row={r}
                               dayZone={tz}
@@ -778,6 +784,7 @@ function StopRow({
             <span className="truncate">{row.title}</span>
           </p>
           {row.subtitle && !row.sides?.length && <p className="text-xs text-[#6D7A77] truncate">{row.subtitle}</p>}
+          {row.note && <p className="text-xs font-semibold text-[#8A5A00]">🕑 {row.note}</p>}
           {!!row.journey?.length && <JourneyPrayerList list={row.journey} />}
           {weather && <p className="mt-1 text-xs text-[#1D4E89]">🌦 {weather.text}</p>}
           {!!row.sides?.length && <SplitGroups a={row} sides={row.sides} people={people} me={me} />}
@@ -817,6 +824,19 @@ const MODE = {
   transit: { icon: TrainFront, label: 'by public transport' },
   drive: { icon: Car, label: 'by car' },
 } as const;
+
+/** Between a journey's departure and arrival: you're on it. */
+function OnBoardRow({ booking }: { booking?: Booking }) {
+  const min = booking ? Math.round((Date.parse(booking.endAt) - Date.parse(booking.startAt)) / 60_000) : 0;
+  const Icon = booking ? KIND[booking.kind].icon : TrainFront;
+  return (
+    <p className="flex items-center gap-2 pl-8 py-1.5 text-xs text-[#6D7A77]">
+      <span className="h-4 border-l-2 border-dotted border-[#D5CEC4]" />
+      <Icon className="w-3.5 h-3.5" /> {booking?.kind === 'flight' ? 'In the air' : 'On board'}
+      {min > 0 && ` · ${Math.floor(min / 60)} h ${min % 60} min`}
+    </p>
+  );
+}
 
 function TravelRow({ leg, a, b }: { leg?: TransitLeg; a?: GeoPoint; b?: GeoPoint }) {
   if (!leg && !(a && b)) return <div className="h-2" />;

@@ -10,6 +10,7 @@ import {
   estimateTravelMin,
   Idea,
   metersBetween,
+  sameJourney,
   ideaItemId,
   Member,
   mergePrefs,
@@ -271,11 +272,11 @@ const FILLER_M = 700;
  * backlog or backup idea near where the others pray that none of them voted
  * against (liked ones first, then nearest). Not already on the timeline.
  */
-function fillerFor(data: TripData, near: GeoPoint, used: Set<string>): Idea | undefined {
+function fillerFor(data: TripData, near: GeoPoint, used: Set<string>, onDay: Set<string>): Idea | undefined {
   const others = data.members.filter((m) => !m.prefs?.prayerReminders).map((m) => m.uid);
   if (!others.length) return undefined;
   return [...data.ideas.values()]
-    .filter((i) => (i.status === 'backlog' || i.status === 'backup') && !used.has(i.id) && !isAltOfSplit(data, i))
+    .filter((i) => (i.status === 'backlog' || i.status === 'backup') && !used.has(i.id) && !onDay.has(i.id) && !isAltOfSplit(data, i))
     .filter((i) => metersBetween(i.place.location, near) <= FILLER_M)
     .filter((i) => !others.some((u) => i.votes[u]?.value === -1))
     .map((i) => ({ i, likes: others.filter((u) => i.votes[u]?.value === 1).length, d: metersBetween(i.place.location, near) }))
@@ -309,9 +310,11 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
   const lookups = { n: 0 };
   const praying = prayingUids(data.members);
   const used = new Set<string>();
+  // Ideas already on this day (their status may not be updated in `data` yet).
+  const onDay = new Set(all.flatMap((i) => (i.ref.kind === 'idea' ? [i.ref.ideaId] : [])));
   for (const slot of prayers) {
     const facility = await facilityFor(data, slot, stops, previous, lookups);
-    const filler = fillerFor(data, facility?.location ?? slot.at, used);
+    const filler = fillerFor(data, facility?.location ?? slot.at, used, onDay);
     if (filler) used.add(filler.id);
     const id = prayerItemId(day, slot.key);
     batch.set(
@@ -365,7 +368,8 @@ export async function refreshLegs(tripId: string, day: string, data: TripData) {
     const a = prev && ends.get(prev.id)?.out;
     const b = ends.get(it.id)?.in;
     const leg = it.transitFromPrev;
-    if (!a || !b) {
+    // Departure → arrival of the same journey: no leg (you're on it).
+    if (!a || !b || sameJourney(prev, it)) {
       if (leg) {
         batch.update(itemRef(tripId, it.id), { transitFromPrev: FieldValue.delete() });
         writes++;
@@ -404,6 +408,7 @@ export function dayProblems(data: TripData, day: string, items: ScheduleItem[]) 
       const prev = k > 0 ? chain[k - 1] : undefined;
       const a = prev && ends.get(prev.id)?.out;
       const b = ends.get(it.id)?.in;
+      if (sameJourney(prev, it)) return { ...it };
       const known = it.transitFromPrev?.fromId === prev?.id ? it.transitFromPrev?.minutes : undefined;
       return { ...it, transitMin: known ?? (a && b ? estimateTravelMin(a, b) : undefined) };
     }),

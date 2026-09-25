@@ -78,6 +78,10 @@ export function estimateTravelMin(a: GeoPoint, b: GeoPoint): number {
 
 // ─── Warnings ───────────────────────────────────────────────────────────────
 
+/** Two timeline moments of the same journey (departs → arrives): no travel between them — you're on it. */
+export const sameJourney = (a?: Pick<ScheduleItem, 'ref'>, b?: Pick<ScheduleItem, 'ref'>) =>
+  a?.ref.kind === 'booking' && b?.ref.kind === 'booking' && a.ref.bookingId === b.ref.bookingId;
+
 /** Minutes kept free on top of the travel time (finding the entrance, parking, queues). */
 export const BUFFER_MIN = 10;
 /** Visits at least this long may run through a prayer time — you pray there. */
