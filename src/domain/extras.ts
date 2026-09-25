@@ -1,35 +1,10 @@
-// Document vault, emergency incidents, background jobs, activity feed.
+// Emergency incidents, background jobs, activity feed.
 import { z } from 'zod';
 import { Id, Millis } from './common.js';
 
 // Expenses live in expenses.ts.
 
-// ─── Document vault ─────────────────────────────────────────────────────────
-
-export const TravelDocument = z.object({
-  id: Id,
-  ownerUid: Id,
-  kind: z.enum(['passport', 'visa', 'ticket', 'hotel', 'insurance', 'other']),
-  storagePath: z.string().max(300),
-  fileName: z.string().max(200),
-  /** AI-extracted fields. Sensitive values stay owner-only unless shared. */
-  extracted: z.record(z.string(), z.string().max(300)).optional(),
-  visibility: z.enum(['owner', 'group']).default('owner'),
-  uploadedAt: Millis,
-});
-export type TravelDocument = z.infer<typeof TravelDocument>;
-
-export const Check = z.object({
-  id: Id,
-  severity: z.enum(['error', 'warning', 'info']),
-  title: z.string().max(200),
-  detail: z.string().max(1000),
-  subjectUid: Id.optional(),
-  relatedIds: z.array(Id).max(20).default([]),
-  resolved: z.boolean().default(false),
-  createdAt: Millis,
-});
-export type Check = z.infer<typeof Check>;
+// The document vault lives in vault.ts.
 
 // ─── Emergency resync ───────────────────────────────────────────────────────
 

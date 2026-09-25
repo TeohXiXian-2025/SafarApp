@@ -5,6 +5,7 @@ import { lookupTimezone } from '../_lib/google.js';
 import { json, readJson } from '../_lib/http.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { displayNameFor, loadTrip, logActivity } from '../_lib/trip.js';
+import { deleteTripFiles } from '../_lib/vault.js';
 
 async function withTimezones(destinations: DestinationInput[]) {
   return Promise.all(destinations.map(async (d) => ({ ...d, timezone: await lookupTimezone(d.location) })));
@@ -80,7 +81,10 @@ export const tripRoutes: RouteTable = {
       const batch = db.batch();
       invites.docs.forEach((d) => batch.delete(d.ref));
       await batch.commit();
+      const memberIds = ((await db.doc(paths.trip(tripId)).get()).get('memberIds') as string[] | undefined) ?? [];
       await db.recursiveDelete(db.doc(paths.trip(tripId)));
+      // Vaults live outside the trip doc; uploads (tickets, receipts, documents) in Storage.
+      await deleteTripFiles(tripId, memberIds);
       return json({ ok: true });
     },
     { admin: true, perMinute: 5 },

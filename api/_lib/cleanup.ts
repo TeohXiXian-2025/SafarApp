@@ -1,15 +1,18 @@
 // When someone leaves (or is removed from) a trip: their votes and choices
 // stop counting, open ideas are re-tallied (they may now be decided), they
 // leave any split group (empty groups — and splits with only the main group
-// left — go away), and they're taken off timeline stops.
+// left — go away), they're taken off timeline stops, and their Document
+// Vault for the trip (records, files, shared status) is deleted.
 import { FieldValue } from 'firebase-admin/firestore';
 import { CHOICE_WINDOW_MS, OPEN_STATUSES, paths, statusFromTally, tallyIdea, votingClosed } from '../../src/domain/index.js';
 import { adminDb } from './firebaseAdmin.js';
 import { ideaDocRef, loadTripData } from './schedule.js';
 import { applyMove } from './splits.js';
+import { deleteVault } from './vault.js';
 
 /** Call after the member doc is deleted and `memberIds` no longer has them. */
 export async function cleanupMember(tripId: string, uid: string) {
+  await deleteVault(tripId, uid);
   const db = adminDb();
   const data = await loadTripData(tripId);
   const now = Date.now();

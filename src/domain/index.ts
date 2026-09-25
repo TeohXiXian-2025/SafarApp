@@ -15,3 +15,4 @@ export * from './notify.js';
 export * from './food.js';
 export * from './expenses.js';
 export * from './stays.js';
+export * from './vault.js';

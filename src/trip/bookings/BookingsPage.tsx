@@ -11,6 +11,7 @@ import { AddBookingSheet } from './AddBookingSheet';
 import { BookingEditor, draftProblem, type EditableDraft } from './BookingEditor';
 import { bookingTitle, dayDiff, formatDay, KIND, localParts, tzCity } from './format';
 import { StaysSection } from './StaysSection';
+import { VaultSection } from './VaultSection';
 
 export function BookingsPage() {
   const { trip, members, me } = useTrip();
@@ -18,7 +19,7 @@ export function BookingsPage() {
   const [editing, setEditing] = useState<Booking | null>(null);
   const bookings = useQuery(`bookings:${trip.id}`, () => paths.bookings(trip.id), Booking);
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') === 'stays' ? 'stays' : 'tickets';
+  const tab = (['stays', 'documents'] as const).find((t) => t === params.get('tab')) ?? 'tickets';
 
   const byDay = useMemo(() => {
     const sorted = [...bookings.data].sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt));
@@ -37,16 +38,19 @@ export function BookingsPage() {
           <h1 className="text-xl font-extrabold text-[#161C23]">Bookings</h1>
           <p className="text-sm text-[#6D7A77]">Flights, trains and hotels. They become fixed points on the timeline.</p>
         </div>
-        <Button onClick={() => setAdding(true)} className="shrink-0">
-          <Plus className="w-4 h-4" /> Add
-        </Button>
+        {tab !== 'documents' && (
+          <Button onClick={() => setAdding(true)} className="shrink-0">
+            <Plus className="w-4 h-4" /> Add
+          </Button>
+        )}
       </div>
 
-      <div className="grid grid-cols-2 rounded-xl bg-[#F3EFE9] p-1 text-sm font-semibold" role="tablist">
+      <div className="grid grid-cols-3 rounded-xl bg-[#F3EFE9] p-1 text-sm font-semibold" role="tablist">
         {(
           [
             ['tickets', 'All bookings'],
             ['stays', 'Hotels'],
+            ['documents', 'Documents'],
           ] as const
         ).map(([t, label]) => (
           <button
@@ -54,7 +58,7 @@ export function BookingsPage() {
             role="tab"
             aria-selected={tab === t}
             type="button"
-            onClick={() => setParams(t === 'stays' ? { tab: t } : {}, { replace: true })}
+            onClick={() => setParams(t === 'tickets' ? {} : { tab: t }, { replace: true })}
             className={cx('min-h-9 rounded-lg', tab === t ? 'bg-white text-[#00685F] shadow-xs' : 'text-[#6D7A77]')}
           >
             {label}
@@ -64,7 +68,9 @@ export function BookingsPage() {
 
       {bookings.error && <ErrorBanner>Could not load bookings: {bookings.error.message}</ErrorBanner>}
 
-      {tab === 'stays' ? (
+      {tab === 'documents' ? (
+        <VaultSection />
+      ) : tab === 'stays' ? (
         <StaysSection bookings={bookings.data} onUpload={() => setAdding(true)} />
       ) : bookings.loading ? (
         <Spinner />
