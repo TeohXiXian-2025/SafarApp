@@ -50,6 +50,7 @@ import {
   writeStops,
   type TripData,
 } from '../_lib/schedule.js';
+import { notify } from '../_lib/push.js';
 import { logActivity } from '../_lib/trip.js';
 
 const jobRef = (tripId: string, id: string) => adminDb().doc(paths.job(tripId, id));
@@ -273,6 +274,11 @@ export const scheduleRoutes: RouteTable = {
       logActivity(batch, tripId, member.uid, `${member.displayName} applied AI Arrange (${scheduled.size} stops over ${job.plan.days.length} days)`);
       await batch.commit();
       await refreshDays(tripId, [...job.plan.days.map((d) => d.day), ...before.map((i) => i.day)], data);
+      await notify(
+        data.trip.memberIds,
+        { kind: 'timeline', title: 'The timeline was re-planned', body: `${member.displayName} applied AI Arrange: ${scheduled.size} stops over ${job.plan.days.length} days.`, url: `/t/${tripId}/timeline`, tag: `timeline-${tripId}` },
+        { timeZone: data.trip.destinations[0].timezone, except: member.uid },
+      );
       return json({ ok: true });
     },
     { admin: true, perMinute: 6 },

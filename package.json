@@ -19,7 +19,8 @@
     "e2e:phase4": "node scripts/e2e-phase4.mjs",
     "e2e:phase5": "node scripts/e2e-phase5.mjs",
     "e2e:phase6": "node scripts/e2e-phase6.mjs",
-    "e2e:voting": "node scripts/e2e-voting.mjs"
+    "e2e:voting": "node scripts/e2e-voting.mjs",
+    "e2e:notify": "node scripts/e2e-notify.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -45,6 +46,7 @@
     "react-router": "^8.4.0",
     "unpdf": "^1.8.1",
     "vite": "^6.2.3",
+    "web-push": "^3.6.7",
     "zod": "^4.6.5",
     "zustand": "^5.0.15"
   },
@@ -53,6 +55,7 @@
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/web-push": "^3.6.4",
     "@vercel/node": "^14.0.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",

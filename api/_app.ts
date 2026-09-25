@@ -9,6 +9,7 @@ import { bookingRoutes } from './_routes/bookings.js';
 import { ideaRoutes } from './_routes/ideas.js';
 import { scheduleRoutes } from './_routes/schedule.js';
 import { decisionRoutes } from './_routes/decisions.js';
+import { notificationRoutes } from './_routes/notifications.js';
 
 const table: RouteTable = {
   ...systemRoutes,
@@ -19,6 +20,7 @@ const table: RouteTable = {
   ...ideaRoutes,
   ...scheduleRoutes,
   ...decisionRoutes,
+  ...notificationRoutes,
 };
 
 export async function dispatch(req: Request): Promise<Response> {

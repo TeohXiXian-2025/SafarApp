@@ -33,6 +33,7 @@ import { transcribe } from '../_lib/groq.js';
 import type { Part } from '@google/genai';
 import { loadTrip, logActivity } from '../_lib/trip.js';
 import { useDailyQuota } from '../_lib/quota.js';
+import { notify } from '../_lib/push.js';
 import { applyMove, dissolve } from '../_lib/splits.js';
 
 const ANALYSIS_TTL = 14 * 86_400_000;
@@ -258,6 +259,11 @@ export const ideaRoutes: RouteTable = {
       batch.set(ref, idea);
       logActivity(batch, tripId, member.uid, `${member.displayName} suggested ${place.name}`);
       await batch.commit();
+      await notify(
+        trip.memberIds,
+        { kind: 'new_idea', title: `${member.displayName} suggested ${place.name}`, body: 'Vote 👍 or 👎 on the Idea Board (more may follow).', url: `/t/${tripId}/ideas?filter=voting`, tag: `new-${tripId}` },
+        { timeZone: trip.destinations[0].timezone, except: member.uid, throttleKey: `newidea:${tripId}`, throttle: 600 },
+      );
       return json({ id: ref.id, duplicate: false }, { status: 201 });
     },
     { perMinute: 30 },

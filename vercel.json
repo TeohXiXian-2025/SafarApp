@@ -49,5 +49,11 @@
     "api/router.ts": {
       "maxDuration": 120
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/reminders",
+      "schedule": "0 1 * * *"
+    }
+  ]
 }

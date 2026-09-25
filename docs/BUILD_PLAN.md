@@ -399,7 +399,8 @@ Rules live in `src/domain/voting.ts` + `split.ts` (unit-tested); API in `api/_ro
 - [x] **Leaving / removal:** votes and choices removed, open ideas re-tallied (may settle), removed from groups and timeline stops.
 - [x] Comments on idea cards; "Needs you" strip (Overview + Ideas) and a badge on the Ideas tab.
 - [x] Timeline + map: groups in their own colours side by side, 🚩 meeting time, dashed side trips, 🕌 prayer pins, tap a stop to focus it on the map.
-- [ ] Push notifications + precise 12 h reminders (needs an FCM web-push key and QStash) — in-app badges for now.
+- [x] **Push notifications** (standard Web Push, self-generated VAPID keys — no FCM): subscribe per device in Settings (+ an Overview nudge); per-person choices (new ideas, votes, split votes, admin decisions, results, timeline, comments); non-urgent ones wait out quiet hours (22:00–08:00 trip time); new ideas bundled (≤ 1 per 10 min); dead devices removed on 404/410. iPhone: only once installed to the Home Screen. Verified by `npm run e2e:notify` (12 checks, decrypting real encrypted pushes via a local fake push service).
+- [x] **Reminders job** `GET /api/cron/reminders` (Bearer `CRON_SECRET`): closes overdue votes, "N h left to vote" and "pick a middle ground" reminders ≤ 12 h before the deadline (once each), nudges the admin when choosing time is up. Vercel Cron runs it daily (01:00 UTC); for exact 12 h timing add an hourly Upstash QStash schedule calling it with the same header.
 
 ### Phase 8 — Hotels + Restaurant tab (week 11)
 - [ ] `HotelRatesProvider` interface + LiteAPI adapter (search by lat/lng → rates for trip dates/occupancy/currency).

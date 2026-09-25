@@ -33,18 +33,14 @@ import {
 import { withTrip } from '../_lib/auth.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
-import { buildOptions } from '../_lib/options.js';
 import { useDailyQuota } from '../_lib/quota.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { ideaDocRef, leadIdea, loadTripData, type TripData } from '../_lib/schedule.js';
 import { applyMove, dissolve } from '../_lib/splits.js';
+import { notify } from '../_lib/push.js';
+import { closeOverdue, ensureOptions, onDecided, onReadyForAdmin, onSplitVotes, STATUS_TEXT } from '../_lib/tally.js';
 import { logActivity } from '../_lib/trip.js';
 
-const STATUS_TEXT: Record<string, string> = {
-  backlog: 'everyone approved it — added to the backlog',
-  rejected: 'everyone passed on it',
-  mixed: 'votes are split — the people not going can pick a middle ground',
-};
 
 async function conflictsFor(data: TripData, idea: Idea): Promise<Conflict[]> {
   const summary = (await adminDb().doc(paths.halalSummary(idea.placeKey)).get()).data() as HalalSummary | undefined;
@@ -56,19 +52,6 @@ async function loadFresh(tripId: string, ideaId: string, tx?: FirebaseFirestore.
   const snap = tx ? await tx.get(ref) : await ref.get();
   if (!snap.exists) throw new HttpError(404, 'Idea not found');
   return Idea.parse(snap.data());
-}
-
-/** Middle grounds for `choosers`; keeps options someone already picked. `more` = show different places. */
-async function ensureOptions(tripId: string, data: TripData, ideaId: string, choosers: Member[], more = false): Promise<MiddleOption[]> {
-  const idea = await loadFresh(tripId, ideaId);
-  if (idea.options?.length && !more) return idea.options;
-  const picked = new Set(Object.values(idea.choices).map((c) => c.optionId));
-  const keep = (idea.options ?? []).filter((o) => picked.has(o.id) && o.type !== 'join' && o.type !== 'free_time');
-  const shown = (idea.options ?? []).flatMap((o) => (o.place ? [o.place.placeId] : []));
-  const onBoard = [...data.ideas.values()].flatMap((i) => (i.place.placeId ? [i.place.placeId] : []));
-  const options = await buildOptions({ idea, trip: data.trip, choosers, excludePlaceIds: new Set([...onBoard, ...(more ? shown : [])]), keep });
-  await ideaDocRef(tripId, ideaId).update({ options, updatedAt: Date.now() });
-  return options;
 }
 
 const VoteBody = z.object({
@@ -132,11 +115,10 @@ export const decisionRoutes: RouteTable = {
         if (status !== idea.status && status !== 'voting') logActivity(tx, tripId, 'system', `${idea.place.name}: ${STATUS_TEXT[status]}`);
         return { status, changed: status !== idea.status };
       });
-      if (result.status === 'mixed') {
-        const idea = await loadFresh(tripId, body.ideaId);
-        const choosers = data.members.filter((m) => nonGoers(idea, data.trip.memberIds).includes(m.uid));
-        await ensureOptions(tripId, data, idea.id, choosers).catch((e) => console.warn('[options]', e));
-      }
+      const after = await loadFresh(tripId, body.ideaId);
+      if (result.status === 'mixed' && (result.changed || !after.options?.length)) await onSplitVotes(tripId, data, after);
+      else if (result.status === 'mixed') await onReadyForAdmin(tripId, data, after);
+      else if (result.changed) await onDecided(tripId, data, after, result.status);
       return json({ status: result.status });
     },
     { perMinute: 60 },
@@ -171,6 +153,7 @@ export const decisionRoutes: RouteTable = {
         if (!idea.options?.some((o) => o.id === body.optionId)) throw new HttpError(400, 'That option is no longer available');
         tx.update(ideaDocRef(tripId, idea.id), { [`choices.${member.uid}`]: { optionId: body.optionId, ...(body.note ? { note: body.note } : {}), at: Date.now() }, updatedAt: Date.now() });
       });
+      await onReadyForAdmin(tripId, data, await loadFresh(tripId, body.ideaId));
       return json({ ok: true });
     },
     { perMinute: 30 },
@@ -200,7 +183,8 @@ export const decisionRoutes: RouteTable = {
         // Closing = the deadline is now: non-voters abstain from here on.
         b.update(ideaDocRef(tripId, idea.id), { status, votingEndsAt: now, ...(status === 'mixed' ? { choiceEndsAt: now + CHOICE_WINDOW_MS } : {}), updatedAt: now });
         await b.commit();
-        if (status === 'mixed') await ensureOptions(tripId, data, idea.id, data.members.filter((m) => nonGoers(idea, data.trip.memberIds).includes(m.uid))).catch(() => {});
+        if (status === 'mixed') await onSplitVotes(tripId, data, await loadFresh(tripId, idea.id));
+        else await onDecided(tripId, data, idea, status, member.uid);
         return json({ status });
       }
 
@@ -220,6 +204,7 @@ export const decisionRoutes: RouteTable = {
         // Build the groups one by one (each may create an alternative idea).
         for (const g of groups?.alternatives ?? []) await applyMove(tripId, idea.id, g.uids, { kind: 'alt', option: g.option }, member.uid, { reason: 'mixed_votes' });
         if (groups?.freeTime.length) await applyMove(tripId, idea.id, groups.freeTime, { kind: 'free' }, member.uid, { reason: 'mixed_votes' });
+        await onDecided(tripId, data, idea, 'backlog', member.uid);
         return json({ status: 'backlog' });
       }
 
@@ -234,6 +219,7 @@ export const decisionRoutes: RouteTable = {
         updatedAt: now,
       });
       await b.commit();
+      if (action !== 'reopen') await onDecided(tripId, data, idea, action === 'backup' ? 'backup' : 'rejected', member.uid);
       return json({ ok: true });
     },
     { admin: true, perMinute: 30 },
@@ -281,36 +267,23 @@ export const decisionRoutes: RouteTable = {
   ),
 
   /** Closes voting that ran past its deadline (called when the board opens). */
-  'POST ideas/sweep': withTrip(
-    async (_req, { tripId }) => {
-      const now = Date.now();
-      const data = await loadTripData(tripId);
-      const due = [...data.ideas.values()].filter((i) => i.status === 'voting' && votingClosed(i, now));
-      const batch = adminDb().batch();
-      const mixed: string[] = [];
-      for (const i of due) {
-        const status = statusFromTally(tallyIdea(i, data.trip.memberIds), true);
-        batch.update(ideaDocRef(tripId, i.id), { status, ...(status === 'mixed' ? { choiceEndsAt: now + CHOICE_WINDOW_MS } : {}), updatedAt: now });
-        logActivity(batch, tripId, 'system', `${i.place.name}: voting time is up — ${STATUS_TEXT[status] ?? status}`);
-        if (status === 'mixed') mixed.push(i.id);
-      }
-      if (due.length) await batch.commit();
-      for (const id of mixed) {
-        const i = data.ideas.get(id)!;
-        await ensureOptions(tripId, data, id, data.members.filter((m) => nonGoers(i, data.trip.memberIds).includes(m.uid))).catch(() => {});
-      }
-      return json({ closed: due.length });
-    },
-    { perMinute: 6 },
-  ),
+  'POST ideas/sweep': withTrip(async (_req, { tripId }) => json({ closed: await closeOverdue(tripId) }), { perMinute: 6 }),
 
   'POST ideas/comment': withTrip(
     async (req, { tripId, member }) => {
       const { ideaId, text } = await readJson(req, z.object({ ideaId: Id, text: z.string().trim().min(1).max(500) }));
       await useDailyQuota(member.uid, 'comment');
-      await loadFresh(tripId, ideaId);
+      const idea = await loadFresh(tripId, ideaId);
       const ref = adminDb().collection(paths.comments(tripId, ideaId)).doc();
       await ref.set(IdeaComment.parse({ id: ref.id, uid: member.uid, text, at: Date.now() }));
+      // The person who added it, everyone who voted, and earlier commenters.
+      const earlier = (await adminDb().collection(paths.comments(tripId, ideaId)).select('uid').get()).docs.map((d) => d.get('uid') as string);
+      const trip = (await loadTripData(tripId)).trip;
+      await notify(
+        [idea.createdBy, ...Object.keys(idea.votes), ...earlier].filter((u) => trip.memberIds.includes(u)),
+        { kind: 'comment', title: `${member.displayName} on ${idea.place.name}`, body: text.slice(0, 140), url: `/t/${tripId}/ideas`, tag: `comment-${idea.id}` },
+        { timeZone: trip.destinations[0].timezone, except: member.uid, throttleKey: `comment:${idea.id}`, throttle: 300 },
+      );
       return json({ id: ref.id }, { status: 201 });
     },
     { perMinute: 20 },

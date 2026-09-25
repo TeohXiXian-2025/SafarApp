@@ -8,6 +8,7 @@ import { daysUntil, localTimeIn, timeAgo, tripLengthDays } from '../lib/format';
 import { Avatar, Badge, Button, Card } from '../ui';
 import { useTrip } from './TripLayout';
 import { NeedsYouStrip, useNeeds } from './ideas/NeedsYou';
+import { NotificationsCard } from '../components/live/NotificationsCard';
 
 export function OverviewPage() {
   const ctx = useTrip();
@@ -26,6 +27,7 @@ export function OverviewPage() {
     <div className="grid gap-4 md:grid-cols-[1fr_320px]">
       <div className="space-y-4">
         <NeedsYouStrip needs={needs} tripId={trip.id} />
+        <NotificationsCard compact />
         {!me.prefs && (
           <Nudge to="preferences" icon={<SlidersHorizontal className="w-5 h-5" />} title="Set your travel preferences" text="Budget, halal needs, prayer breaks and pace — the plan balances everyone's." />
         )}

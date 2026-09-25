@@ -266,6 +266,8 @@ export const Idea = z.object({
   choices: z.record(z.string(), Choice).default({}),
   /** Choosing closes then (anyone who hasn't picked gets free time). */
   choiceEndsAt: Millis.optional(),
+  /** When 12 h reminders went out (so each is sent once). */
+  reminded: z.object({ vote: Millis.optional(), choose: Millis.optional(), decide: Millis.optional() }).optional(),
   /** A timing middle ground the admin accepted: the group visits in this window. */
   window: z.object({ start: z.string().max(5), end: z.string().max(5) }).optional(),
   /** Set when the admin closes voting early or overrides the result. */

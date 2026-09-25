@@ -57,6 +57,8 @@ const pwa = VitePWA({
   },
   workbox: {
     globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+    // Push notification handlers (public/push-sw.js).
+    importScripts: ['push-sw.js'],
     // The pitch deck is a separate page with big images — don't ship it to every phone.
     // Pitch-deck screenshots and the /demo prototype's code load on demand instead.
     globIgnores: ['pitch.html', 'assets/pitch-*', 'assets/*.png', 'assets/*.jpg', 'images/**', 'assets/App-*', 'assets/pdf-*', 'assets/motion-*'],

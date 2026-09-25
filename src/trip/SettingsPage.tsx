@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
+import { NotificationsCard } from '../components/live/NotificationsCard';
 import { TripForm } from '../components/live/TripForm';
 import { api, ApiError } from '../lib/api';
 import { Button, Card, ErrorBanner, Field, Input } from '../ui';
@@ -14,7 +15,12 @@ export function SettingsPage() {
   const [error, setError] = useState('');
 
   if (!isAdmin) {
-    return <Card className="p-5 text-sm text-[#6D7A77]">Only the trip admin can change trip settings.</Card>;
+    return (
+      <div className="max-w-xl space-y-4">
+        <NotificationsCard />
+        <Card className="p-5 text-sm text-[#6D7A77]">Only the trip admin can change trip details.</Card>
+      </div>
+    );
   }
 
   const del = async () => {
@@ -31,6 +37,7 @@ export function SettingsPage() {
 
   return (
     <div className="max-w-xl space-y-4">
+      <NotificationsCard />
       <Card className="p-5 space-y-4">
         <h2 className="font-bold text-[#161C23]">Trip details</h2>
         <TripForm

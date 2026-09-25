@@ -11,3 +11,4 @@ export * from './timeline.js';
 export * from './arrange.js';
 export * from './split.js';
 export * from './voting.js';
+export * from './notify.js';

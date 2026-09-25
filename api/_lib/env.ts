@@ -15,6 +15,9 @@ const SERVER_KEYS = [
   'UPSTASH_REDIS_REST_URL',
   'UPSTASH_REDIS_REST_TOKEN',
   'APP_URL',
+  'VAPID_PUBLIC_KEY',
+  'VAPID_PRIVATE_KEY',
+  'CRON_SECRET',
 ] as const;
 
 export type ServerKey = (typeof SERVER_KEYS)[number];
