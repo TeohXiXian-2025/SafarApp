@@ -1,14 +1,19 @@
-import { Compass, LayoutGrid, LogOut } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { Compass, Gauge, LayoutGrid, LogOut } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { signOut, useAuth } from '../../auth/auth';
 import { Avatar } from '../../ui';
 import { InboxBell } from './InboxBell';
+import { isOwner } from './UsageCard';
 
 /** Top bar for the live app: logo → My Trips, optional title, account menu. */
 export function AppHeader({ children }: { children?: ReactNode }) {
   const user = useAuth((s) => s.user);
   const [menu, setMenu] = useState(false);
+  const [owner, setOwner] = useState(false);
+  useEffect(() => {
+    if (menu && user) void isOwner().then(setOwner);
+  }, [menu, user]);
   const name = user?.displayName || user?.email || 'You';
 
   return (
@@ -43,6 +48,15 @@ export function AppHeader({ children }: { children?: ReactNode }) {
                 >
                   <LayoutGrid className="w-4 h-4" /> My trips
                 </Link>
+                {owner && (
+                  <Link
+                    to="/usage"
+                    onClick={() => setMenu(false)}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[#161C23] hover:bg-[#F3EFE9]"
+                  >
+                    <Gauge className="w-4 h-4" /> Service usage
+                  </Link>
+                )}
                 <button
                   onClick={() => void signOut()}
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[#B3261E] hover:bg-[#FDECEA]"

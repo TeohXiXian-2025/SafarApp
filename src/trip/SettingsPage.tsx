@@ -20,6 +20,7 @@ export function SettingsPage() {
       <div className="max-w-xl space-y-4">
         <NotificationsCard />
         <Card className="p-5 text-sm text-[#6D7A77]">Only the trip admin can change trip details.</Card>
+        <UsageCard />
       </div>
     );
   }

@@ -2,7 +2,8 @@
 // AI requests per day — so running low shows up before anything breaks.
 // Each service already falls back on its own when its allowance runs out.
 import { Gauge } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { auth } from '../../firebase/config';
 import { api } from '../../lib/api';
 import { Card, cx } from '../../ui';
 
@@ -31,11 +32,21 @@ const ROWS: [keyof Omit<Usage, 'month' | 'ai'>, string][] = [
   ['halalAutoChecks', 'Auto halal checks (today)'],
 ];
 
-export function UsageCard() {
+/** True when the signed-in account is an app owner (OWNER_EMAILS). Asked once per signed-in user. */
+let ownerCheck: { uid: string; result: Promise<boolean> } | null = null;
+export function isOwner(): Promise<boolean> {
+  const uid = auth.currentUser?.uid ?? '';
+  if (ownerCheck?.uid !== uid) ownerCheck = { uid, result: uid ? api.get('system/usage').then(() => true, () => false) : Promise.resolve(false) };
+  return ownerCheck.result;
+}
+
+export function UsageCard({ fallback = null }: { fallback?: ReactNode }) {
   const [u, setU] = useState<Usage | null>(null);
+  const [denied, setDenied] = useState(false);
   useEffect(() => {
-    void api.get<Usage>('system/usage').then(setU).catch(() => {});
+    void api.get<Usage>('system/usage').then(setU).catch(() => setDenied(true));
   }, []);
+  if (denied) return <>{fallback}</>;
   if (!u) return null;
   const today = u.ai.last7Days[0];
   const week = u.ai.last7Days.reduce((s, d) => ({ ok: s.ok + d.gemini + d.groq, failed: s.failed + d.failed }), { ok: 0, failed: 0 });
