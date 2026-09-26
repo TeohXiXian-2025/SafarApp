@@ -135,19 +135,16 @@ try {
   assert.ok(n1[ali.uid] > 0 && n1[cara.uid] < 0, JSON.stringify(n1));
   ok(`balances add up to zero: Ali ${(n1[ali.uid] / 100).toFixed(2)}, Bob ${(n1[bob.uid] / 100).toFixed(2)}, Cara ${(n1[cara.uid] / 100).toFixed(2)}`);
 
-  // Cara pays Ali what she owes. Only Ali — who receives it — can tick it: not Bob, not Cara herself.
-  assert.equal((await bob.call('expenses/settle', { from: cara.uid, to: ali.uid, amountMinor: 1000, date: '2026-12-08' }, q)).status, 403);
-  assert.equal((await cara.call('expenses/settle', { from: cara.uid, to: ali.uid, amountMinor: -n1[cara.uid], date: '2026-12-08' }, q)).status, 403);
-  const s = await ali.call('expenses/settle', { from: cara.uid, to: ali.uid, amountMinor: -n1[cara.uid], date: '2026-12-08' }, q);
-  assert.equal(s.status, 201, JSON.stringify(s.body));
-  const n2 = await net();
-  assert.equal(n2[cara.uid], 0);
-  ok('only Ali (who received the money) can confirm Cara paid him → Cara is square; Cara and Bob can’t tick it');
-  // Only the receiver can undo it — not Cara who sent it (she's its payer).
-  assert.equal((await cara.call('expenses/delete', { id: s.body.id }, q)).status, 403);
-  assert.equal((await ali.call('expenses/delete', { id: s.body.id }, q)).status, 200);
-  assert.equal((await net())[cara.uid], n1[cara.uid]);
-  ok('only Ali (who received it) can undo the payment — Cara, who sent it, can’t');
+  // Paid back: only the person who paid the bill ticks (and un-ticks) who paid them back — not the
+  // person who owes, not the admin.
+  assert.equal((await cara.call('expenses/paid-back', { id: taxi.id, uid: cara.uid, paid: true }, q)).status, 403);
+  assert.equal((await ali.call('expenses/paid-back', { id: taxi.id, uid: cara.uid, paid: true }, q)).status, 403); // admin, not the payer
+  assert.equal((await bob.call('expenses/paid-back', { id: taxi.id, uid: cara.uid, paid: true }, q)).status, 200);
+  assert.ok((await db.doc(`trips/${q.tripId}/expenses/${taxi.id}`).get()).data().paidBack[cara.uid] > 0);
+  assert.equal((await bob.call('expenses/paid-back', { id: taxi.id, uid: cara.uid, paid: false }, q)).status, 200);
+  assert.equal((await db.doc(`trips/${q.tripId}/expenses/${taxi.id}`).get()).data().paidBack[cara.uid], undefined);
+  assert.equal((await ali.call('expenses/settle', { from: cara.uid, to: ali.uid, amountMinor: 1000, date: '2026-12-08' }, q)).status, 404);
+  ok('only Bob (who paid the taxi) ticks / un-ticks Cara as paid back — Cara and the admin can’t; there is no “Received” button any more');
 
   // Receipt: upload into Bob's own folder, AI reads it, anyone in the trip can view it.
   const path = `trips/${q.tripId}/users/${bob.uid}/receipts/${run}.pdf`;

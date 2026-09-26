@@ -1,4 +1,4 @@
-// Money tab: my balance, the fewest payments to settle up, my daily budget vs
+// Money tab: my balance, who still owes whom (bill by bill), my daily budget vs
 // what I actually spent, spending by category, and every expense by day.
 import { ArrowRight, Check, Paperclip, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -11,11 +11,11 @@ import {
   dailySpend,
   formatMoney,
   paths,
-  settleUp,
   sharesOf,
+  stillOwed,
   toMinor,
   type ExpenseCategory,
-  type Transfer,
+  type Owed,
 } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
@@ -51,7 +51,7 @@ export function ExpensesPage() {
       paid,
       share,
       net,
-      transfers: settleUp(net),
+      owed: stillOwed(list),
       total: spending.reduce((s, e) => s + e.tripAmountMinor, 0),
       myShare: spending.reduce((s, e) => s + (sharesOf(e)[me.uid] ?? 0), 0),
       byCategory: [...byCategory].sort((a, b) => b[1] - a[1]),
@@ -81,7 +81,7 @@ export function ExpensesPage() {
       ) : expenses.data.length === 0 ? (
         <Card className="p-6 text-center space-y-3">
           <p className="font-bold text-[#161C23]">No expenses yet</p>
-          <p className="text-sm text-[#6D7A77]">Add what someone paid for the group: snap the receipt, and Safar works out who owes whom in the fewest payments.</p>
+          <p className="text-sm text-[#6D7A77]">Add what someone paid for the group: snap the receipt, and Safar works out who owes whom for each bill.</p>
           <Button onClick={() => setEditing('new')}>
             <Plus className="w-4 h-4" /> Add the first expense
           </Button>
@@ -94,7 +94,7 @@ export function ExpensesPage() {
             <Stat label="Group spent" value={money(view.total)} />
           </Card>
 
-          <SettleUp transfers={view.transfers} nameOf={nameOf} money={money} />
+          <SettleUp owed={view.owed} nameOf={nameOf} money={money} />
 
           {members.length > 1 && (
             <Card className="p-4 space-y-2">
@@ -116,7 +116,7 @@ export function ExpensesPage() {
                   );
                 })}
               </div>
-              <p className="text-xs text-[#6D7A77]">+ is owed money, − owes. Balances include payments already recorded.</p>
+              <p className="text-xs text-[#6D7A77]">+ is owed money, − owes. Shares ticked as paid back are left out.</p>
             </Card>
           )}
           <Budget daily={view.daily} money={money} />
@@ -163,58 +163,58 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'go
   );
 }
 
-function SettleUp({ transfers, nameOf, money }: { transfers: Transfer[]; nameOf: (uid: string) => string; money: (m: number) => string }) {
-  const { trip, members, me } = useTrip();
-  const [busy, setBusy] = useState<string>();
-  const [error, setError] = useState('');
-  if (!transfers.length) return null;
-
-  const record = async (t: Transfer) => {
-    if (!confirm(`Confirm that ${nameOf(t.from)} paid you ${money(t.amountMinor)}? Only tick it once the money has arrived.`)) return;
-    setBusy(`${t.from}>${t.to}`);
-    setError('');
-    try {
-      await api.post('expenses/settle', { ...t, date: tripToday(trip) }, { tripId: trip.id });
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not record it.');
-    } finally {
-      setBusy(undefined);
-    }
-  };
-
-  // My own payments first.
-  const sorted = [...transfers].sort((a, b) => +[b.from, b.to].includes(me.uid) - +[a.from, a.to].includes(me.uid));
+/** Who still owes whom — each bill's unpaid shares, grouped by pair. Read-only: the bill's payer ticks people off on the bill. */
+function SettleUp({ owed, nameOf, money }: { owed: Owed[]; nameOf: (uid: string) => string; money: (m: number) => string }) {
+  const { members, me } = useTrip();
+  const pairs = new Map<string, { from: string; to: string; total: number; bills: Owed[] }>();
+  for (const o of owed) {
+    const key = `${o.from}>${o.to}`;
+    const p = pairs.get(key) ?? { from: o.from, to: o.to, total: 0, bills: [] };
+    p.total += o.amountMinor;
+    p.bills.push(o);
+    pairs.set(key, p);
+  }
+  // My own debts and money owed to me first, then the biggest.
+  const mine = (p: { from: string; to: string }) => +[p.from, p.to].includes(me.uid);
+  const sorted = [...pairs.values()].sort((a, b) => mine(b) - mine(a) || b.total - a.total);
   return (
     <Card className="p-4 space-y-3">
       <div>
         <h2 className="font-bold text-[#161C23]">Settle up</h2>
-        <p className="text-xs text-[#6D7A77]">The fewest payments that make everyone square. Pay by bank transfer, DuitNow or cash — only the person who receives it ticks it here (not the admin). This covers every bill: no need to tick receipts one by one.</p>
+        <p className="text-xs text-[#6D7A77]">
+          {sorted.length ? 'Who still owes whom, for each bill. Once paid, the person who paid the bill ticks it off on the bill below.' : 'Everyone is square — nobody owes anything.'}
+        </p>
       </div>
-      <ul className="space-y-2">
-        {sorted.map((t) => {
-          const involved = t.from === me.uid || t.to === me.uid;
-          const from = members.find((m) => m.uid === t.from);
-          const to = members.find((m) => m.uid === t.to);
-          return (
-            <li key={`${t.from}>${t.to}`} className={cx('flex items-center gap-2 rounded-xl p-2.5', involved ? 'bg-[#00685F]/5 ring-1 ring-[#00685F]/20' : 'bg-[#FAF8F5]')}>
-              <Avatar name={from?.displayName ?? '?'} photoURL={from?.photoURL} size={28} />
-              <span className="text-sm font-semibold text-[#161C23] truncate">{nameOf(t.from)}</span>
-              <ArrowRight className="w-4 h-4 text-[#6D7A77] shrink-0" />
-              <Avatar name={to?.displayName ?? '?'} photoURL={to?.photoURL} size={28} />
-              <span className="text-sm font-semibold text-[#161C23] truncate flex-1">{nameOf(t.to)}</span>
-              <span className="font-extrabold text-[#161C23] shrink-0">{money(t.amountMinor)}</span>
-              {t.to === me.uid ? (
-                <Button variant="secondary" className="!min-h-9 !px-2.5 shrink-0" loading={busy === `${t.from}>${t.to}`} onClick={() => void record(t)} aria-label={`${nameOf(t.from)} paid you — confirm`}>
-                  <Check className="w-4 h-4" /> <span className="hidden sm:inline">Received</span>
-                </Button>
-              ) : t.from === me.uid ? (
-                <span className="shrink-0 text-[11px] text-[#6D7A77] max-w-[7rem] text-right">{nameOf(t.to)} ticks it once it arrives</span>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-      <ErrorBanner>{error}</ErrorBanner>
+      {sorted.length > 0 && (
+        <ul className="space-y-2">
+          {sorted.map((p) => {
+            const from = members.find((m) => m.uid === p.from);
+            const to = members.find((m) => m.uid === p.to);
+            return (
+              <li key={`${p.from}>${p.to}`} className={cx('rounded-xl p-2.5 space-y-1.5', mine(p) ? 'bg-[#00685F]/5 ring-1 ring-[#00685F]/20' : 'bg-[#FAF8F5]')}>
+                <div className="flex items-center gap-2">
+                  <Avatar name={from?.displayName ?? '?'} photoURL={from?.photoURL} size={28} />
+                  <span className="text-sm font-semibold text-[#161C23] truncate">{nameOf(p.from)}</span>
+                  <span className="text-xs text-[#6D7A77] shrink-0">{p.from === me.uid ? 'owe' : 'owes'}</span>
+                  <ArrowRight className="w-4 h-4 text-[#6D7A77] shrink-0" />
+                  <Avatar name={to?.displayName ?? '?'} photoURL={to?.photoURL} size={28} />
+                  <span className="text-sm font-semibold text-[#161C23] truncate flex-1">{nameOf(p.to)}</span>
+                  <span className="font-extrabold text-[#B3261E] shrink-0">{money(p.total)}</span>
+                </div>
+                <ul className="ml-9 space-y-0.5 text-xs text-[#6D7A77]">
+                  {p.bills.map((o) => (
+                    <li key={o.expenseId} className="flex gap-2">
+                      <span className="w-20 shrink-0">{formatDay(o.date)}</span>
+                      <span className="flex-1 min-w-0 truncate text-[#161C23]">{o.title}</span>
+                      <span className="shrink-0 font-semibold text-[#161C23]">{money(o.amountMinor)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </Card>
   );
 }
@@ -275,8 +275,22 @@ function ExpenseRow({ expense: e, nameOf, money, stop, onEdit }: { expense: Expe
   const [error, setError] = useState('');
   const shares = sharesOf(e);
   const myShare = shares[me.uid] ?? 0;
+  const iPaid = e.paidBy === me.uid;
   const owers = Object.entries(shares).filter(([u, v]) => u !== e.paidBy && v > 0);
-  // Payments are undone only by whoever received them (they confirmed it); bills by whoever added / paid them, or the admin.
+  const [ticking, setTicking] = useState<string>();
+  // Only the person who paid the bill ticks who paid them back (not the admin).
+  const tick = async (uid: string, paid: boolean) => {
+    setTicking(uid);
+    setError('');
+    try {
+      await api.post('expenses/paid-back', { id: e.id, uid, paid }, { tripId: trip.id });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not save.');
+    } finally {
+      setTicking(undefined);
+    }
+  };
+  // Older recorded payments are undone only by whoever received them; bills by whoever added / paid them, or the admin.
   const receiver = e.settlement && e.split.mode === 'equal' && e.split.uids.includes(me.uid);
   const canEdit = !e.settlement && (e.createdBy === me.uid || e.paidBy === me.uid || isAdmin);
   const canDelete = e.settlement ? receiver : canEdit;
@@ -345,11 +359,29 @@ function ExpenseRow({ expense: e, nameOf, money, stop, onEdit }: { expense: Expe
         </div>
       </div>
       {owers.length > 0 && (
-        // Who owes the payer what for this bill — paying back is confirmed once, in Settle up.
-        <p className="ml-12 text-xs text-[#6D7A77]">
-          {owers.map(([u, v]) => `${u === me.uid ? 'Your' : `${nameOf(u)}'s`} share ${money(v)}`).join(' · ')}
-          {' · '}paid back through Settle up
-        </p>
+        <ul className="ml-12 space-y-1">
+          {owers.map(([u, v]) => {
+            const back = !!e.paidBack?.[u];
+            return (
+              <li key={u} className="flex items-center gap-2 text-xs">
+                <label className={cx('flex items-center gap-2 flex-1 min-w-0', iPaid ? 'cursor-pointer' : 'cursor-default')}>
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-[#00685F]"
+                    checked={back}
+                    disabled={!iPaid || ticking === u}
+                    onChange={() => void tick(u, !back)}
+                    aria-label={`${nameOf(u)} paid ${nameOf(e.paidBy)} back`}
+                  />
+                  <span className={cx('truncate', back ? 'text-[#6D7A77] line-through' : 'text-[#161C23]')}>
+                    {u === me.uid ? 'You' : nameOf(u)} owe{u === me.uid ? '' : 's'} {money(v)}
+                  </span>
+                </label>
+                <span className={cx('shrink-0', back ? 'text-[#00685F] font-semibold' : 'text-[#9AA5A3]')}>{back ? 'paid back ✓' : iPaid ? 'tick when paid' : `${nameOf(e.paidBy)} ticks it`}</span>
+              </li>
+            );
+          })}
+        </ul>
       )}
       {(e.receiptPath || canDelete) && (
         <div className="flex justify-end gap-1">

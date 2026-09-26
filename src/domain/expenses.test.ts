@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { allocate, balances, convertMinor, dailySpend, formatMoney, settleUp, sharesOf, splitProblem, toMinor } from './expenses';
+import { allocate, balances, convertMinor, dailySpend, formatMoney, sharesOf, splitProblem, stillOwed, toMinor } from './expenses';
 
-const e = (paidBy: string, trip: number, split: Parameters<typeof sharesOf>[0]['split'], over = {}) => ({ paidBy, tripAmountMinor: trip, amountMinor: trip, split, date: '2026-12-07', category: 'food' as const, settlement: false, ...over });
+let n = 0;
+const e = (paidBy: string, trip: number, split: Parameters<typeof sharesOf>[0]['split'], over = {}) => ({ id: `e${++n}`, title: `Bill ${n}`, paidBy, tripAmountMinor: trip, amountMinor: trip, split, date: '2026-12-07', category: 'food' as const, settlement: false, ...over });
 
 describe('money maths', () => {
   it('splits cents so parts always add up', () => {
@@ -29,24 +30,33 @@ describe('money maths', () => {
     expect(splitProblem({ mode: 'shares', parts: { a: 1 } }, 100)).toBeNull();
   });
 
-  it('balances and the fewest transfers to settle up', () => {
+  it('who owes whom, bill by bill — no netting, so every person who shares a bill shows', () => {
     const all = ['ali', 'bob', 'cara', 'dan'];
     const list = [
       e('ali', 12000, { mode: 'equal', uids: all }), // dinner RM120
       e('bob', 4000, { mode: 'equal', uids: all }), // taxi RM40
       e('cara', 2000, { mode: 'equal', uids: ['cara', 'dan'] }), // snacks
     ];
+    const owed = stillOwed(list);
+    // Bob paid the taxi, but he still owes Ali for dinner (and Ali owes him for the taxi) — both shown.
+    expect(owed.filter((o) => o.to === 'ali').map((o) => [o.from, o.amountMinor])).toEqual([['bob', 3000], ['cara', 3000], ['dan', 3000]]);
+    expect(owed.filter((o) => o.to === 'bob').map((o) => o.from)).toEqual(['ali', 'cara', 'dan']);
+    expect(owed.find((o) => o.to === 'cara')).toMatchObject({ from: 'dan', amountMinor: 1000, title: list[2].title, date: '2026-12-07' });
     const net = balances(list, all);
     expect(net).toEqual({ ali: 8000, bob: 0, cara: -3000, dan: -5000 });
     expect(Object.values(net).reduce((s, v) => s + v, 0)).toBe(0);
-    const t = settleUp(net);
-    expect(t).toEqual([
-      { from: 'dan', to: 'ali', amountMinor: 5000 },
-      { from: 'cara', to: 'ali', amountMinor: 3000 },
-    ]);
-    // After paying (a settlement is an expense paid by the debtor for the creditor), everyone is square.
-    const paid = [...list, ...t.map((x) => e(x.from, x.amountMinor, { mode: 'equal', uids: [x.to] }, { settlement: true }))];
-    expect(Object.values(balances(paid, all)).every((v) => v === 0)).toBe(true);
+  });
+
+  it('the payer ticks someone off → that share is no longer owed', () => {
+    const bill = e('ali', 900, { mode: 'equal', uids: ['ali', 'bob', 'cara'] });
+    expect(stillOwed([bill]).map((o) => o.from)).toEqual(['bob', 'cara']);
+    expect(stillOwed([{ ...bill, paidBack: { bob: 1 } }]).map((o) => o.from)).toEqual(['cara']);
+    expect(balances([{ ...bill, paidBack: { bob: 1, cara: 2 } }], ['ali', 'bob', 'cara'])).toEqual({ ali: 0, bob: 0, cara: 0 });
+  });
+
+  it('an older recorded payment (X paid Y) pays off X’s oldest shares on Y’s bills', () => {
+    const list = [e('ali', 1000, { mode: 'equal', uids: ['ali', 'bob'] }), e('ali', 2000, { mode: 'equal', uids: ['ali', 'bob'] }, { date: '2026-12-08' }), e('bob', 700, { mode: 'equal', uids: ['ali'] }, { settlement: true, date: '2026-12-09' })];
+    expect(stillOwed(list).map((o) => [o.expenseId, o.amountMinor])).toEqual([[list[1].id, 800]]);
   });
 
   it('daily spend counts my share of food/activities only', () => {
@@ -87,13 +97,5 @@ describe('split amount — by item', () => {
     expect(splitProblem({ ...split, items: [...items, { name: 'Cendol', amountMinor: 500, uids: [] }] }, 4900)).toMatch(/Tick who had/);
     const shares = sharesOf({ split, amountMinor: 4400, tripAmountMinor: 4400 });
     expect(shares.ali + shares.bob + shares.cara).toBe(4400);
-  });
-  it('paying back is one settle-up payment — an old per-bill tick never counts it twice', async () => {
-    const { balances } = await import('./expenses');
-    const e = { paidBy: 'ali', split: { mode: 'equal' as const, uids: ['ali', 'bob'] }, amountMinor: 1000, tripAmountMinor: 1000 };
-    const payment = { paidBy: 'bob', split: { mode: 'equal' as const, uids: ['ali'] }, amountMinor: 500, tripAmountMinor: 500 };
-    expect(balances([e], ['ali', 'bob'])).toEqual({ ali: 500, bob: -500 });
-    expect(balances([e, payment], ['ali', 'bob'])).toEqual({ ali: 0, bob: 0 });
-    expect(balances([{ ...e, paidBack: { bob: 1 } }, payment] as never, ['ali', 'bob'])).toEqual({ ali: 0, bob: 0 });
   });
 });

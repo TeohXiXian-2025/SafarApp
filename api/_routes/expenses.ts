@@ -3,8 +3,9 @@
 //                        currencies the ECB doesn't publish), cached 12 h
 //   expenses/receipt     AI reads a receipt photo → title, amount, currency, date
 //   expenses/receipt-url a short-lived link so the whole group can see a receipt
-//   expenses/create|update|delete, expenses/settle (record a payment)
+//   expenses/create|update|delete, expenses/paid-back (the payer ticks who paid them back)
 import { Type } from '@google/genai';
+import { FieldValue } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import {
   CurrencyCode,
@@ -285,41 +286,22 @@ export const expenseRoutes: RouteTable = {
     { perMinute: 30 },
   ),
 
-  /** Record "from paid to" — confirmed by the person who received it. Amount in trip-currency minor units. */
-  'POST expenses/settle': withTrip(
+  /**
+   * "X paid me back for this bill": only the person who paid the bill ticks it
+   * (or un-ticks it) — not the person who owes, not the admin.
+   */
+  'POST expenses/paid-back': withTrip(
     async (req, { tripId, member }) => {
-      const body = await readJson(req, z.object({ from: Id, to: Id, amountMinor: z.number().int().positive(), date: LocalDate }));
-      if (body.from === body.to) throw new HttpError(400, 'Pick two different people');
-      // Only the person who gets the money confirms it arrived — nobody can tick a payment they didn't receive.
-      if (member.uid !== body.to) throw new HttpError(403, `Only ${body.to === member.uid ? 'you' : 'the person being paid'} can confirm this payment arrived`);
-      const trip = await loadTrip(tripId);
-      if (![body.from, body.to].every((u) => trip.memberIds.includes(u))) throw new HttpError(400, 'Both people must be in the trip');
-      const db = adminDb();
-      const ref = db.collection(paths.expenses(tripId)).doc();
-      const now = Date.now();
-      const expense: Expense = {
-        id: ref.id,
-        title: 'Payment',
-        amountMinor: body.amountMinor,
-        currency: trip.currency,
-        rate: 1,
-        tripAmountMinor: body.amountMinor,
-        paidBy: body.from,
-        split: { mode: 'equal', uids: [body.to] },
-        category: 'other',
-        date: body.date,
-        settlement: true,
-        paidBack: {},
-        createdBy: member.uid,
-        createdAt: now,
-        updatedAt: now,
-      };
-      const batch = db.batch();
-      batch.set(ref, expense);
-      logActivity(batch, tripId, member.uid, `${member.displayName} recorded a payment of ${formatMoney(body.amountMinor, trip.currency)}`);
-      await batch.commit();
-      return json({ id: ref.id }, { status: 201 });
+      const body = await readJson(req, z.object({ id: Id, uid: Id, paid: z.boolean() }));
+      const e = await loadExpense(tripId, body.id);
+      if (e.settlement) throw new HttpError(400, 'This is a payment, not a bill');
+      if (e.paidBy !== member.uid) throw new HttpError(403, 'Only the person who paid this bill can tick who paid them back');
+      if (body.uid === e.paidBy || !(body.uid in sharesOf(e))) throw new HttpError(400, 'That person has no share in this bill');
+      await adminDb()
+        .doc(`${paths.expenses(tripId)}/${body.id}`)
+        .update({ [`paidBack.${body.uid}`]: body.paid ? Date.now() : FieldValue.delete(), updatedAt: Date.now() });
+      return json({ ok: true });
     },
-    { perMinute: 30 },
+    { perMinute: 60 },
   ),
 };

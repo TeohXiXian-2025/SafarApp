@@ -1,5 +1,5 @@
-// Group expenses: who paid, who shares, balances and the fewest transfers to
-// settle up. Money is kept in minor units (cents/sen) — integers, so totals
+// Group expenses: who paid, who shares, and who still owes whom for which
+// bill (the payer ticks each person off when they pay back). Money is kept in minor units (cents/sen) — integers, so totals
 // always add up. Each expense keeps its own currency plus the exchange rate
 // into the trip currency on the day it was added.
 import { z } from 'zod';
@@ -63,11 +63,7 @@ export const Expense = z.object({
   settlement: z.boolean().default(false),
   receiptPath: z.string().max(300).optional(),
   note: z.string().max(300).optional(),
-  /**
-   * Old per-bill "paid back" ticks. No longer counted: paying back is recorded
-   * once, in Settle up, by the person who receives it — two places to tick
-   * made the same money count twice. Kept so older expenses still parse.
-   */
+  /** People who paid the payer back for this bill — ticked by the payer only (when it arrived). */
   paidBack: z.record(z.string(), Millis).default({}),
   createdBy: Id,
   createdAt: Millis,
@@ -145,44 +141,55 @@ export function splitProblem(split: ExpenseSplit, amountMinor: number): string |
   return null;
 }
 
-/**
- * Net per person in trip-currency minor units: + = is owed money, − = owes.
- * Paying back is a settle-up payment (an expense with `settlement`), so it
- * counts here like any other — the only record of money changing hands.
- */
-export function balances(expenses: Pick<Expense, 'paidBy' | 'split' | 'tripAmountMinor' | 'amountMinor'>[], memberIds: string[]): Record<string, number> {
-  const net: Record<string, number> = Object.fromEntries(memberIds.map((u) => [u, 0]));
-  for (const e of expenses) {
-    net[e.paidBy] = (net[e.paidBy] ?? 0) + e.tripAmountMinor;
-    for (const [u, share] of Object.entries(sharesOf(e))) net[u] = (net[u] ?? 0) - share;
-  }
-  return net;
-}
-
-export interface Transfer {
+/** One person's unpaid share of one bill: `from` owes `to` (trip-currency minor units). */
+export interface Owed {
   from: string;
   to: string;
   amountMinor: number;
+  expenseId: string;
+  title: string;
+  date: string;
 }
 
-/** The fewest transfers (greedy: biggest debtor pays biggest creditor) — at most n−1. */
-export function settleUp(net: Record<string, number>): Transfer[] {
-  const debt = Object.entries(net).filter(([, v]) => v < 0).map(([u, v]) => ({ u, v: -v })).sort((a, b) => b.v - a.v);
-  const cred = Object.entries(net).filter(([, v]) => v > 0).map(([u, v]) => ({ u, v })).sort((a, b) => b.v - a.v);
-  const out: Transfer[] = [];
-  while (debt.length && cred.length) {
-    const d = debt[0];
-    const c = cred[0];
-    const amt = Math.min(d.v, c.v);
-    if (amt > 0) out.push({ from: d.u, to: c.u, amountMinor: amt });
-    d.v -= amt;
-    c.v -= amt;
-    if (!d.v) debt.shift();
-    if (!c.v) cred.shift();
-    debt.sort((a, b) => b.v - a.v);
-    cred.sort((a, b) => b.v - a.v);
+type OwedInput = Pick<Expense, 'id' | 'title' | 'date' | 'paidBy' | 'split' | 'tripAmountMinor' | 'amountMinor'> & { settlement?: boolean; paidBack?: Record<string, number>; createdAt?: number };
+
+/**
+ * Who still owes whom, bill by bill (oldest first): every share the payer
+ * hasn't ticked as paid back. No netting between people — each debt is shown
+ * as it is. Payments recorded by an older version ("X paid Y") pay off X's
+ * oldest shares on Y's bills.
+ */
+export function stillOwed(expenses: OwedInput[]): Owed[] {
+  const byDate = [...expenses].sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  const out: Owed[] = [];
+  for (const e of byDate) {
+    if (e.settlement) continue;
+    for (const [u, share] of Object.entries(sharesOf(e))) {
+      if (u !== e.paidBy && share > 0 && !e.paidBack?.[u]) out.push({ from: u, to: e.paidBy, amountMinor: share, expenseId: e.id, title: e.title, date: e.date });
+    }
   }
-  return out;
+  for (const p of byDate.filter((e) => e.settlement && e.split.mode === 'equal')) {
+    const to = p.split.mode === 'equal' ? p.split.uids[0] : '';
+    let left = p.tripAmountMinor;
+    for (const o of out) {
+      if (left <= 0) break;
+      if (o.from !== p.paidBy || o.to !== to) continue;
+      const paid = Math.min(left, o.amountMinor);
+      o.amountMinor -= paid;
+      left -= paid;
+    }
+  }
+  return out.filter((o) => o.amountMinor > 0);
+}
+
+/** Net per person in trip-currency minor units (+ = is owed money, − = owes), from what's still owed. */
+export function balances(expenses: OwedInput[], memberIds: string[]): Record<string, number> {
+  const net: Record<string, number> = Object.fromEntries(memberIds.map((u) => [u, 0]));
+  for (const o of stillOwed(expenses)) {
+    net[o.to] = (net[o.to] ?? 0) + o.amountMinor;
+    net[o.from] = (net[o.from] ?? 0) - o.amountMinor;
+  }
+  return net;
 }
 
 /** One person's spend per day on what the daily budget covers (their shares, not what they paid). */
