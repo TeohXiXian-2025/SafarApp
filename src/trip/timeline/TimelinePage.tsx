@@ -18,6 +18,7 @@ import {
   useSensors,
   type CollisionDetection,
   type DragEndEvent,
+  type DragMoveEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -30,6 +31,9 @@ import {
   ArrangeJob,
   Booking,
   byTimeAndPriority,
+  planChain,
+  BUFFER_MIN,
+  type ChainRow,
   citiesByDay,
   cityLabel,
   durationRange,
@@ -329,6 +333,46 @@ export function TimelinePage() {
     return base.map((r) => (r.item.locked || r.prayer || !pending.order.includes(r.item.id) ? r : (queue.shift() ?? r)));
   }, [rowsByDay, day, pending]);
 
+  // ── The day as one chain: travel between every pair of blocks (stops, prayer places, bookings) ──
+  const chainOf = (list: Row[]): ChainRow[] =>
+    list
+      .filter((r) => !isSide(r.item.track))
+      .map((r) => ({ id: r.item.id, start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), fixed: r.item.locked || !!r.prayer, ...(r.prayer ? { prayer: true } : {}), ...(r.item.ref.kind === 'booking' && (r.item.ref.event === 'checkin' || r.item.ref.event === 'checkout') ? { soft: true } : {}), ...((r.in ?? r.out) ? { loc: (r.in ?? r.out)! } : {}) }));
+  const travel = useMemo(() => {
+    // Real Routes times between stops where measured (same as the server), else an estimate + 20 %.
+    const legs = new Map(rows.flatMap((r) => (r.item.transitFromPrev?.fromId ? [[`${r.item.transitFromPrev.fromId}>${r.item.id}`, r.item.transitFromPrev.minutes] as const] : [])));
+    const idAt = new Map(rows.flatMap((r) => ((r.in ?? r.out) ? [[`${(r.in ?? r.out)!.lat},${(r.in ?? r.out)!.lng}`, r.item.id] as const] : [])));
+    return (a: GeoPoint, b: GeoPoint) => {
+      if (a.lat === b.lat && a.lng === b.lng) return 0;
+      const from = idAt.get(`${a.lat},${a.lng}`);
+      const to = idAt.get(`${b.lat},${b.lng}`);
+      return (from && to ? legs.get(`${from}>${to}`) : undefined) ?? Math.round(estimateTravelMin(a, b) * 1.2);
+    };
+  }, [rows]);
+  const chain = useMemo(() => planChain(chainOf(rows), travel), [rows, travel]);
+
+  // ── Dragging into a gap between any two blocks: where it would go, and the whole day re-timed live ──
+  const [slot, setSlot] = useState<{ rowId: string; where: 'before' | 'after' } | null>(null);
+  const [moving, setMoving] = useState<{ id: string; duration: number; loc?: GeoPoint; ideaId?: string } | null>(null);
+  const [landed, setLanded] = useState<Map<string, number> | null>(null);
+  useEffect(() => setLanded(null), [schedule.data]);
+  const dropPlan = useMemo(() => {
+    if (!moving || !slot) return null;
+    const target = rows.find((r) => r.item.id === slot.rowId);
+    if (!target || target.item.id === moving.id) return null;
+    const tLoc = target.in ?? target.out;
+    const leg = moving.loc && tLoc ? travel(slot.where === 'after' ? tLoc : moving.loc, slot.where === 'after' ? moving.loc : tLoc) : 0;
+    const pad = leg > 0 ? BUFFER_MIN : 0;
+    const tStart = toMin(target.item.start);
+    const tEnd = Math.max(toMin(target.item.end), tStart);
+    const want = slot.where === 'after' ? Math.ceil((tEnd + leg + pad) / 5) * 5 : Math.floor((tStart - leg - pad - moving.duration) / 5) * 5;
+    const others = chainOf(rows).filter((c) => c.id !== moving.id);
+    const plan = planChain([...others, { id: moving.id, start: Math.max(0, want), end: Math.max(0, want) + moving.duration, fixed: false, ...(moving.loc ? { loc: moving.loc } : {}) }], travel);
+    const start = plan.starts.get(moving.id) ?? want;
+    return { start, starts: plan.starts, legs: plan.legs, fits: start >= 0 && start + moving.duration <= 24 * 60 - 1 };
+  }, [moving, slot, rows, travel]);
+  const shownStart = (id: string) => dropPlan?.starts.get(id) ?? landed?.get(id);
+
   const dayList = useMemo(() => warningsFor(day, rows), [rows, day]);
   const warnings = useMemo(() => {
     const byItem = new Map<string, DayWarning[]>();
@@ -527,8 +571,22 @@ export function TimelinePage() {
     const under = pointerWithin(args);
     const chip = under.find((c) => /^chip2?:/.test(String(c.id)));
     if (chip) return [chip];
-    if (String(args.active.id).startsWith('backlog:')) return under.length ? under : closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((c) => c.id === 'day-list') });
-    return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((c) => sortIds.includes(String(c.id))) });
+    if (rearranging) return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((c) => sortIds.includes(String(c.id))) });
+    // The timeline: the block under the pointer (drop before / after it), else the nearest block.
+    const slotUnder = under.find((c) => String(c.id).startsWith('slot:'));
+    if (slotUnder) return [slotUnder];
+    const slots = args.droppableContainers.filter((c) => String(c.id).startsWith('slot:'));
+    return slots.length ? closestCenter({ ...args, droppableContainers: slots }) : under;
+  };
+  /** Which half of the block the dragged card's centre is over → before / after it. */
+  const onDragMove = (e: DragMoveEvent) => {
+    const over = e.over;
+    if (!over || !String(over.id).startsWith('slot:')) return setSlot((cur) => (cur ? null : cur));
+    const rect = e.active.rect.current.translated;
+    const y = rect ? rect.top + rect.height / 2 : 0;
+    const where = y < over.rect.top + over.rect.height / 2 ? 'before' : 'after';
+    const rowId = String(over.id).slice(5);
+    setSlot((cur) => (cur?.rowId === rowId && cur.where === where ? cur : { rowId, where }));
   };
   /** Earlier / later by one place (the same as dragging it). */
   const nudge = (id: string, by: -1 | 1) => {
@@ -557,12 +615,42 @@ export function TimelinePage() {
     setArranging(false);
   };
 
-  const onDragStart = (e: DragStartEvent) => setDragging({ title: String(e.active.data.current?.title ?? '') });
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
+  const onDragStart = (e: DragStartEvent) => {
+    setDragging({ title: String(e.active.data.current?.title ?? '') });
+    const id = String(e.active.id);
+    if (id.startsWith('backlog:')) {
+      const idea = ideaMap.get(id.slice(8));
+      if (idea) setMoving({ id, duration: durationRange(idea.estDurationMin).min, loc: idea.place.location, ideaId: idea.id });
+    } else {
+      const r = rows.find((x) => x.item.id === id);
+      if (r) setMoving({ id, duration: Math.max(5, toMin(r.item.end) - toMin(r.item.start)), ...((r.in ?? r.out) ? { loc: (r.in ?? r.out)! } : {}) });
+    }
+  };
+  // The browser's scroll anchoring would jump the page while auto-scrolling a drag.
+  useEffect(() => {
+    document.documentElement.style.overflowAnchor = dragging ? 'none' : '';
+  }, [dragging]);
+  const endDrag = () => {
     setDragging(null);
+    setMoving(null);
+    setSlot(null);
+  };
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    const dropped = dropPlan;
+    const drag = moving;
+    endDrag();
     if (!over) return;
     const id = String(active.id);
     const target = String(over.id);
+    // Into a gap on this day: it takes that time; everything after it is re-timed (travel included).
+    if (target.startsWith('slot:') && dropped && drag) {
+      if (!dropped.fits) return setError(`${drag.id.startsWith('backlog:') ? 'That' : 'It'} doesn't fit there — it would run past midnight. Drop it earlier or on another day.`);
+      setLanded(dropped.starts);
+      const start = toClock(dropped.start);
+      if (id.startsWith('backlog:')) void call(() => api.post('schedule/add', { ideaId: drag.ideaId, day, start, durationMin: drag.duration }, { tripId: trip.id }));
+      else void call(() => api.post('schedule/update', { id, start }, { tripId: trip.id }));
+      return;
+    }
     if (id.startsWith('backlog:')) {
       const toDay = /^chip2?:/.test(target) ? target.split(':')[1] : day;
       void call(async () => {
@@ -656,7 +744,7 @@ export function TimelinePage() {
   });
 
   return (
-    <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
+    <DndContext sensors={sensors} collisionDetection={collision} autoScroll={{ acceleration: 30, threshold: { x: 0, y: 0.18 } }} onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd} onDragCancel={endDrag}>
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -916,12 +1004,25 @@ export function TimelinePage() {
               />
             ) : (
               <DayList empty={!rows.length}>
-                <SortableContext items={movable} strategy={verticalListSortingStrategy}>
                   {rows.map((r, i) => {
-                    // Travel legs skip prayer breaks: you go from the last stop to the next one.
-                    const prev = rows.slice(0, i).reverse().find((x) => !x.prayer);
+                    // Travel into every block from the one before it — stops, prayer places, bookings.
+                    // While dragging only the times change (live) — the rows keep their place so nothing jumps.
+                    const leg = chain.legs.get(r.item.id);
+                    const prevRow = i > 0 ? rows[i - 1] : undefined;
+                    const line =
+                      slot?.rowId === r.item.id && dropPlan && moving
+                        ? { where: slot.where, text: dropPlan.fits ? `${dragging?.title ?? 'It'} would start at ${fmtClock(dropPlan.start)}` : "Doesn't fit before midnight" }
+                        : null;
+                    const travelRow = prevRow && sameJourney(prevRow.item, r.item) ? (
+                      <OnBoardRow booking={r.item.ref.kind === 'booking' ? bookingMap.get(r.item.ref.bookingId) : undefined} />
+                    ) : leg ? (
+                      <TravelRow minutes={leg.minutes} real={r.item.transitFromPrev?.fromId === leg.fromId ? r.item.transitFromPrev : undefined} to={r.prayer ? 'prayer' : undefined} />
+                    ) : (
+                      <div className="h-1.5" />
+                    );
                     return (
-                      <div key={r.item.id}>
+                      <DropRow key={r.item.id} id={r.item.id} line={line}>
+                        {i > 0 && travelRow}
                         {r.prayer ? (
                           <PrayerRow
                             row={r}
@@ -940,9 +1041,9 @@ export function TimelinePage() {
                           />
                         ) : (
                           <>
-                            {prev && (sameJourney(prev.item, r.item) ? <OnBoardRow booking={r.item.ref.kind === 'booking' ? bookingMap.get(r.item.ref.bookingId) : undefined} /> : <TravelRow leg={r.item.transitFromPrev} a={prev.out} b={r.in} />)}
                             <StopRow
                               row={r}
+                              shownStart={shownStart(r.item.id)}
                               index={movable.indexOf(r.item.id)}
                               count={movable.length}
                               days={days}
@@ -966,10 +1067,9 @@ export function TimelinePage() {
                             />
                           </>
                         )}
-                      </div>
+                      </DropRow>
                     );
                   })}
-                </SortableContext>
               </DayList>
             )}
           </div>
@@ -1173,6 +1273,7 @@ function DayList({ empty, children }: { empty: boolean; children: ReactNode }) {
 
 function StopRow({
   row,
+  shownStart,
   index,
   count,
   days,
@@ -1190,6 +1291,8 @@ function StopRow({
   onEdit,
 }: {
   row: Row;
+  /** While dragging / saving: the start the re-timed day gives it. */
+  shownStart?: number;
   /** Position among the day's movable stops (-1 = locked). */
   index: number;
   count: number;
@@ -1208,15 +1311,18 @@ function StopRow({
   onEdit: () => void;
 }) {
   const { item } = row;
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: item.locked, data: { title: row.title } });
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: item.id, disabled: item.locked, data: { title: row.title } });
   const moment = item.start === item.end;
+  const len = toMin(item.end) - toMin(item.start);
+  const s0 = shownStart ?? toMin(item.start);
+  const moved = shownStart !== undefined && shownStart !== toMin(item.start);
   const movable = !item.locked;
   return (
-    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={cx(isDragging && 'opacity-40 z-10 relative')}>
+    <div ref={setNodeRef} className={cx(isDragging && 'opacity-40')}>
       <Card className={cx('flex items-stretch', item.locked && 'bg-[#F3EFE9]', selected && 'ring-2 ring-[#00685F]/50')}>
-        <div className="w-[4.75rem] shrink-0 py-3 pl-3 text-xs font-bold text-[#161C23] tabular-nums">
-          <p>{fmtClock(toMin(item.start))}</p>
-          {!moment && <p className="text-[#6D7A77] font-semibold">{fmtClock(toMin(item.end))}</p>}
+        <div className={cx('w-[4.75rem] shrink-0 py-3 pl-3 text-xs font-bold tabular-nums', moved ? 'text-[#00685F]' : 'text-[#161C23]')}>
+          <p>{fmtClock(s0)}</p>
+          {!moment && <p className={cx('font-semibold', moved ? 'text-[#00685F]' : 'text-[#6D7A77]')}>{fmtClock(s0 + len)}</p>}
           {row.zone && (row.zone !== dayZone || item.ref.kind === 'booking') && (
             <p className={cx('mt-0.5 text-[10px] leading-tight font-semibold', row.zone !== dayZone ? 'text-[#8A5A00]' : 'text-[#9AA5A3]')}>{row.zoneName ?? tzCity(row.zone)} time</p>
           )}
@@ -1327,19 +1433,40 @@ function OnBoardRow({ booking }: { booking?: Booking }) {
   );
 }
 
-function TravelRow({ leg, a, b }: { leg?: TransitLeg; a?: GeoPoint; b?: GeoPoint }) {
-  if (!leg && !(a && b)) return <div className="h-2" />;
-  const Icon = leg ? MODE[leg.mode].icon : TrainFront;
-  const text = leg
-    ? leg.minutes === 0
+/** Travel from the block before: the Routes API leg when measured, else an estimate. */
+function TravelRow({ minutes, real, to }: { minutes: number; real?: TransitLeg; to?: 'prayer' }) {
+  const mode = real?.mode ?? (minutes <= 18 ? 'walk' : 'transit');
+  const Icon = MODE[mode].icon;
+  const text =
+    minutes === 0
       ? 'Same place'
-      : `${leg.minutes} min ${MODE[leg.mode].label}${leg.meters ? ` · ${leg.meters < 1000 ? `${leg.meters} m` : `${(leg.meters / 1000).toFixed(1)} km`}` : ''}`
-    : `About ${estimateTravelMin(a!, b!)} min (working out the route…)`;
+      : real
+        ? `${real.minutes} min ${MODE[real.mode].label}${real.meters ? ` · ${real.meters < 1000 ? `${real.meters} m` : `${(real.meters / 1000).toFixed(1)} km`}` : ''}`
+        : `~${minutes} min ${MODE[mode].label}${to === 'prayer' ? ' to pray' : ''}`;
   return (
-    <p className="flex items-center gap-2 pl-8 py-1.5 text-xs text-[#6D7A77]">
+    <p className="flex items-center gap-2 pl-8 py-1 text-xs text-[#6D7A77]">
       <span className="h-4 border-l-2 border-dotted border-[#D5CEC4]" />
       <Icon className="w-3.5 h-3.5" /> {text}
     </p>
+  );
+}
+
+/** A block on the timeline that a card can be dropped before / after; shows where it would land. */
+function DropRow({ id, line, children }: { id: string; line: { where: 'before' | 'after'; text: string } | null; children: ReactNode }) {
+  const { setNodeRef } = useDroppable({ id: `slot:${id}` });
+  // Drawn over the edge of the block (takes no space) — nothing on the page moves while you drag.
+  const bar = line && (
+    <div className={cx('pointer-events-none absolute inset-x-0 z-20 flex items-center gap-2', line.where === 'before' ? '-top-2.5' : '-bottom-2.5')} aria-live="polite">
+      <span className="h-1 flex-1 rounded bg-[#00685F]" />
+      <span className="shrink-0 rounded-full bg-[#00685F] px-2 py-0.5 text-[11px] font-bold text-white shadow">{line.text}</span>
+      <span className="h-1 w-4 rounded bg-[#00685F]" />
+    </div>
+  );
+  return (
+    <div ref={setNodeRef} className="relative" data-block={id}>
+      {children}
+      {bar}
+    </div>
   );
 }
 

@@ -141,3 +141,78 @@ describe('same-time priority (journey > prayer > hotel > the rest)', () => {
     expect(w.find((x) => x.itemId === 'ci')?.kind).toBe('checkin');
   });
 });
+
+describe('planChain — travel between every block', () => {
+  const A = { lat: 3.139, lng: 101.6869 };
+  const far = { lat: 3.2, lng: 101.75 }; // ~10 km
+  const mosque = { lat: 3.142, lng: 101.69 };
+  const h = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3));
+  it('a stop right after a prayer starts after walking from the mosque', async () => {
+    const { planChain, estimateTravelMin } = await import('./timeline');
+    const p = planChain(
+      [
+        { id: 'dhuhr', start: h('13:10'), end: h('13:40'), loc: mosque, fixed: true },
+        { id: 'stop', start: h('13:40'), end: h('15:00'), loc: far, fixed: false },
+      ],
+      estimateTravelMin,
+    );
+    expect(p.legs.get('stop')!.minutes).toBe(estimateTravelMin(mosque, far));
+    expect(p.starts.get('stop')!).toBeGreaterThanOrEqual(h('13:40') + estimateTravelMin(mosque, far) + 10);
+  });
+  it('a short stop that would run into a prayer moves after it; a long visit prays inside', async () => {
+    const { planChain, estimateTravelMin } = await import('./timeline');
+    const rows = [
+      { id: 'a', start: h('12:30'), end: h('13:30'), loc: A, fixed: false },
+      { id: 'dhuhr', start: h('13:10'), end: h('13:40'), loc: A, fixed: true, prayer: true },
+    ];
+    // Dhuhr falls in the middle of the visit: it stays (you step out to pray) — no chain of pushes to the evening.
+    expect(planChain(rows, estimateTravelMin).starts.get('a')).toBe(h('12:30'));
+    // Starting inside the prayer time: it waits until after the prayer.
+    const late = [{ id: 'x', start: h('11:00'), end: h('12:00'), loc: A, fixed: false }, { id: 'dhuhr', start: h('13:10'), end: h('13:40'), loc: A, fixed: true, prayer: true }, { id: 'b', start: h('13:15'), end: h('14:15'), loc: A, fixed: false }];
+    expect(planChain(late, estimateTravelMin).starts.get('b')).toBeGreaterThanOrEqual(h('13:40'));
+    // A 2-hour stop added late morning isn't pushed past every prayer of the day.
+    const day = [
+      { id: 'a', start: h('09:00'), end: h('11:00'), loc: A, fixed: false },
+      { id: 'b', start: h('11:15'), end: h('13:15'), loc: A, fixed: false },
+      ...[['dhuhr', '13:10'], ['asr', '16:30'], ['maghrib', '19:05'], ['isha', '20:20']].map(([id, t]) => ({ id, start: h(t), end: h(t) + 30, loc: A, fixed: true, prayer: true })),
+    ];
+    expect(planChain(day, estimateTravelMin).starts.get('b')).toBeLessThan(h('12:00'));
+    const park = [{ id: 'disney', start: h('09:00'), end: h('18:00'), loc: far, fixed: false }, { id: 'dhuhr', start: h('11:35'), end: h('12:05'), loc: far, fixed: true }, { id: 'dinner', start: h('18:30'), end: h('19:30'), loc: far, fixed: false }];
+    const pp = planChain(park, estimateTravelMin);
+    expect(pp.starts.get('disney')).toBe(h('09:00'));
+    expect(pp.legs.get('dinner')!.fromId).toBe('disney');
+  });
+});
+
+it('planChain: after a prayer, only travel beyond the walk the prayer block already includes counts', async () => {
+  const { planChain } = await import('./timeline');
+  const h = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3));
+  const P = { lat: 3.14, lng: 101.69 };
+  const Q = { lat: 3.2, lng: 101.75 };
+  const rows = [
+    { id: 'dhuhr', start: h('13:10'), end: h('13:40'), loc: P, fixed: true, prayer: true },
+    { id: 'near', start: h('13:45'), end: h('14:45'), loc: P, fixed: false },
+    { id: 'far', start: h('14:50'), end: h('15:50'), loc: Q, fixed: false },
+  ];
+  const p = planChain(rows, (a, b) => (a === b ? 0 : 25));
+  expect(p.starts.get('near')).toBe(h('13:45'));
+  expect(p.starts.get('far')).toBe(h('15:20')); // 14:45 + 25 min travel + 10 buffer
+});
+
+it('planChain: a moment or prayer during a stop never makes the next stop start inside it', async () => {
+  const { planChain } = await import('./timeline');
+  const h = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3));
+  const L = (n: number) => ({ lat: 3.1 + n / 100, lng: 101.7 });
+  const rows = [
+    { id: 'Sy', start: h('09:45'), end: h('11:15'), fixed: false, loc: L(1) },
+    { id: 'checkout', start: h('12:00'), end: h('12:00'), fixed: true, loc: L(2) },
+    { id: 'dhuhr', start: h('13:10'), end: h('13:40'), fixed: true, prayer: true, loc: L(3) },
+    { id: 'a', start: h('14:10'), end: h('15:40'), fixed: false, loc: L(4) },
+    { id: 'meal', start: h('14:10'), end: h('15:10'), fixed: false, loc: L(5) },
+    { id: 'asr', start: h('16:30'), end: h('17:00'), fixed: true, prayer: true, loc: L(6) },
+    { id: 'b', start: h('17:20'), end: h('18:50'), fixed: false, loc: L(7) },
+  ];
+  const p = planChain(rows, () => 20);
+  const placed = rows.filter((r) => !r.fixed).map((r) => ({ id: r.id, s: p.starts.get(r.id)!, e: p.starts.get(r.id)! + (r.end - r.start) })).sort((x, y) => x.s - y.s);
+  for (let i = 1; i < placed.length; i++) expect(placed[i].s).toBeGreaterThanOrEqual(placed[i - 1].e);
+});

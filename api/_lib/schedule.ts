@@ -23,7 +23,8 @@ import {
   paths,
   PRAYER_LABEL,
   planDay,
-  pushForward,
+  planChain,
+  type ChainRow,
   journeySpans,
   goodForWhilePraying,
   openingRanges,
@@ -490,38 +491,41 @@ export async function refreshLegs(tripId: string, day: string, data: TripData) {
  */
 export async function retimeDay(tripId: string, day: string, data: TripData): Promise<boolean> {
   const items = await dayItems(tripId, day);
-  const chain = items.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTimeAndPriority);
-  const movable = chain.filter((i) => !i.locked);
-  if (!movable.length) return false;
-  const ends = itemEnds(data, items);
-  const units: Unit[] = movable.flatMap((it) => {
-    const loc = ends.get(it.id)?.in;
-    if (!loc) return [];
-    // Travel only — not opening hours: a time someone typed on purpose stays (the timeline flags it instead).
-    return [{ id: it.id, loc, duration: Math.max(5, toMin(it.end) - toMin(it.start)), notBefore: toMin(it.start) }];
-  });
-  // Measured legs by (from, to) stop; locked spans (same-day journeys) are blocks.
+  const main = items.filter((i) => !isTrackB(i));
+  if (!main.some((i) => !i.locked && !isPrayerItem(i))) return false;
+  const ends = itemEnds(data, main);
+  // Every block of the day in one chain: stops move, prayer times and bookings don't.
+  const rows: ChainRow[] = main.map((it) => ({
+    id: it.id,
+    start: toMin(it.start),
+    end: Math.max(toMin(it.end), toMin(it.start)),
+    fixed: it.locked || isPrayerItem(it),
+    ...(isPrayerItem(it) ? { prayer: true } : {}),
+    ...(it.ref.kind === 'booking' && (it.ref.event === 'checkin' || it.ref.event === 'checkout') ? { soft: true } : {}),
+    ...((it.prayer?.facility?.location ?? ends.get(it.id)?.in) ? { loc: it.prayer?.facility?.location ?? ends.get(it.id)!.in } : {}),
+  }));
+  // Real Routes times between stops where measured, else an estimate + 20 %.
   const legs = new Map(items.flatMap((i) => (i.transitFromPrev?.fromId ? [[`${i.transitFromPrev.fromId}>${i.id}`, i.transitFromPrev.minutes] as const] : [])));
-  const idAt = new Map(units.map((u) => [`${u.loc.lat},${u.loc.lng}`, u.id]));
+  const idAt = new Map(rows.filter((r) => r.loc).map((r) => [`${r.loc!.lat},${r.loc!.lng}`, r.id]));
   const travel = (a: GeoPoint, b: GeoPoint) => {
+    if (a.lat === b.lat && a.lng === b.lng) return 0;
     const from = idAt.get(`${a.lat},${a.lng}`);
     const to = idAt.get(`${b.lat},${b.lng}`);
-    if (from && from === to) return 0;
-    const known = from && to ? legs.get(`${from}>${to}`) : undefined;
-    return known ?? Math.round(estimateTravelMin(a, b) * 1.2);
+    return (from && to ? legs.get(`${from}>${to}`) : undefined) ?? Math.round(estimateTravelMin(a, b) * 1.2);
   };
-  const base = frameAt(data, day, units[0]?.loc);
-  const locked = items.filter((i) => i.locked && toMin(i.end) > toMin(i.start)).map((l) => ({ start: toMin(l.start), end: toMin(l.end) }));
-  const moved = pushForward({ ...base, blocks: [...base.blocks, ...locked] }, units, travel);
-  if (!moved.size) return false;
+  const plan = planChain(rows, travel);
   const batch = adminDb().batch();
-  for (const [id, start] of moved) {
-    const it = movable.find((m) => m.id === id)!;
+  let moved = 0;
+  for (const [id, start] of plan.starts) {
+    const it = main.find((m) => m.id === id)!;
     const shift = start - toMin(it.start);
+    // Never past midnight: the end would be cut at 23:59 and the stop lose its length (the day shows 🔴 instead).
+    if (!shift || toMin(it.end) + shift > 24 * 60 - 1) continue;
+    moved++;
     for (const g of pairIds(it, items)) batch.update(itemRef(tripId, g.id), { start: toClock(toMin(g.start) + shift), end: toClock(toMin(g.end) + shift), updatedAt: Date.now() });
   }
-  await batch.commit();
-  return true;
+  if (moved) await batch.commit();
+  return moved > 0;
 }
 
 /**

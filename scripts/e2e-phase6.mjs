@@ -162,7 +162,14 @@ try {
   assert.ok(prayers.length >= 1);
   assert.ok(prayers.every((p) => p.memberUids.length === 1 && p.memberUids[0] === alice.uid));
   assert.ok(prayers.some((p) => p.prayer.facility), 'a mosque / prayer room found');
-  for (const day of DAYS) noOverlap(items.filter((i) => i.day === day && !i.locked));
+  for (const day of DAYS) {
+    try {
+      noOverlap(items.filter((i) => i.day === day && !i.locked));
+    } catch (err) {
+      console.log('  DEBUG', day, items.filter((i) => i.day === day).sort((x, y) => x.start.localeCompare(y.start)).map((i) => `${i.id.slice(0, 14)} ${i.track.slice(-2)} ${i.start}-${i.end}${i.transitFromPrev ? ` leg${i.transitFromPrev.minutes}` : ''}`).join(' | '));
+      throw err;
+    }
+  }
   assert.equal((await ideaDoc(tripId, dtfId)).status, 'scheduled');
   assert.equal((await ideaDoc(tripId, altId)).status, 'scheduled');
   ok(`applied: pair A ${a.start}–${a.end} / B ${b.start}–${b.end}; prayers ${prayers.map((p) => `${p.prayer.prayer} ${p.start} @ ${p.prayer.facility?.name ?? '?'} (${p.prayer.facility?.walkMin ?? '?'} min)`).join(', ')}`);

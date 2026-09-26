@@ -135,13 +135,14 @@ try {
   assert.ok(n1[ali.uid] > 0 && n1[cara.uid] < 0, JSON.stringify(n1));
   ok(`balances add up to zero: Ali ${(n1[ali.uid] / 100).toFixed(2)}, Bob ${(n1[bob.uid] / 100).toFixed(2)}, Cara ${(n1[cara.uid] / 100).toFixed(2)}`);
 
-  // Cara pays Ali what she owes. Bob can't record a payment between other people.
+  // Cara pays Ali what she owes. Only Ali — who receives it — can tick it: not Bob, not Cara herself.
   assert.equal((await bob.call('expenses/settle', { from: cara.uid, to: ali.uid, amountMinor: 1000, date: '2026-12-08' }, q)).status, 403);
-  const s = await cara.call('expenses/settle', { from: cara.uid, to: ali.uid, amountMinor: -n1[cara.uid], date: '2026-12-08' }, q);
+  assert.equal((await cara.call('expenses/settle', { from: cara.uid, to: ali.uid, amountMinor: -n1[cara.uid], date: '2026-12-08' }, q)).status, 403);
+  const s = await ali.call('expenses/settle', { from: cara.uid, to: ali.uid, amountMinor: -n1[cara.uid], date: '2026-12-08' }, q);
   assert.equal(s.status, 201, JSON.stringify(s.body));
   const n2 = await net();
   assert.equal(n2[cara.uid], 0);
-  ok('Cara records paying Ali → Cara is square (only payer, receiver or admin can record)');
+  ok('only Ali (who received the money) can confirm Cara paid him → Cara is square; Cara and Bob can’t tick it');
   // The receiver can undo it.
   assert.equal((await ali.call('expenses/delete', { id: s.body.id }, q)).status, 200);
   assert.equal((await net())[cara.uid], n1[cara.uid]);
@@ -156,7 +157,35 @@ try {
   assert.equal(rc.body.total, 33.44);
   assert.equal(rc.body.currency, 'MYR');
   assert.equal(rc.body.category, 'food');
-  ok(`receipt read: “${rc.body.title}” ${rc.body.currency} ${rc.body.total} on ${rc.body.date ?? '?'} (${rc.body.category}); others can’t read Bob’s upload`);
+  assert.ok(rc.body.items?.length >= 2, JSON.stringify(rc.body.items));
+  const itemsSum = rc.body.items.reduce((a, i) => a + i.amount, 0);
+  assert.ok(Math.abs(itemsSum + (rc.body.extra ?? 0) - 33.44) < 0.02, `${itemsSum} + ${rc.body.extra}`);
+  ok(`receipt read: “${rc.body.title}” ${rc.body.currency} ${rc.body.total} — items ${rc.body.items.map((i) => `${i.name} ${i.amount}`).join(', ')} + ${rc.body.extra} service; others can’t read Bob’s upload`);
+
+  // Split amount by item: Bob ticks who had what; the service charge is shared by what each had.
+  const byItem = await add(bob, {
+    title: 'Nasi Kandar Pelita (by item)',
+    amountMinor: 3344,
+    currency: 'MYR',
+    paidBy: bob.uid,
+    split: { mode: 'items', items: [{ name: '2x Nasi Kandar', amountMinor: 2400, uids: [bob.uid, cara.uid] }, { name: '2x Teh Tarik', amountMinor: 640, uids: [cara.uid] }], extraMinor: 304 },
+    date: '2026-12-08',
+  });
+  assert.equal(byItem.status, 201, JSON.stringify(byItem.body));
+  const saved = (await db.doc(`trips/${q.tripId}/expenses/${byItem.body.id}`).get()).data();
+  assert.equal(saved.split.mode, 'items');
+  const badItems = await add(bob, { title: 'x', amountMinor: 3344, currency: 'MYR', paidBy: bob.uid, split: { mode: 'items', items: [{ name: 'A', amountMinor: 3000, uids: [] }], extraMinor: 344 }, date: '2026-12-08' });
+  assert.equal(badItems.status, 400);
+  ok('split amount by item saved (Cara: her Nasi Kandar half + both teh tarik + her part of the service); an item nobody had is refused');
+
+  // Paid back: only Bob (who paid the bill) ticks Cara off — Cara can't tick herself.
+  assert.equal((await cara.call('expenses/paid-back', { id: byItem.body.id, uid: cara.uid, paid: true }, q)).status, 403);
+  assert.equal((await bob.call('expenses/paid-back', { id: byItem.body.id, uid: cara.uid, paid: true }, q)).status, 200);
+  const ticked = (await db.doc(`trips/${q.tripId}/expenses/${byItem.body.id}`).get()).data();
+  assert.ok(ticked.paidBack[cara.uid] > 0);
+  assert.equal((await bob.call('expenses/paid-back', { id: byItem.body.id, uid: cara.uid, paid: false }, q)).status, 200);
+  assert.equal((await bob.call('expenses/delete', { id: byItem.body.id }, q)).status, 200);
+  ok('only the bill’s payer can tick “paid back” (Cara can’t tick herself); it can be un-ticked');
   const withReceipt = await add(bob, { title: rc.body.title, amountMinor: 3344, currency: 'MYR', paidBy: bob.uid, split: { mode: 'equal', uids: all }, receiptPath: path, date: '2026-12-08' });
   assert.equal(withReceipt.status, 201);
   const link = await cara.call('expenses/receipt-url', { id: withReceipt.body.id }, q);

@@ -164,14 +164,13 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'go
 }
 
 function SettleUp({ transfers, nameOf, money }: { transfers: Transfer[]; nameOf: (uid: string) => string; money: (m: number) => string }) {
-  const { trip, members, me, isAdmin } = useTrip();
+  const { trip, members, me } = useTrip();
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState('');
   if (!transfers.length) return null;
 
   const record = async (t: Transfer) => {
-    const verb = t.from === me.uid ? `you paid ${nameOf(t.to)}` : `${nameOf(t.from)} paid you`;
-    if (!confirm(`Record that ${verb} ${money(t.amountMinor)}?`)) return;
+    if (!confirm(`Confirm that ${nameOf(t.from)} paid you ${money(t.amountMinor)}? Only tick it once the money has arrived.`)) return;
     setBusy(`${t.from}>${t.to}`);
     setError('');
     try {
@@ -189,7 +188,7 @@ function SettleUp({ transfers, nameOf, money }: { transfers: Transfer[]; nameOf:
     <Card className="p-4 space-y-3">
       <div>
         <h2 className="font-bold text-[#161C23]">Settle up</h2>
-        <p className="text-xs text-[#6D7A77]">The fewest payments that make everyone square. Pay by bank transfer, DuitNow or cash, then mark it here.</p>
+        <p className="text-xs text-[#6D7A77]">The fewest payments that make everyone square. Pay by bank transfer, DuitNow or cash — the person who receives it ticks it here.</p>
       </div>
       <ul className="space-y-2">
         {sorted.map((t) => {
@@ -204,11 +203,13 @@ function SettleUp({ transfers, nameOf, money }: { transfers: Transfer[]; nameOf:
               <Avatar name={to?.displayName ?? '?'} photoURL={to?.photoURL} size={28} />
               <span className="text-sm font-semibold text-[#161C23] truncate flex-1">{nameOf(t.to)}</span>
               <span className="font-extrabold text-[#161C23] shrink-0">{money(t.amountMinor)}</span>
-              {(involved || isAdmin) && (
-                <Button variant="secondary" className="!min-h-9 !px-2.5 shrink-0" loading={busy === `${t.from}>${t.to}`} onClick={() => void record(t)} aria-label="Mark as paid">
-                  <Check className="w-4 h-4" /> <span className="hidden sm:inline">{t.to === me.uid ? 'Received' : 'Paid'}</span>
+              {t.to === me.uid ? (
+                <Button variant="secondary" className="!min-h-9 !px-2.5 shrink-0" loading={busy === `${t.from}>${t.to}`} onClick={() => void record(t)} aria-label={`${nameOf(t.from)} paid you — confirm`}>
+                  <Check className="w-4 h-4" /> <span className="hidden sm:inline">Received</span>
                 </Button>
-              )}
+              ) : t.from === me.uid ? (
+                <span className="shrink-0 text-[11px] text-[#6D7A77] max-w-[7rem] text-right">{nameOf(t.to)} ticks it once it arrives</span>
+              ) : null}
             </li>
           );
         })}
@@ -272,7 +273,22 @@ function ExpenseRow({ expense: e, nameOf, money, stop, onEdit }: { expense: Expe
   const { trip, me, isAdmin } = useTrip();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const myShare = sharesOf(e)[me.uid] ?? 0;
+  const shares = sharesOf(e);
+  const myShare = shares[me.uid] ?? 0;
+  const iPaid = e.paidBy === me.uid;
+  const owers = Object.entries(shares).filter(([u, v]) => u !== e.paidBy && v > 0);
+  const [ticking, setTicking] = useState<string>();
+  const tick = async (uid: string, paid: boolean) => {
+    setTicking(uid);
+    setError('');
+    try {
+      await api.post('expenses/paid-back', { id: e.id, uid, paid }, { tripId: trip.id });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not save.');
+    } finally {
+      setTicking(undefined);
+    }
+  };
   const receiver = e.settlement && e.split.mode === 'equal' && e.split.uids.includes(me.uid);
   const canEdit = e.createdBy === me.uid || e.paidBy === me.uid || isAdmin;
   const canDelete = canEdit || receiver;
@@ -340,6 +356,31 @@ function ExpenseRow({ expense: e, nameOf, money, stop, onEdit }: { expense: Expe
           <p className="text-[11px] text-[#6D7A77]">{myShare ? 'your share' : 'not yours'}</p>
         </div>
       </div>
+      {owers.length > 0 && (
+        <ul className="ml-12 space-y-1">
+          {owers.map(([u, v]) => {
+            const back = !!e.paidBack?.[u];
+            return (
+              <li key={u} className="flex items-center gap-2 text-xs">
+                <label className={cx('flex items-center gap-2 flex-1 min-w-0', iPaid ? 'cursor-pointer' : 'cursor-default')}>
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-[#00685F]"
+                    checked={back}
+                    disabled={!iPaid || ticking === u}
+                    onChange={() => void tick(u, !back)}
+                    aria-label={`${nameOf(u)} paid ${nameOf(e.paidBy)} back`}
+                  />
+                  <span className={cx('truncate', back ? 'text-[#6D7A77] line-through' : 'text-[#161C23]')}>
+                    {u === me.uid ? 'You' : nameOf(u)} owe{u === me.uid ? '' : 's'} {money(v)}
+                  </span>
+                </label>
+                <span className={cx('shrink-0', back ? 'text-[#00685F] font-semibold' : 'text-[#9AA5A3]')}>{back ? 'paid back ✓' : iPaid ? 'tick when paid' : `${nameOf(e.paidBy)} ticks it`}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {(e.receiptPath || canDelete) && (
         <div className="flex justify-end gap-1">
           {e.receiptPath && (

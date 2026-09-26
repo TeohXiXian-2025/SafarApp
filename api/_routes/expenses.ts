@@ -16,8 +16,10 @@ import {
   convertMinor,
   formatMoney,
   paths,
+  sharesOf,
   splitProblem,
 } from '../../src/domain/index.js';
+import { FieldValue } from 'firebase-admin/firestore';
 import { withTrip } from '../_lib/auth.js';
 import { adminBucket, adminDb } from '../_lib/firebaseAdmin.js';
 import { extractJson } from '../_lib/gemini.js';
@@ -71,6 +73,8 @@ Rules:
 - title: short, e.g. the shop or restaurant name ("Nando's KLCC", "Grab to airport").
 - date: YYYY-MM-DD if printed, else empty.
 - category: food, transport, lodging, activity, shopping or other.
+- items: every line item as printed (name, quantity, and the LINE amount = quantity × unit price, a plain number). Skip subtotal / total / payment / change lines.
+- extra: tax + service charge + rounding − discounts, as ONE plain number (negative if the discounts are bigger), so that items + extra = total. 0 if none.
 - confidence: 0..1. If this isn't a receipt, return total 0 and confidence 0.`;
 
 const receiptSchema = {
@@ -81,6 +85,8 @@ const receiptSchema = {
     currency: { type: Type.STRING },
     date: { type: Type.STRING },
     category: { type: Type.STRING, enum: ExpenseCategory.options },
+    items: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, qty: { type: Type.NUMBER }, amount: { type: Type.NUMBER } }, required: ['name', 'amount'] } },
+    extra: { type: Type.NUMBER },
     confidence: { type: Type.NUMBER },
   },
   required: ['title', 'total', 'currency', 'category', 'confidence'],
@@ -92,6 +98,8 @@ const Receipt = z.object({
   currency: z.string().default(''),
   date: z.string().optional(),
   category: ExpenseCategory.catch('other'),
+  items: z.array(z.object({ name: z.string().catch(''), qty: z.number().optional().catch(undefined), amount: z.number().catch(0) })).max(80).catch([]),
+  extra: z.number().catch(0),
   confidence: z.number().min(0).max(1).catch(0),
 });
 
@@ -114,7 +122,9 @@ const ExpenseBody = z.object({
 type ExpenseBody = z.infer<typeof ExpenseBody>;
 
 function uidsIn(split: ExpenseSplit): string[] {
-  return split.mode === 'equal' ? split.uids : Object.entries(split.parts).filter(([, v]) => v > 0).map(([u]) => u);
+  if (split.mode === 'equal') return split.uids;
+  if (split.mode === 'items') return [...new Set(split.items.flatMap((i) => i.uids))];
+  return Object.entries(split.parts).filter(([, v]) => v > 0).map(([u]) => u);
 }
 
 /** Validates and fills the derived fields (rate, trip amount). */
@@ -125,12 +135,13 @@ async function build(tripId: string, body: ExpenseBody, uploaderUid: string) {
   if (involved.some((u) => !everyone.has(u))) throw new HttpError(400, 'Everyone paying or sharing must be in the trip');
   const problem = splitProblem(body.split, body.amountMinor);
   if (problem) {
-    if (body.split.mode !== 'exact') throw new HttpError(400, problem);
+    if (body.split.mode !== 'exact') throw new HttpError(400, problem.replace(/add up to (-?\d+), not (\d+)/, (_m, a, b) => `add up to ${formatMoney(Number(a), body.currency)}, not ${formatMoney(Number(b), body.currency)}`));
     const sum = Object.values(body.split.parts).reduce((x, y) => x + y, 0);
     throw new HttpError(400, `The amounts add up to ${formatMoney(sum, body.currency)}, not ${formatMoney(body.amountMinor, body.currency)}`);
   }
   // Drop zero shares so the saved split only lists people who actually share.
-  const split: ExpenseSplit = body.split.mode === 'equal' ? body.split : ({ ...body.split, parts: Object.fromEntries(Object.entries(body.split.parts).filter(([, v]) => v > 0)) } as ExpenseSplit);
+  const split: ExpenseSplit =
+    body.split.mode === 'equal' || body.split.mode === 'items' ? body.split : ({ ...body.split, parts: Object.fromEntries(Object.entries(body.split.parts).filter(([, v]) => v > 0)) } as ExpenseSplit);
   if (body.receiptPath && (!body.receiptPath.startsWith(`trips/${tripId}/users/${uploaderUid}/`) || body.receiptPath.includes('..'))) {
     throw new HttpError(403, 'Invalid receipt');
   }
@@ -192,6 +203,8 @@ export const expenseRoutes: RouteTable = {
         currency,
         ...(r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? { date: r.date } : {}),
         category: r.category,
+        items: r.items.filter((i) => i.name.trim() && i.amount >= 0).map((i) => ({ name: `${i.qty && i.qty > 1 ? `${i.qty}× ` : ''}${i.name.trim()}`.slice(0, 80), amount: i.amount })),
+        extra: r.extra,
         confidence: r.confidence,
       });
     },
@@ -217,7 +230,7 @@ export const expenseRoutes: RouteTable = {
       const db = adminDb();
       const ref = db.collection(paths.expenses(tripId)).doc();
       const now = Date.now();
-      const expense: Expense = { ...body, split, id: ref.id, rate, tripAmountMinor, settlement: false, createdBy: member.uid, createdAt: now, updatedAt: now };
+      const expense: Expense = { ...body, split, id: ref.id, rate, tripAmountMinor, settlement: false, paidBack: {}, createdBy: member.uid, createdAt: now, updatedAt: now };
       const batch = db.batch();
       batch.set(ref, Expense.parse(expense));
       logActivity(batch, tripId, member.uid, `${member.displayName} added “${body.title}” (${formatMoney(tripAmountMinor, trip.currency)})`);
@@ -272,14 +285,31 @@ export const expenseRoutes: RouteTable = {
     { perMinute: 30 },
   ),
 
-  /** Record "from paid to" (either of them can record it). Amount in trip-currency minor units. */
+  /**
+   * "X paid me back for this bill": only the person who paid the bill ticks it
+   * (or un-ticks it). That share is then settled in the balances.
+   */
+  'POST expenses/paid-back': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ id: Id, uid: Id, paid: z.boolean() }));
+      const e = await loadExpense(tripId, body.id);
+      if (e.paidBy !== member.uid) throw new HttpError(403, 'Only the person who paid this bill can tick who paid them back');
+      if (body.uid === e.paidBy || !(body.uid in sharesOf(e))) throw new HttpError(400, 'That person has no share in this bill');
+      await adminDb()
+        .doc(`${paths.expenses(tripId)}/${body.id}`)
+        .update({ [`paidBack.${body.uid}`]: body.paid ? Date.now() : FieldValue.delete(), updatedAt: Date.now() });
+      return json({ ok: true });
+    },
+    { perMinute: 60 },
+  ),
+
+  /** Record "from paid to" — confirmed by the person who received it. Amount in trip-currency minor units. */
   'POST expenses/settle': withTrip(
     async (req, { tripId, member }) => {
       const body = await readJson(req, z.object({ from: Id, to: Id, amountMinor: z.number().int().positive(), date: LocalDate }));
       if (body.from === body.to) throw new HttpError(400, 'Pick two different people');
-      if (member.uid !== body.from && member.uid !== body.to && member.role !== 'admin') {
-        throw new HttpError(403, 'Only the payer, the receiver or the admin can record this payment');
-      }
+      // Only the person who gets the money confirms it arrived — nobody can tick a payment they didn't receive.
+      if (member.uid !== body.to) throw new HttpError(403, `Only ${body.to === member.uid ? 'you' : 'the person being paid'} can confirm this payment arrived`);
       const trip = await loadTrip(tripId);
       if (![body.from, body.to].every((u) => trip.memberIds.includes(u))) throw new HttpError(400, 'Both people must be in the trip');
       const db = adminDb();
@@ -297,6 +327,7 @@ export const expenseRoutes: RouteTable = {
         category: 'other',
         date: body.date,
         settlement: true,
+        paidBack: {},
         createdBy: member.uid,
         createdAt: now,
         updatedAt: now,

@@ -68,3 +68,30 @@ describe('currency choices', () => {
     expect(new Set(list).size).toBe(list.length);
   });
 });
+
+describe('split amount — by item', () => {
+  it('each item is shared by who had it; tax / service is shared by what each had', async () => {
+    const { itemShares, sharesOf, splitProblem } = await import('./expenses');
+    // Nasi lemak 12 (Ali), 2 teh tarik 8 (Ali + Bob), satay 20 (everyone) + 4 service charge = 44.
+    const items = [
+      { name: 'Nasi lemak', amountMinor: 1200, uids: ['ali'] },
+      { name: '2× Teh tarik', amountMinor: 800, uids: ['ali', 'bob'] },
+      { name: 'Satay', amountMinor: 2000, uids: ['ali', 'bob', 'cara'] },
+    ];
+    const had = itemShares(items, 400);
+    expect(Object.values(had).reduce((a, b) => a + b, 0)).toBe(4400);
+    expect(had.ali).toBeGreaterThan(had.bob);
+    expect(had.bob).toBeGreaterThan(had.cara);
+    const split = { mode: 'items' as const, items, extraMinor: 400 };
+    expect(splitProblem(split, 4400)).toBeNull();
+    expect(splitProblem({ ...split, items: [...items, { name: 'Cendol', amountMinor: 500, uids: [] }] }, 4900)).toMatch(/Tick who had/);
+    const shares = sharesOf({ split, amountMinor: 4400, tripAmountMinor: 4400 });
+    expect(shares.ali + shares.bob + shares.cara).toBe(4400);
+  });
+  it('a share the payer ticked as paid back no longer counts in the balances', async () => {
+    const { balances } = await import('./expenses');
+    const e = { paidBy: 'ali', split: { mode: 'equal' as const, uids: ['ali', 'bob'] }, amountMinor: 1000, tripAmountMinor: 1000 };
+    expect(balances([e], ['ali', 'bob'])).toEqual({ ali: 500, bob: -500 });
+    expect(balances([{ ...e, paidBack: { bob: 1 } }], ['ali', 'bob'])).toEqual({ ali: 0, bob: 0 });
+  });
+});

@@ -125,6 +125,7 @@ export const scheduleRoutes: RouteTable = {
       const duration = split ? unitFor(lead, split).duration : (body.durationMin ?? unitFor(lead, split).duration);
       const start = body.start ? toMin(body.start) : toMin(nextSlot(withPrayerTimes(data, body.day, day, lead.place.location), duration).start);
 
+      if (start + duration > 24 * 60 - 1) throw new HttpError(400, `${lead.place.name} would run past midnight there — pick an earlier time or another day`);
       const batch = adminDb().batch();
       const placed = writeStops(batch, tripId, { data, idea: lead, day: body.day, start, durationMin: split ? undefined : duration, orderIndex: day.length, actor: member.uid });
       placed.forEach((id) => batch.update(ideaDocRef(tripId, id), { status: 'scheduled', updatedAt: Date.now() }));
@@ -168,7 +169,9 @@ export const scheduleRoutes: RouteTable = {
       if (!leadIdea) throw new HttpError(404, 'Idea not found');
       const split = approvedSplit(data, leadIdea);
 
-      const duration = split ? split.reunion.afterMinutes : (body.durationMin ?? toMin(item.end) - toMin(item.start));
+      // (A stop squashed to nothing by an old bug gets its place's length back.)
+      const kept = toMin(item.end) - toMin(item.start);
+      const duration = split ? split.reunion.afterMinutes : (body.durationMin ?? (kept >= 5 ? kept : leadIdea.estDurationMin));
       // Editing a side group's time moves the whole split: keep its offset from the main group.
       let start = body.start ? toMin(body.start) - (toMin(item.start) - toMin(lead.start)) : toMin(lead.start);
       let orderIndex = lead.orderIndex;
@@ -177,6 +180,8 @@ export const scheduleRoutes: RouteTable = {
         orderIndex = target.length;
         if (!body.start) start = toMin(nextSlot(withPrayerTimes(data, day, target, leadIdea.place.location), duration).start);
       }
+      // Never cut a stop short at midnight: say so instead.
+      if (start < 0 || start + duration > 24 * 60 - 1) throw new HttpError(400, `${leadIdea.place.name} would run past midnight there — pick an earlier time or another day`);
       const batch = adminDb().batch();
       group.forEach((g) => batch.delete(itemRef(tripId, g.id)));
       writeStops(batch, tripId, { data, idea: leadIdea, day, start, durationMin: split ? undefined : duration, orderIndex, actor: member.uid });

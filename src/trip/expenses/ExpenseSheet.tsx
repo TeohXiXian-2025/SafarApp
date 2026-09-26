@@ -1,12 +1,14 @@
 // Add or edit an expense: optional receipt scan (AI fills it in), amount in any
 // currency (today's rate, editable), who paid, and how it's split.
-import { Camera, Loader2 } from 'lucide-react';
+import { Camera, Loader2, Plus, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   EXPENSE_CATEGORIES,
   Idea,
   ScheduleItem,
+  allocate,
   convertMinor,
+  itemShares,
   fmtClock,
   paths,
   toMin,
@@ -25,7 +27,8 @@ import { deleteFile, UPLOAD_ACCEPT, uploadTripFile } from '../../lib/storage';
 import { Avatar, Button, Chip, cx, ErrorBanner, Field, Input, Select, Sheet } from '../../ui';
 import { useTrip } from '../TripLayout';
 
-type Mode = ExpenseSplit['mode'];
+/** Share equally, or split the amount item by item (who had what). */
+type Mode = 'equal' | 'items';
 
 interface ReceiptResult {
   title: string;
@@ -33,7 +36,29 @@ interface ReceiptResult {
   currency: string;
   date?: string;
   category: ExpenseCategory;
+  items?: { name: string; amount: number }[];
+  extra?: number;
   confidence: number;
+}
+
+interface ItemRow {
+  key: number;
+  name: string;
+  /** Major units, as typed. */
+  amount: string;
+  uids: string[];
+}
+let itemKey = 0;
+const newItem = (name = '', amount = '', uids: string[] = []): ItemRow => ({ key: ++itemKey, name, amount, uids });
+
+/** An older expense split by exact amounts or shares, shown as one item per person. */
+function itemsFrom(e: Expense | undefined, names: (uid: string) => string): ItemRow[] {
+  if (!e) return [];
+  const s = e.split;
+  if (s.mode === 'items') return s.items.map((i) => newItem(i.name, String(i.amountMinor / minorUnits(e.currency)), i.uids));
+  if (s.mode === 'equal') return [];
+  const parts = s.mode === 'exact' ? s.parts : allocate(e.amountMinor, Object.entries(s.parts));
+  return Object.entries(parts).map(([u, v]) => newItem(`${names(u)}'s part`, String(v / minorUnits(e.currency)), [u]));
 }
 
 /** Today in the trip's first destination, kept within the trip dates. */
@@ -89,14 +114,14 @@ export function ExpenseSheet({ expense, preset, onClose }: { expense?: Expense; 
       const idea = ref.kind === 'idea' ? ideas.data.find((i) => i.id === ref.ideaId) : undefined;
       return idea ? [{ id: idea.id, label: `${fmtClock(toMin(s.start))} · ${idea.place.name}` }] : [];
     });
-  const [mode, setMode] = useState<Mode>(expense?.split.mode ?? 'equal');
+  const nameOf = (uid: string) => members.find((m) => m.uid === uid)?.displayName ?? 'Someone';
+  const [mode, setMode] = useState<Mode>(!expense || expense.split.mode === 'equal' ? 'equal' : 'items');
   const [equalUids, setEqualUids] = useState<string[]>(expense?.split.mode === 'equal' ? expense.split.uids : everyone);
-  // Exact: amounts in the expense currency (major units, as typed). Shares: weights.
-  const [parts, setParts] = useState<Record<string, string>>(() =>
-    expense && expense.split.mode !== 'equal'
-      ? Object.fromEntries(Object.entries(expense.split.parts).map(([u, v]) => [u, expense.split.mode === 'exact' ? major(v, expense.currency) : String(v)]))
-      : {},
-  );
+  // Split amount: the receipt's items (or typed ones), each with the people who had it.
+  const [items, setItems] = useState<ItemRow[]>(() => {
+    const from = itemsFrom(expense, nameOf);
+    return from.length ? from : [newItem()];
+  });
   const [receiptPath, setReceiptPath] = useState(expense?.receiptPath);
   const [scan, setScan] = useState<{ busy: boolean; note?: string }>({ busy: false });
   const [error, setError] = useState('');
@@ -127,18 +152,14 @@ export function ExpenseSheet({ expense, preset, onClose }: { expense?: Expense; 
   const rateNum = currency === trip.currency ? 1 : Number(rate);
   const tripMinor = rateNum > 0 ? convertMinor(amountMinor, currency, trip.currency, rateNum) : 0;
 
-  const split: ExpenseSplit =
-    mode === 'equal'
-      ? { mode, uids: equalUids }
-      : {
-          mode,
-          parts: Object.fromEntries(
-            Object.entries(parts)
-              .map(([u, v]) => [u, mode === 'exact' ? toMinor(Number(v) || 0, currency) : Number(v) || 0] as const)
-              .filter(([, v]) => v > 0),
-          ),
-        };
-  const exactLeft = mode === 'exact' ? amountMinor - Object.values((split as { parts: Record<string, number> }).parts).reduce((a, b) => a + b, 0) : 0;
+  const typedItems = items.filter((i) => i.name.trim() || Number(i.amount) > 0).map((i) => ({ name: i.name.trim() || 'Item', amountMinor: toMinor(Number(i.amount) || 0, currency), uids: i.uids }));
+  const itemsSum = typedItems.reduce((a, i) => a + i.amountMinor, 0);
+  // Whatever the items don't cover: tax / service charge (or a discount if negative), shared by what each person had.
+  const extraMinor = amountMinor - itemsSum;
+  const split: ExpenseSplit = mode === 'equal' ? { mode, uids: equalUids } : { mode: 'items', items: typedItems, extraMinor };
+  const perPerson = mode === 'items' ? itemShares(typedItems.filter((i) => i.uids.length), extraMinor) : {};
+  const setItem = (key: number, patch: Partial<ItemRow>) => setItems((l) => l.map((i) => (i.key === key ? { ...i, ...patch } : i)));
+  const toggleItemUid = (key: number, uid: string) => setItems((l) => l.map((i) => (i.key === key ? { ...i, uids: i.uids.includes(uid) ? i.uids.filter((u) => u !== uid) : [...i.uids, uid] } : i)));
 
   const close = () => {
     // A receipt uploaded in this sheet but never saved shouldn't linger.
@@ -162,6 +183,11 @@ export function ExpenseSheet({ expense, preset, onClose }: { expense?: Expense; 
       }
       if (r.title && !title) setTitle(r.title);
       setAmount(String(r.total));
+      // Items on the receipt → split by item; whoever paid ticks who had what.
+      if (r.items?.length) {
+        setItems(r.items.map((i) => newItem(i.name, String(i.amount), [])));
+        setMode('items');
+      }
       if (r.currency && choices.includes(r.currency)) setCurrency(r.currency);
       if (r.date && r.date >= trip.startDate && r.date <= trip.endDate) setDate(r.date);
       setCategory(r.category);
@@ -176,7 +202,8 @@ export function ExpenseSheet({ expense, preset, onClose }: { expense?: Expense; 
     if (amountMinor <= 0) return setError('Enter the amount.');
     if (!(rateNum > 0)) return setError(`Enter the exchange rate: 1 ${currency} = ? ${trip.currency}.`);
     const problem = splitProblem(split, amountMinor);
-    if (problem) return setError(mode === 'exact' ? `The amounts must add up to ${formatMoney(amountMinor, currency)}.` : problem);
+    if (problem) return setError(problem.includes('add up to') ? `The items come to ${formatMoney(itemsSum, currency)} — more than the ${formatMoney(amountMinor, currency)} total by too much. Check the amounts.` : problem);
+    if (mode === 'items' && extraMinor < 0 && -extraMinor > itemsSum * 0.5) return setError(`The items come to ${formatMoney(itemsSum, currency)}, far more than the ${formatMoney(amountMinor, currency)} total — check the amounts.`);
     setSaving(true);
     const body = {
       title: title.trim(),
@@ -222,7 +249,7 @@ export function ExpenseSheet({ expense, preset, onClose }: { expense?: Expense; 
           {scan.busy ? <Loader2 className="w-5 h-5 text-[#00685F] animate-spin" /> : <Camera className="w-5 h-5 text-[#00685F]" />}
           <span className="min-w-0">
             <span className="block text-sm font-bold text-[#161C23]">{receiptPath ? 'Replace receipt photo' : 'Scan a receipt'}</span>
-            <span className="block text-xs text-[#6D7A77] truncate">{scan.note ?? 'AI fills in the amount, currency and date'}</span>
+            <span className="block text-xs text-[#6D7A77] truncate">{scan.note ?? 'AI fills in the items, amount, currency and date'}</span>
           </span>
         </button>
 
@@ -282,12 +309,11 @@ export function ExpenseSheet({ expense, preset, onClose }: { expense?: Expense; 
         </Field>
 
         <Field label="Split" group>
-          <div className="grid grid-cols-3 rounded-xl bg-[#F3EFE9] p-1 text-sm font-semibold">
+          <div className="grid grid-cols-2 rounded-xl bg-[#F3EFE9] p-1 text-sm font-semibold">
             {(
               [
-                ['equal', 'Equally'],
-                ['exact', 'Amounts'],
-                ['shares', 'Shares'],
+                ['equal', 'Share equally'],
+                ['items', 'Split amount'],
               ] as const
             ).map(([m, label]) => (
               <button key={m} type="button" onClick={() => setMode(m)} className={cx('min-h-9 rounded-lg', mode === m ? 'bg-white text-[#00685F] shadow-xs' : 'text-[#6D7A77]')}>
@@ -295,38 +321,83 @@ export function ExpenseSheet({ expense, preset, onClose }: { expense?: Expense; 
               </button>
             ))}
           </div>
-          <ul className="divide-y divide-[#E7DFD5] rounded-xl border border-[#E7DFD5] bg-white">
-            {members.map((m) => {
-              const name = m.uid === me.uid ? `${m.displayName} (you)` : m.displayName;
-              return (
-                <li key={m.uid} className="flex items-center gap-3 px-3 py-2">
-                  <Avatar name={m.displayName} photoURL={m.photoURL} size={28} />
-                  <span className="flex-1 min-w-0 truncate text-sm text-[#161C23]">{name}</span>
-                  {mode === 'equal' ? (
+          {mode === 'equal' ? (
+            <>
+              <ul className="divide-y divide-[#E7DFD5] rounded-xl border border-[#E7DFD5] bg-white">
+                {members.map((m) => (
+                  <li key={m.uid} className="flex items-center gap-3 px-3 py-2">
+                    <Avatar name={m.displayName} photoURL={m.photoURL} size={28} />
+                    <span className="flex-1 min-w-0 truncate text-sm text-[#161C23]">{m.uid === me.uid ? `${m.displayName} (you)` : m.displayName}</span>
                     <input type="checkbox" aria-label={`${m.displayName} shares this`} className="w-5 h-5 accent-[#00685F]" checked={equalUids.includes(m.uid)} onChange={() => toggleEqual(m.uid)} />
-                  ) : (
-                    <Input
-                      aria-label={mode === 'exact' ? `${m.displayName}'s amount` : `${m.displayName}'s shares`}
-                      inputMode="decimal"
-                      className="!w-24 !min-h-9 text-right"
-                      placeholder="0"
-                      value={parts[m.uid] ?? ''}
-                      onChange={(e) => setParts((p) => ({ ...p, [m.uid]: e.target.value.replace(/[^\d.]/g, '') }))}
-                    />
+                  </li>
+                ))}
+              </ul>
+              {equalUids.length > 0 && amountMinor > 0 && <p className="text-xs text-[#6D7A77]">≈ {formatMoney(Math.round(amountMinor / equalUids.length), currency)} each</p>}
+            </>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-[#6D7A77]">Tick who had each item — people who shared one split it equally. Tax, service charge or a discount is shared by what each person had.</p>
+              {items.map((it) => (
+                <div key={it.key} className="rounded-xl border border-[#E7DFD5] bg-white p-2.5 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Input aria-label="Item" className="flex-1 !min-h-9" value={it.name} maxLength={80} placeholder="Item, e.g. Nasi lemak" onChange={(e) => setItem(it.key, { name: e.target.value })} />
+                    <Input aria-label="Price" inputMode="decimal" className="!w-24 !min-h-9 text-right" value={it.amount} placeholder="0.00" onChange={(e) => setItem(it.key, { amount: e.target.value.replace(/[^\d.]/g, '') })} />
+                    <button type="button" aria-label="Remove item" onClick={() => setItems((l) => (l.length > 1 ? l.filter((x) => x.key !== it.key) : [newItem()]))} className="w-8 h-8 shrink-0 flex items-center justify-center text-[#9AA5A3] hover:text-[#B3261E]">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {members.map((m) => {
+                      const on = it.uids.includes(m.uid);
+                      return (
+                        <button
+                          key={m.uid}
+                          type="button"
+                          role="checkbox"
+                          aria-checked={on}
+                          onClick={() => toggleItemUid(it.key, m.uid)}
+                          className={cx('inline-flex items-center gap-1.5 rounded-lg border px-2 min-h-8 text-xs font-semibold', on ? 'border-[#00685F] bg-[#00685F] text-white' : 'border-[#E7DFD5] bg-white text-[#161C23]')}
+                        >
+                          <span className={cx('w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px]', on ? 'border-white' : 'border-[#9AA5A3]')}>{on ? '✓' : ''}</span>
+                          {m.uid === me.uid ? 'Me' : m.displayName.split(' ')[0]}
+                        </button>
+                      );
+                    })}
+                    <button type="button" onClick={() => setItem(it.key, { uids: it.uids.length === everyone.length ? [] : everyone })} className="rounded-lg px-2 min-h-8 text-xs font-semibold text-[#00685F]">
+                      {it.uids.length === everyone.length ? 'Clear' : 'Everyone'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <Button variant="secondary" className="w-full !min-h-9" onClick={() => setItems((l) => [...l, newItem()])}>
+                <Plus className="w-4 h-4" /> Add item
+              </Button>
+              {amountMinor > 0 && (
+                <div className="rounded-xl bg-[#F3EFE9] px-3 py-2 text-xs space-y-1">
+                  <p className="flex justify-between text-[#3E4947]">
+                    <span>Items</span> <span className="tabular-nums">{formatMoney(itemsSum, currency)}</span>
+                  </p>
+                  {extraMinor !== 0 && (
+                    <p className="flex justify-between text-[#3E4947]">
+                      <span>{extraMinor > 0 ? 'Tax / service charge' : 'Discount'}</span> <span className="tabular-nums">{extraMinor > 0 ? '+' : '−'}{formatMoney(Math.abs(extraMinor), currency)}</span>
+                    </p>
                   )}
-                </li>
-              );
-            })}
-          </ul>
-          {mode === 'equal' && equalUids.length > 0 && amountMinor > 0 && (
-            <p className="text-xs text-[#6D7A77]">≈ {formatMoney(Math.round(amountMinor / equalUids.length), currency)} each</p>
+                  <p className="flex justify-between font-bold text-[#161C23] border-t border-black/10 pt-1">
+                    <span>Total</span> <span className="tabular-nums">{formatMoney(amountMinor, currency)}</span>
+                  </p>
+                  {Object.keys(perPerson).length > 0 && (
+                    <ul className="pt-1 space-y-0.5">
+                      {Object.entries(perPerson).map(([u, v]) => (
+                        <li key={u} className="flex justify-between text-[#161C23]">
+                          <span>{u === me.uid ? 'You' : nameOf(u)} pay{u === me.uid ? '' : 's'}</span> <span className="tabular-nums font-semibold">{formatMoney(v, currency)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
           )}
-          {mode === 'exact' && amountMinor > 0 && (
-            <p className={cx('text-xs', exactLeft ? 'text-[#96590B]' : 'text-[#00685F]')}>
-              {exactLeft === 0 ? 'Adds up ✓' : exactLeft > 0 ? `${formatMoney(exactLeft, currency)} still to assign` : `${formatMoney(-exactLeft, currency)} too much`}
-            </p>
-          )}
-          {mode === 'shares' && <p className="text-xs text-[#6D7A77]">E.g. 2 for a couple and 1 for everyone else.</p>}
         </Field>
 
         {(stops.length > 0 || ideaId) && (
