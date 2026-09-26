@@ -23,11 +23,21 @@ export const MAX_ALTERNATIVES = 2;
 
 type VotingIdea = Pick<Idea, 'votes' | 'voters' | 'votingEndsAt' | 'choices' | 'choiceEndsAt' | 'options' | 'status'>;
 
-/** Members who must vote: those in the trip when the idea was added (older ideas: everyone). */
-export const requiredVoters = (idea: Pick<Idea, 'voters'>, memberIds: string[]) => (idea.voters ?? memberIds).filter((u) => memberIds.includes(u));
+/**
+ * Members who must vote. While an idea is still open for voting that's
+ * everyone in the trip now — someone who joins midway is waited for too (the
+ * 24 h deadline doesn't move; if they don't vote by then they abstain). Once
+ * decided, it's the members who were asked. Split alternatives (`voters: []`)
+ * need no vote.
+ */
+export const requiredVoters = (idea: Pick<Idea, 'voters'> & { status?: Idea['status'] }, memberIds: string[]) => {
+  if (idea.voters?.length === 0) return [];
+  if (!idea.voters || idea.status === 'voting') return [...memberIds];
+  return idea.voters.filter((u) => memberIds.includes(u));
+};
 
 /** Required voters plus anyone who joined later and voted anyway. */
-export const countedVoters = (idea: Pick<Idea, 'voters' | 'votes'>, memberIds: string[]) => {
+export const countedVoters = (idea: Pick<Idea, 'voters' | 'votes'> & { status?: Idea['status'] }, memberIds: string[]) => {
   const req = requiredVoters(idea, memberIds);
   return [...req, ...memberIds.filter((u) => !req.includes(u) && idea.votes[u])];
 };
@@ -39,7 +49,7 @@ export interface IdeaTally {
   pending: string[];
 }
 
-export function tallyIdea(idea: Pick<Idea, 'voters' | 'votes'>, memberIds: string[]): IdeaTally {
+export function tallyIdea(idea: Pick<Idea, 'voters' | 'votes'> & { status?: Idea['status'] }, memberIds: string[]): IdeaTally {
   const counted = countedVoters(idea, memberIds);
   return {
     up: counted.filter((u) => idea.votes[u]?.value === 1).length,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupHotelBudget, hotelJourneyProblem, proposeStays, scoreHotel, suggestStayTimes, transportGaps, tripNights, uncoveredNights, type ScoreContext } from './stays';
+import { groupHotelBudget, hotelJourneyProblem, nightsWithoutStay, proposeStays, trimProposals, scoreHotel, suggestStayTimes, transportGaps, tripNights, uncoveredNights, type ScoreContext } from './stays';
 
 const KL = { lat: 3.139, lng: 101.6869 };
 const PENANG = { lat: 5.4141, lng: 100.3288 };
@@ -138,5 +138,67 @@ describe('transportGaps', () => {
   it('flags only the missing KL → Penang leg', () => {
     const r = transportGaps({ ...trip, stays, bookings: [move('2026-12-06T23:00', '2026-12-07T07:00', { lat: 1.36, lng: 103.99 }, KL), move('2026-12-12T18:00', '2026-12-12T20:00', PENANG, { lat: 1.36, lng: 103.99 })] });
     expect(r.map((g) => [g.kind, g.from, g.to])).toEqual([['between', 'Kuala Lumpur', 'Penang']]);
+  });
+});
+
+describe('stays that go missing (Tokyo + Osaka trip)', () => {
+  const TOKYO = { name: 'Tokyo', location: { lat: 35.68, lng: 139.76 } };
+  const OSAKA = { name: 'Osaka', location: { lat: 34.69, lng: 135.5 } };
+
+  it('re-planning keeps the free nights of a proposal instead of dropping the whole city', () => {
+    const proposals = [
+      { destIdx: 0, checkIn: '2026-11-10', checkOut: '2026-11-15', center: TOKYO.location },
+      { destIdx: 1, checkIn: '2026-11-15', checkOut: '2026-11-18', center: OSAKA.location },
+    ];
+    // Osaka's picked stay starts a night early: Tokyo keeps 10–14.
+    const kept = [{ checkIn: '2026-11-14', checkOut: '2026-11-18' }];
+    expect(trimProposals(proposals, kept).map((p) => [p.destIdx, p.checkIn, p.checkOut])).toEqual([[0, '2026-11-10', '2026-11-14']]);
+    expect(nightsWithoutStay(tripNights('2026-11-10', '2026-11-18'), kept)).toEqual(['2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13']);
+  });
+
+  it('the city dates decide which city each night is in', () => {
+    const r = proposeStays({
+      startDate: '2026-11-10',
+      endDate: '2026-11-18',
+      destinations: [{ ...TOKYO, arriveDate: '2026-11-10', leaveDate: '2026-11-14' }, { ...OSAKA, arriveDate: '2026-11-14', leaveDate: '2026-11-18' }],
+      bookings: [],
+      stops: [],
+    });
+    expect(r.map((p) => [p.destIdx, p.checkIn, p.checkOut])).toEqual([
+      [0, '2026-11-10', '2026-11-14'],
+      [1, '2026-11-14', '2026-11-18'],
+    ]);
+  });
+
+  it('still asks for the Tokyo → Osaka train when only the Osaka stay exists', () => {
+    const gaps = transportGaps({ startDate: '2026-11-10', endDate: '2026-11-18', destinations: [TOKYO, OSAKA], stays: [{ destIdx: 1, checkIn: '2026-11-14', checkOut: '2026-11-18' }], bookings: [] });
+    const between = gaps.find((g) => g.kind === 'between');
+    expect(between).toMatchObject({ from: 'Tokyo', to: 'Osaka', date: '2026-11-14' });
+  });
+
+  it('uses the city dates for the move day, and a booked train clears it', () => {
+    const destinations = [{ ...TOKYO, arriveDate: '2026-11-10', leaveDate: '2026-11-13' }, { ...OSAKA, arriveDate: '2026-11-13', leaveDate: '2026-11-18' }];
+    expect(transportGaps({ startDate: '2026-11-10', endDate: '2026-11-18', destinations, stays: [], bookings: [] }).find((g) => g.kind === 'between')?.date).toBe('2026-11-13');
+    const train = { kind: 'train', startLocal: '2026-11-13T09:00', endLocal: '2026-11-13T11:30', from: { location: TOKYO.location }, to: { location: OSAKA.location } };
+    expect(transportGaps({ startDate: '2026-11-10', endDate: '2026-11-18', destinations, stays: [], bookings: [train] }).some((g) => g.kind === 'between')).toBe(false);
+  });
+});
+
+describe('a city with no booking or plans yet still gets its stay', () => {
+  it('KL hotel booked for the first nights → the remaining nights are Penang', () => {
+    const r = proposeStays({ startDate: '2026-12-07', endDate: '2026-12-11', destinations: [{ location: KL }, { location: PENANG }], bookings: [hotel('2026-12-07', '2026-12-09')], stops: [] });
+    expect(r.map((p) => [p.destIdx, p.checkIn, p.checkOut])).toEqual([
+      [0, '2026-12-07', '2026-12-09'],
+      [1, '2026-12-09', '2026-12-11'],
+    ]);
+  });
+  it('Osaka hotel booked for the last nights → the first nights are Tokyo', () => {
+    const TOKYO = { lat: 35.68, lng: 139.76 };
+    const OSAKA = { lat: 34.69, lng: 135.5 };
+    const r = proposeStays({ startDate: '2026-11-10', endDate: '2026-11-18', destinations: [{ location: TOKYO }, { location: OSAKA }], bookings: [hotel('2026-11-14', '2026-11-18', OSAKA)], stops: [] });
+    expect(r.map((p) => [p.destIdx, p.checkIn, p.checkOut])).toEqual([
+      [0, '2026-11-10', '2026-11-14'],
+      [1, '2026-11-14', '2026-11-18'],
+    ]);
   });
 });

@@ -53,8 +53,9 @@ export function ArrangeSheet({
     <Sheet open onClose={onClose} title="AI Arrange — preview" wide>
       <div className="space-y-4 min-w-0">
         <p className="text-sm text-[#6D7A77]">
-          Stops are grouped by area, ordered to cut travel (with a 10-min buffer), fitted to opening hours and meal times, and planned around the fixed prayer
-          times. Bookings stay where they are. Nothing changes until you apply — and you can undo it.
+          Each day only gets places in the city you're in that day. Stops are grouped by area, ordered to cut travel (with a 10-min buffer), fitted to opening
+          hours, and planned around bookings and the fixed prayer times (prayed near the stop before). Days with no food stop at lunch or dinner get a halal
+          restaurant nearby. Nothing changes until you apply — and you can undo it.
         </p>
         {job.plan.days.map((d) => (
           <section key={d.day} className="rounded-2xl border border-[#E7DFD5] bg-white p-3 space-y-2">
@@ -73,6 +74,14 @@ export function ArrangeSheet({
               {[
                 ...d.stops.map((s) => ({ key: s.ideaId, start: s.start, end: s.end, name: ideas.get(s.ideaId)?.place.name ?? 'Removed idea', change: change(s.ideaId, d.day, s.start), prayer: false })),
                 ...d.prayers.map((p) => ({ key: p.key, start: p.start, end: p.end, name: `${PRAYER_LABEL[p.key]} prayer`, change: null, prayer: true })),
+                ...d.meals.map((m) => ({
+                  key: `meal-${m.key}`,
+                  start: m.start,
+                  end: m.end,
+                  name: m.place ? `🍽 ${m.key === 'lunch' ? 'Lunch' : 'Dinner'} · ${m.place.name}` : `🍽 ${m.key === 'lunch' ? 'Lunch' : 'Dinner'} break (no halal place found nearby — pick one after)`,
+                  change: m.halal ? { label: m.halal.split(' · ')[0], tone: 'brand' as const } : null,
+                  prayer: false,
+                })),
               ]
                 .sort((a, b) => a.start.localeCompare(b.start))
                 .map((row) => (

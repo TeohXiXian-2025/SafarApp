@@ -167,7 +167,14 @@ export const ScheduleItem = z.object({
       /** span = whole same-day journey; otherwise a single moment of it. */
       event: z.enum(['span', 'depart', 'arrive', 'checkin', 'checkout']),
     }),
-    z.object({ kind: z.literal('custom'), title: z.string().max(200), place: PlaceRef.optional() }),
+    z.object({
+      kind: z.literal('custom'),
+      title: z.string().max(200),
+      place: PlaceRef.optional(),
+      /** A lunch / dinner stop at a restaurant (not an Idea Board idea). */
+      meal: z.enum(['lunch', 'dinner']).optional(),
+      phone: z.string().max(40).optional(),
+    }),
   ]),
   /** "all", or "{splitId}:A" / "{splitId}:B" for split tracks. */
   track: z.string().max(140).default('all'),
@@ -235,6 +242,20 @@ export const ArrangeJob = z.object({
         travelMin: z.number().int().nonnegative(),
         stops: z.array(z.object({ ideaId: Id, start: LocalTime, end: LocalTime })),
         prayers: z.array(z.object({ key: PrayerKeyZ, start: LocalTime, end: LocalTime })),
+        /** Lunch / dinner slots the plan added (the day had no food stop then), with the restaurant picked. */
+        meals: z
+          .array(
+            z.object({
+              key: z.enum(['lunch', 'dinner']),
+              start: LocalTime,
+              end: LocalTime,
+              place: PlaceRef.optional(),
+              phone: z.string().max(40).optional(),
+              /** "Listed as halal · Google Maps" etc. */
+              halal: z.string().max(120).optional(),
+            }),
+          )
+          .default([]),
       }),
     ),
     unplaced: z.array(z.object({ ideaId: Id, reason: z.enum(['closed', 'hours', 'time']) })),

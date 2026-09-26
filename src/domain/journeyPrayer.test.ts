@@ -26,3 +26,27 @@ describe('journeyPrayers', () => {
     expect(r.find((p) => p.prayer === 'dhuhr')?.where).toBe('before');
   });
 });
+
+describe('journeyPrayers — times on the right clock', () => {
+  const HND = { location: { lat: 35.5494, lng: 139.7798 }, timezone: 'Asia/Tokyo', name: 'Haneda' };
+
+  it("never says a prayer 'starts' before it has started where you board (Asar isn't in yet at 14:30 in KL)", () => {
+    // KL Asar ≈ 16:26; Tokyo's Asar (14:09 JST = 13:09 KL time) must not be quoted as KL's.
+    const r = journeyPrayers({ kind: 'flight', startAt: '2026-12-01T14:30:00+08:00', endAt: '2026-12-01T22:30:00+09:00', from: KUL, to: HND });
+    expect(r.find((p) => p.prayer === 'asr')?.where).toBe('jamak_taqdim');
+    expect(r.some((p) => p.where === 'before' && p.prayer === 'asr')).toBe(false);
+    // Zuhur is folded into the jamak taqdim line, not listed twice.
+    expect(r.filter((p) => p.prayer === 'dhuhr')).toEqual([]);
+  });
+
+  it('uses the Malaysian (JAKIM) method for KLIA even without a country code', () => {
+    // MWL would say Isyak 8:11 PM; JAKIM's 18° gives ~8:15 PM.
+    const r = journeyPrayers({ kind: 'flight', startAt: '2026-12-01T22:30:00+08:00', endAt: '2026-12-02T06:30:00+09:00', from: KUL, to: HND });
+    expect(r.find((p) => p.prayer === 'isha')?.text).toMatch(/8:1[5-7] PM/);
+  });
+
+  it("jamak ta'khir says when the later prayer's time starts", () => {
+    const r = journeyPrayers({ kind: 'flight', startAt: '2026-12-01T09:00:00+08:00', endAt: '2026-12-01T17:00:00+09:00', from: KUL, to: HND });
+    expect(r.find((p) => p.where === 'jamak_takhir')?.text).toMatch(/from 5:5\d PM until/);
+  });
+});

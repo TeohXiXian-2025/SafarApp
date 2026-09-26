@@ -27,7 +27,7 @@ export interface FoodGuess {
 }
 
 export function foodVerdict(opts: {
-  community?: Pick<HalalSummary, 'tier' | 'reportCount' | 'certificate' | 'flags'> | null;
+  community?: Pick<HalalSummary, 'tier' | 'reportCount' | 'certificate' | 'flags'> & Partial<Pick<HalalSummary, 'lean'>> | null;
   analysis?: Pick<HalalAssessment, 'tier' | 'verdict' | 'flags' | 'source'> | null;
   /** Google halal_restaurant type, OSM diet:halal, or "halal" in the name. */
   listed?: 'google' | 'osm' | 'name' | null;
@@ -39,6 +39,8 @@ export function foodVerdict(opts: {
   if (c?.tier === 'muslim_owned') return { bucket: 'halal', text: 'Muslim-owned / fully halal', basis: reports };
   if (c?.tier === 'not_halal') return { bucket: 'not_halal', text: 'Not halal', basis: reports };
   if (c?.tier === 'pork_free') return { bucket: 'pork_free', text: 'Pork-free, not halal', basis: reports };
+  // One traveller so far (any Safar trip): a strong hint until someone confirms it.
+  if (c?.lean === 'certified' || c?.lean === 'muslim_owned') return { bucket: 'likely', text: 'A Safar traveller says halal', basis: `${reports} — one more confirms it` };
   if (a?.flags.servesPork || a?.tier === 'not_halal') return { bucket: 'not_halal', text: 'Serves pork', basis: 'Halal Radar (reviews / website)' };
   if (a?.tier === 'certified') return { bucket: 'certified', text: 'Likely certified', basis: 'Halal Radar (named certifier in reviews / website)' };
   if (listed) return { bucket: 'halal', text: 'Listed as halal', basis: listed === 'google' ? 'Google Maps' : listed === 'osm' ? 'OpenStreetMap' : 'Name says halal' };

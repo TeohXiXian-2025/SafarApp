@@ -4,10 +4,10 @@ import { GeoPoint, HalalTier, Id, Millis, PlaceRef } from './common.js';
 // ─── Halal assessment (the "Halal Radar" verdict for any place) ─────────────
 
 /** Where a halal verdict came from, highest trust first. */
-export const HalalSource = z.enum(['verified_certificate', 'community', 'google', 'foursquare', 'osm', 'ai_estimate']);
+export const HalalSource = z.enum(['verified_certificate', 'directory', 'community', 'google', 'foursquare', 'osm', 'ai_estimate']);
 export type HalalSource = z.infer<typeof HalalSource>;
 
-export const EvidenceSource = z.enum(['google', 'foursquare', 'openstreetmap', 'reviews', 'website', 'place_details', 'nearby', 'community', 'ai']);
+export const EvidenceSource = z.enum(['google', 'foursquare', 'openstreetmap', 'reviews', 'website', 'place_details', 'nearby', 'community', 'ai', 'directory']);
 export type EvidenceSource = z.infer<typeof EvidenceSource>;
 
 export const NearbyPlace = z.object({
@@ -94,6 +94,8 @@ export const HalalSummary = z.object({
   counts: z.partialRecord(HalalTier, z.number().nonnegative()),
   /** Consensus tier, when reports agree strongly enough. */
   tier: HalalTier.optional(),
+  /** What the reports lean to before there's a consensus (e.g. the first report) — a hint, not a verdict. */
+  lean: HalalTier.optional(),
   disputed: z.boolean(),
   flags: HalalAssessment.shape.flags,
   /** A valid certificate someone photographed (name matched, not expired). */
@@ -130,7 +132,7 @@ export function summarizeReports(
   reports: (Pick<HalalReport, 'tier' | 'flags' | 'updatedAt'> & { uid?: string })[],
   now = Date.now(),
   weightOf: (uid: string) => number = () => 1,
-): Pick<HalalSummary, 'reportCount' | 'counts' | 'tier' | 'disputed' | 'flags'> {
+): Pick<HalalSummary, 'reportCount' | 'counts' | 'tier' | 'lean' | 'disputed' | 'flags'> {
   const counts: Partial<Record<HalalTier, number>> = {};
   let total = 0;
   for (const r of reports) {
@@ -148,7 +150,7 @@ export function summarizeReports(
   return {
     reportCount: reports.length,
     counts,
-    ...(agreed ? { tier: topTier } : {}),
+    ...(agreed ? { tier: topTier } : topTier && topWeight / total >= 0.6 ? { lean: topTier } : {}),
     disputed: reports.length >= MIN_COMMUNITY_REPORTS && !agreed,
     flags: {
       ...(majority('servesAlcohol') !== undefined ? { servesAlcohol: majority('servesAlcohol') } : {}),
@@ -298,7 +300,7 @@ export const Idea = z.object({
   analysis: z.object({ status: z.enum(['pending', 'done', 'error']), at: Millis, error: z.string().max(300).optional() }).optional(),
   status: IdeaStatus,
   votes: z.record(z.string(), Vote).default({}),
-  /** Who must vote: the members when it was added (later joiners may vote but aren't waited for). */
+  /** Who was asked to vote when it was added. While voting, members who join later are waited for too (see requiredVoters). */
   voters: z.array(Id).max(50).optional(),
   /** Voting closes then (non-voters abstain). */
   votingEndsAt: Millis.optional(),

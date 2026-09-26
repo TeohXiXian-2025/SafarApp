@@ -7,6 +7,8 @@
 import { Type } from '@google/genai';
 import { z } from 'zod';
 import type { EvidenceSource, GeoPoint, HalalAssessment, HalalSource, NearbyPlace, PrayerAccess, Sentiment } from '../../src/domain/index.js';
+import { scanText, scoreHalal } from '../../src/domain/index.js';
+import { certifiedListing } from './certDirectory.js';
 import { optionalEnv } from './env.js';
 import { extractJson } from './gemini.js';
 import { distanceKm, searchNearby, type PlaceDetails } from './places.js';
@@ -258,7 +260,12 @@ const SIGNAL_SOURCE: Record<Signal['source'], EvidenceSource> = { google: 'googl
 
 export async function analyzePlace(d: PlaceDetails): Promise<{ halal: HalalAssessment; sentiment?: Sentiment }> {
   const isFood = d.place.category === 'food';
-  const [nearby, fsq, site] = await Promise.all([nearbySpots(d, isFood), isFood ? foursquareSignal(d) : null, isFood ? websiteSnippets(d.place.website) : []]);
+  const [nearby, fsq, site, directory] = await Promise.all([
+    nearbySpots(d, isFood),
+    isFood ? foursquareSignal(d) : null,
+    isFood ? websiteSnippets(d.place.website) : [],
+    isFood ? certifiedListing(d.place).catch(() => null) : null,
+  ]);
   const signals = [googleSignal(d), fsq, isFood ? osmSignal(d, nearby.osm) : null].filter((s): s is Signal => !!s);
   const { prayer, halalFood } = nearby;
 
@@ -316,11 +323,39 @@ export async function analyzePlace(d: PlaceDetails): Promise<{ halal: HalalAsses
     if (text && !evidence.some((x) => sameFact(x.text, text))) evidence.push({ text, source: e.source });
   }
 
+  // ── Evidence score: every free signal weighed (listings, own website, review text, name,
+  // certification directory); the AI's tier is one vote. Pork seen on the menu outweighs listings.
+  const osmHit = signals.find((s) => s.source === 'osm');
+  const webScan = scanText(site);
+  const reviewScan = scanText([...d.reviews.map((r) => r.text), d.editorialSummary]);
+  const scored = isFood
+    ? scoreHalal({
+        ...(directory ? { directory } : {}),
+        googleHalalType: d.primaryType === 'halal_restaurant' || d.place.types.includes('halal_restaurant'),
+        ...(osmHit ? { osmHalal: /halal only/.test(osmHit.reason) ? ('only' as const) : ('yes' as const) } : {}),
+        foursquareHalal: !!fsq,
+        nameSaysHalal: HALAL_WORD.test(d.place.name),
+        website: webScan,
+        reviews: reviewScan,
+        servesAlcoholListed: !!(d.servesBeer || d.servesWine),
+        halalLeaningCuisine: d.place.types.some((t) => /middle_eastern|turkish|lebanese|afghani|indonesian|pakistani|persian/.test(t)),
+        ai: { tier: ai.halal.tier, confidence: ai.halal.confidence },
+      })
+    : null;
+  if (directory) evidence.unshift({ text: `On the official certified list: ${directory}`, source: 'directory' });
+  if (scored?.certifier && !directory && webScan.certifier) evidence.push({ text: `Its website names a halal certifier: ${webScan.certifier}`, source: 'website' });
+  if (reviewScan.halal >= 2 && !evidence.some((e) => e.source === 'reviews' && /halal/i.test(e.text))) evidence.push({ text: `${reviewScan.halal} of the reviews mention halal food`, source: 'reviews' });
+  if (reviewScan.pork + webScan.pork > 0 && !reviewScan.noPork && !webScan.noPork) evidence.push({ text: 'Pork dishes are mentioned in reviews or on its website', source: webScan.pork ? 'website' : 'reviews' });
+  // The weight of evidence decides; the AI's tier only fills in when the evidence says nothing.
+  const tier = scored?.tier ?? (ai.halal.tier !== 'unknown' ? ai.halal.tier : undefined);
+
   // ── Verdict
   const top = signals[0];
   let verdict = ai.halal.verdict;
   if (isFood) {
-    if (top && verdict === 'unknown') verdict = 'friendly';
+    if ((top || directory) && verdict === 'unknown') verdict = 'friendly';
+    if (tier === 'certified' || tier === 'muslim_owned') verdict = pork ? 'caution' : 'friendly';
+    if (tier === 'not_halal') verdict = 'not_friendly';
     if (top && pork) verdict = 'caution'; // listed halal but reviews mention pork — flag it
   } else if (verdict !== 'not_friendly' && verdict !== 'caution') {
     // No concern with the activity itself → it comes down to being able to pray.
@@ -328,7 +363,7 @@ export async function analyzePlace(d: PlaceDetails): Promise<{ halal: HalalAsses
   }
 
   const halal: HalalAssessment = {
-    ...(isFood && ai.halal.tier !== 'unknown' ? { tier: ai.halal.tier } : {}),
+    ...(isFood && tier ? { tier } : {}),
     verdict,
     reasons: clip(
       evidence.map((e) => e.text),
@@ -344,8 +379,9 @@ export async function analyzePlace(d: PlaceDetails): Promise<{ halal: HalalAsses
       ...(flag(ai.halal.halalMenuOptions) !== undefined ? { halalMenuOptions: flag(ai.halal.halalMenuOptions) } : {}),
       ...(prayer.access === 'onsite' ? { prayerSpaceOnSite: true } : prayerOnSite === false ? { prayerSpaceOnSite: false } : {}),
     },
-    source: isFood && top ? top.source : 'ai_estimate',
-    confidence: isFood && top ? Math.max(ai.halal.confidence, 0.7) : ai.halal.confidence,
+    ...(directory ? { certificate: { certifier: directory.split(' · ')[0] } } : {}),
+    source: isFood && directory ? 'directory' : isFood && top ? top.source : 'ai_estimate',
+    confidence: isFood && scored ? Math.max(scored.confidence, top || directory ? 0.7 : 0) : ai.halal.confidence,
     assessedAt: Date.now(),
   };
 

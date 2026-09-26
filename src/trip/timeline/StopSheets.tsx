@@ -214,9 +214,11 @@ export function AddStopSheet({
   idea: Idea | null;
   days: string[];
   defaultDay: string;
+  /** The best day + start for this length (a clash-free time in the idea's city if there is one). */
+  pickDefault?: (duration: number) => { day: string; start: string; fits: boolean };
   checker?: Checker;
   onClose: () => void;
-  onAdd: (day: string, start?: string) => Promise<void>;
+  onAdd: (day: string, start: string | undefined, durationMin: number) => Promise<void>;
 }) {
   return (
     <Sheet open={!!idea} onClose={onClose} title={idea ? `Add ${idea.place.name}` : 'Add'}>
@@ -229,6 +231,7 @@ function AddStopForm({
   idea,
   days,
   defaultDay,
+  pickDefault,
   checker,
   onClose,
   onAdd,
@@ -236,25 +239,28 @@ function AddStopForm({
   idea: Idea;
   days: string[];
   defaultDay: string;
+  pickDefault?: (duration: number) => { day: string; start: string; fits: boolean };
   checker?: Checker;
   onClose: () => void;
-  onAdd: (day: string, start?: string) => Promise<void>;
+  onAdd: (day: string, start: string | undefined, durationMin: number) => Promise<void>;
 }) {
-  const [day, setDay] = useState(defaultDay);
-  // Pre-fill the first time that fits opening hours and travel (you can still change it).
-  const suggestFor = (d: string) => {
-    const s = checker?.suggest(d, idea.estDurationMin);
-    return s === null || s === undefined ? '' : toClock(s);
-  };
-  const [start, setStart] = useState(() => suggestFor(defaultDay));
-  const [suggested, setSuggested] = useState(() => !!suggestFor(defaultDay));
+  // Pre-filled with a time that clashes with nothing (in the place's city); you can change any of it.
+  const [initial] = useState(() => pickDefault?.(idea.estDurationMin) ?? { day: defaultDay, start: '', fits: false });
+  const [day, setDay] = useState(initial.day);
+  const [start, setStart] = useState(initial.start);
+  const [duration, setDuration] = useState(idea.estDurationMin);
+  const [hint, setHint] = useState<'fits' | 'fallback' | 'manual'>(initial.start ? (initial.fits ? 'fits' : 'fallback') : 'manual');
+  const validStart = /^\d{2}:\d{2}$/.test(start);
+  const end = validStart ? toClock(Math.min(toMin(start) + duration, 24 * 60 - 1)) : '';
   const changeDay = (d: string) => {
     setDay(d);
-    const s = suggestFor(d);
-    setStart(s);
-    setSuggested(!!s);
+    const s = checker?.suggest(d, duration);
+    if (s !== null && s !== undefined) {
+      setStart(toClock(s));
+      setHint('fits');
+    } else setHint('manual');
   };
-  const blocked = !!checker && /^\d{2}:\d{2}$/.test(start) && checker.check(day, toMin(start), idea.estDurationMin).some((w) => w.severity === 'block');
+  const blocked = !!checker && validStart && checker.check(day, toMin(start), duration).some((w) => w.severity === 'block');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -262,7 +268,7 @@ function AddStopForm({
     setBusy(true);
     setError('');
     try {
-      await onAdd(day, start || undefined);
+      await onAdd(day, start || undefined, duration);
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -276,20 +282,46 @@ function AddStopForm({
       <Field label="Day">
         <DaySelect days={days} value={day} onChange={changeDay} />
       </Field>
-      <Field label="Start" hint={suggested ? 'Suggested: the first time that fits opening hours and travel.' : "Leave empty to go after the day's last stop."}>
-        <Input
-          type="time"
-          step={300}
-          value={start}
-          onChange={(e) => {
-            setStart(e.target.value);
-            setSuggested(false);
-          }}
-        />
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Start">
+          <Input
+            type="time"
+            step={300}
+            value={start}
+            onChange={(e) => {
+              setStart(e.target.value);
+              setHint('manual');
+            }}
+          />
+        </Field>
+        <Field label="End">
+          <Input
+            type="time"
+            step={300}
+            value={end}
+            disabled={!validStart}
+            onChange={(e) => {
+              if (!/^\d{2}:\d{2}$/.test(e.target.value) || !validStart) return;
+              const d = toMin(e.target.value) - toMin(start);
+              if (d >= 5) setDuration(d);
+            }}
+          />
+        </Field>
+      </div>
+      <Field label="Or how long">
+        <DurationSelect value={duration} onChange={setDuration} />
       </Field>
-      <p className="text-xs text-[#6D7A77]">Planned for {durLabel(idea.estDurationMin)} — change it after adding.</p>
+      <p className="text-xs text-[#6D7A77]">
+        {hint === 'fits'
+          ? `Suggested: the first time on ${formatDay(day)} that clashes with nothing — opening hours, travel, prayer times.`
+          : hint === 'fallback'
+            ? `Nothing fits without a clash in this city, so it's after the last stop on the emptiest day (${formatDay(day)}) — change it if you like.`
+            : start
+              ? 'Your time.'
+              : "Leave the start empty to go after the day's last stop."}
+      </p>
       <HoursHint idea={idea} day={day} />
-      <PlacementCheck checker={checker} day={day} start={start} duration={idea.estDurationMin} onPick={(s) => (setStart(s), setSuggested(true))} />
+      <PlacementCheck checker={checker} day={day} start={start} duration={duration} onPick={(x) => (setStart(x), setHint('fits'))} />
       {error && <ErrorBanner>{error}</ErrorBanner>}
       <Button className="w-full" disabled={busy} onClick={add}>
         {busy ? 'Adding…' : `${blocked ? 'Add anyway' : 'Add'} to ${formatDay(day)}`}

@@ -178,6 +178,22 @@ try {
   assert.equal((await db.doc(`trips/${q.tripId}/stays/${kl.id}`).get()).get('search'), undefined);
   ok('changing people per room clears the old prices (search again)');
 
+  // A city's stay goes missing (the Tokyo bug): it can be planned again, and a re-plan never drops it.
+  const penang = (await db.collection(`trips/${q.tripId}/stays`).where('city', '==', 'Penang').get()).docs[0];
+  assert.ok(penang, 'Penang stay exists');
+  assert.equal((await ali.call('stays/delete', { id: penang.id }, q)).status, 200);
+  assert.equal((await bob.call('stays/plan', { fill: true }, q)).status, 403);
+  const filled = await ali.call('stays/plan', { fill: true }, q);
+  assert.equal(filled.status, 200, JSON.stringify(filled.body));
+  assert.equal(filled.body.created, 1);
+  const cities = (await db.collection(`trips/${q.tripId}/stays`).get()).docs.map((d) => d.get('city')).sort();
+  assert.deepEqual(cities, ['Kuala Lumpur', 'Penang']);
+  const replanned = await ali.call('stays/plan', { replan: true }, q);
+  assert.equal(replanned.status, 200);
+  const after = (await db.collection(`trips/${q.tripId}/stays`).get()).docs.map((d) => d.get('city')).sort();
+  assert.deepEqual(after, ['Kuala Lumpur', 'Penang']);
+  ok('a deleted city stay comes back with "Plan the stay" (admin only), and re-planning keeps every city');
+
   console.log(`\n${passed} checks passed.`);
 } catch (e) {
   console.error('\n❌', e);

@@ -22,6 +22,7 @@ import {
   metersBetween,
   paths,
   proposeStays,
+  trimProposals,
   scoreHotel,
   ScheduleItem,
   Stay,
@@ -132,24 +133,29 @@ async function whyItFits(
 }
 
 export const stayRoutes: RouteTable = {
-  /** First visit: save the proposed stays. `replan` (admin) redoes stays nobody has picked a hotel for. */
+  /**
+   * First visit: save the proposed stays. `fill` (admin) adds stays only for
+   * nights no stay covers (a city whose stay was removed comes back); `replan`
+   * (admin) redoes stays nobody has picked a hotel for. Stays that are kept
+   * trim the new ones — a city is never dropped because one night overlaps.
+   */
   'POST stays/plan': withTrip(
     async (req, { tripId, member }) => {
-      const { replan } = await readJson(req, z.object({ replan: z.boolean().default(false) }));
-      if (replan && member.role !== 'admin') throw new HttpError(403, 'Only the admin can re-plan stays');
+      const { replan, fill } = await readJson(req, z.object({ replan: z.boolean().default(false), fill: z.boolean().default(false) }));
+      if ((replan || fill) && member.role !== 'admin') throw new HttpError(403, 'Only the admin can plan stays');
       const db = adminDb();
       const existing = await db.collection(paths.stays(tripId)).get();
-      if (existing.size && !replan) return json({ created: 0 });
+      if (existing.size && !replan && !fill) return json({ created: 0 });
       const data = await loadTripData(tripId);
       const proposals = proposalsFor(data, await stopsOf(tripId, data));
-      const kept = existing.docs.map((d) => Stay.parse(d.data())).filter((s) => s.chosenKey);
+      const all = existing.docs.map((d) => Stay.parse(d.data()));
+      // Replan keeps stays with a hotel picked or booked; fill keeps everything.
+      const kept = fill ? all : all.filter((s) => s.chosenKey || s.bookingId);
       const batch = db.batch();
-      for (const d of existing.docs) if (!d.get('chosenKey')) batch.delete(d.ref); // (their hotel lists stay orphaned but unread)
+      if (!fill) for (const d of existing.docs) if (!kept.some((k) => k.id === d.id)) batch.delete(d.ref); // (their hotel lists stay orphaned but unread)
       const now = Date.now();
       let created = 0;
-      for (const p of proposals) {
-        // Keep stays with a chosen hotel; don't overlap them.
-        if (kept.some((k) => p.checkIn < k.checkOut && k.checkIn < p.checkOut)) continue;
+      for (const p of trimProposals(proposals, kept)) {
         const ref = db.collection(paths.stays(tripId)).doc();
         batch.set(ref, Stay.parse({ id: ref.id, ...p, city: data.trip.destinations[p.destIdx].name, perRoom: 2, createdBy: member.uid, createdAt: now, updatedAt: now }));
         created++;

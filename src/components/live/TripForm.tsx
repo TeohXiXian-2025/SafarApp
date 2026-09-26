@@ -1,6 +1,6 @@
 import { X } from 'lucide-react';
-import { useMemo, useState, type FormEvent } from 'react';
-import { CreateTripInput, MAX_TRIP_DAYS, type DestinationInput } from '../../domain';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { CreateTripInput, MAX_TRIP_DAYS, splitDates, type DestinationInput } from '../../domain';
 import { currencyOptions } from '../../lib/format';
 import { Button, ErrorBanner, Field, Input, Select } from '../../ui';
 import { PlaceSearch } from './PlaceSearch';
@@ -28,13 +28,29 @@ export function TripForm({ initial, submitLabel, onSubmit, onCancel }: Props) {
     if (!name.trim()) setName(`${d.name} trip`);
   };
 
+  // Several cities: ask when the group is in each (helps hotels, transport and the timeline).
+  const multi = destinations.length > 1;
+  const setCityDate = (i: number, key: 'arriveDate' | 'leaveDate', value: string) =>
+    setDestinations((cur) => cur.map((d, j) => (j === i ? { ...d, [key]: value || undefined } : d)));
+  const splitEvenly = () => {
+    const split = splitDates(startDate, endDate, destinations.length);
+    setDestinations((cur) => cur.map((d, i) => ({ ...d, ...split[i] })));
+  };
+  // Fill the dates in as a suggestion once both the cities and the trip dates are known.
+  useEffect(() => {
+    if (multi && startDate && endDate && endDate >= startDate && destinations.every((d) => !d.arriveDate && !d.leaveDate)) splitEvenly();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [multi, startDate, endDate, destinations.length]);
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const parsed = CreateTripInput.safeParse({ name: name.trim(), destinations, startDate, endDate, currency });
+    // Dates only matter with several cities; one city is simply the whole trip.
+    const cities = multi ? destinations : destinations.map(({ arriveDate: _a, leaveDate: _l, ...d }) => d);
+    const parsed = CreateTripInput.safeParse({ name: name.trim(), destinations: cities, startDate, endDate, currency });
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       const field = String(issue.path[0] ?? '');
-      setError(field === 'destinations' ? 'Add at least one destination.' : issue.message);
+      setError(field === 'destinations' ? (destinations.length ? issue.message : 'Add at least one destination.') : issue.message);
       return;
     }
     setBusy(true);
@@ -88,6 +104,29 @@ export function TripForm({ initial, submitLabel, onSubmit, onCancel }: Props) {
         </Field>
       </div>
       <p className="-mt-3 text-xs text-[#6D7A77]">Up to {MAX_TRIP_DAYS} days.</p>
+
+      {multi && (
+        <Field label="When are you in each city?" hint="The day you arrive and the day you leave (a travel day can be both). Used for hotels, transport alerts and planning each day." group>
+          <div className="space-y-2">
+            {destinations.map((d, i) => (
+              <div key={`${d.placeId ?? d.name}-dates-${i}`} className="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[10rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1">
+                <span className="text-sm font-semibold text-[#161C23] truncate col-span-2 sm:col-span-1">
+                  <span className="text-xs opacity-60">{i + 1}.</span> {d.name}
+                </span>
+                <div className="col-span-2 sm:col-span-1 grid grid-cols-2 gap-2">
+                  <Input type="date" aria-label={`Arrive in ${d.name}`} value={d.arriveDate ?? ''} min={startDate || undefined} max={endDate || undefined} onChange={(e) => setCityDate(i, 'arriveDate', e.target.value)} />
+                  <Input type="date" aria-label={`Leave ${d.name}`} value={d.leaveDate ?? ''} min={d.arriveDate || startDate || undefined} max={endDate || undefined} onChange={(e) => setCityDate(i, 'leaveDate', e.target.value)} />
+                </div>
+              </div>
+            ))}
+            {startDate && endDate && (
+              <button type="button" onClick={splitEvenly} className="text-xs font-semibold text-[#00685F]">
+                Split the trip dates evenly
+              </button>
+            )}
+          </div>
+        </Field>
+      )}
 
       <Field label="Group currency" hint="Budgets and shared expenses are shown in this currency.">
         <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>

@@ -5,6 +5,12 @@ import { FieldValue, type WriteBatch } from 'firebase-admin/firestore';
 import {
   Booking,
   byTime,
+  byTimeAndPriority,
+  MEAL_WINDOW,
+  citiesByDay,
+  cityOf,
+  Stay,
+  withCityBase,
   dayFrames,
   dayWarnings,
   estimateTravelMin,
@@ -73,16 +79,18 @@ export interface TripData {
   ideas: Map<string, Idea>;
   /** Approved and proposed splits by id. */
   splits: Map<string, Split>;
+  stays: Stay[];
 }
 
 export async function loadTripData(tripId: string): Promise<TripData> {
   const db = adminDb();
-  const [trip, members, bookings, ideas, splits] = await Promise.all([
+  const [trip, members, bookings, ideas, splits, stays] = await Promise.all([
     loadTrip(tripId),
     db.collection(paths.members(tripId)).get(),
     db.collection(paths.bookings(tripId)).get(),
     db.collection(paths.ideas(tripId)).get(),
     db.collection(paths.splits(tripId)).where('status', 'in', ['proposed', 'approved']).get(),
+    db.collection(paths.stays(tripId)).get(),
   ]);
   return {
     trip,
@@ -90,16 +98,30 @@ export async function loadTripData(tripId: string): Promise<TripData> {
     bookings: new Map(parseAll<Booking>(bookings.docs, Booking).map((b) => [b.id, b])),
     ideas: new Map(parseAll<Idea>(ideas.docs, Idea).map((i) => [i.id, i])),
     splits: new Map(parseAll<Split>(splits.docs, Split).map((s) => [s.id, s])),
+    stays: parseAll<Stay>(stays.docs, Stay),
   };
+}
+
+/** Which trip cities the group is in each day (city dates → stays → hotel bookings). */
+export function dayCitiesOf(data: TripData): Map<string, number[]> {
+  return citiesByDay({
+    startDate: data.trip.startDate,
+    endDate: data.trip.endDate,
+    destinations: data.trip.destinations,
+    stays: data.stays,
+    hotels: [...data.bookings.values()].filter((b) => b.kind === 'hotel'),
+  });
 }
 
 export const prayingUids = (members: Member[]) => members.filter(prays).map((m) => m.uid);
 
 export function framesFor(data: TripData, days: string[]): DayFrame[] {
-  return dayFrames(days, [...data.bookings.values()], data.trip.destinations, {
+  const frames = dayFrames(days, [...data.bookings.values()], data.trip.destinations, {
     pace: mergePrefs(data.members).pace ?? 'moderate',
     praying: prayingUids(data.members).length > 0,
   });
+  // A day with no hotel or arrival starts from its own city, not the first destination.
+  return withCityBase(frames, dayCitiesOf(data), data.trip.destinations);
 }
 
 /** One day's frame; a day with no hotel prays on the local time where its stops are. */
@@ -133,10 +155,11 @@ export function prayerWalk(idea: Idea): number | undefined {
 }
 
 /** One stop for the engine; a split pair is one unit (the original place, until everyone meets again). */
-export function unitFor(idea: Idea, split?: Split): Unit {
+export function unitFor(idea: Idea, split?: Split, destinations?: Trip['destinations']): Unit {
   return {
     id: idea.id,
     loc: idea.place.location,
+    ...(destinations && destinations.length > 1 ? { city: cityOf(destinations, idea.place.location) } : {}),
     duration: split ? split.reunion.afterMinutes : idea.estDurationMin,
     food: idea.place.category === 'food',
     ...(idea.window ? { window: [toMin(idea.window.start), toMin(idea.window.end)] as [number, number] } : {}),
@@ -335,7 +358,7 @@ function fillerFor(data: TripData, near: GeoPoint, used: Set<string>, onDay: Set
 export async function refreshPrayers(tripId: string, day: string, data: TripData) {
   const all = await dayItems(tripId, day);
   const previous = all.filter(isPrayerItem);
-  const stops = all.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTime);
+  const stops = all.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTimeAndPriority);
   const ends = itemEnds(data, stops);
   const frame = frameAt(data, day, stops.filter((i) => !i.locked).map((i) => ends.get(i.id)?.in).find(Boolean));
   const walkOf = (i: ScheduleItem) => {
@@ -402,7 +425,7 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
  * under 30 days old.
  */
 export async function refreshLegs(tripId: string, day: string, data: TripData) {
-  const all = (await dayItems(tripId, day)).sort(byTime);
+  const all = (await dayItems(tripId, day)).sort(byTimeAndPriority);
   const chain = all.filter((i) => !isPrayerItem(i) && !isTrackB(i));
   const ends = itemEnds(data, chain);
   const batch = adminDb().batch();
@@ -446,7 +469,7 @@ export async function refreshDay(tripId: string, day: string, data?: TripData) {
 
 /** The same 🔴 / 🟡 problems the timeline shows for a day. */
 export function dayProblems(data: TripData, day: string, items: ScheduleItem[]) {
-  const chain = items.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTime);
+  const chain = items.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTimeAndPriority);
   const ends = itemEnds(data, chain);
   const ideaOf = (i: ScheduleItem) => (i.ref.kind === 'idea' ? data.ideas.get(i.ref.ideaId) : undefined);
   return dayWarnings(
@@ -458,9 +481,10 @@ export function dayProblems(data: TripData, day: string, items: ScheduleItem[]) 
       const prev = k > 0 ? chain[k - 1] : undefined;
       const a = prev && ends.get(prev.id)?.out;
       const b = ends.get(it.id)?.in;
-      if (sameJourney(prev, it)) return { ...it };
+      const checkin = it.ref.kind === 'booking' && it.ref.event === 'checkin';
+      if (sameJourney(prev, it)) return { ...it, checkin };
       const known = it.transitFromPrev?.fromId === prev?.id ? it.transitFromPrev?.minutes : undefined;
-      return { ...it, transitMin: known ?? (a && b ? estimateTravelMin(a, b) : undefined) };
+      return { ...it, checkin, transitMin: known ?? (a && b ? estimateTravelMin(a, b) : undefined) };
     }),
     (id) => {
       const it = items.find((i) => i.id === id);
@@ -487,8 +511,12 @@ export function planFixDay(data: TripData, day: string, items: ScheduleItem[]): 
   const ends = itemEnds(data, items);
   const units: Unit[] = movable.flatMap((it) => {
     const idea = it.ref.kind === 'idea' ? data.ideas.get(it.ref.ideaId) : undefined;
-    if (!idea) return [];
-    return [{ ...unitFor(idea, approvedSplit(data, idea)), id: it.id, loc: ends.get(it.id)?.in ?? idea.place.location }];
+    if (idea) return [{ ...unitFor(idea, approvedSplit(data, idea)), id: it.id, loc: ends.get(it.id)?.in ?? idea.place.location }];
+    // A lunch / dinner stop stays within its meal time.
+    if (it.ref.kind === 'custom' && it.ref.meal && it.ref.place) {
+      return [{ id: it.id, loc: it.ref.place.location, duration: Math.max(30, toMin(it.end) - toMin(it.start)), food: true, window: MEAL_WINDOW[it.ref.meal] }];
+    }
+    return [];
   });
   const locked = items.filter((i) => i.locked && toMin(i.end) > toMin(i.start));
   const frame = { ...frameAt(data, day, units[0]?.loc), blocks: locked.map((l) => ({ start: toMin(l.start), end: toMin(l.end) })) };

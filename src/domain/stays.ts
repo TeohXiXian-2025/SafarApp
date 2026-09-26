@@ -124,7 +124,7 @@ const NEAR_DEST_M = 60_000;
 export function proposeStays(input: {
   startDate: string;
   endDate: string;
-  destinations: Pick<Destination, 'location'>[];
+  destinations: (Pick<Destination, 'location'> & Partial<Pick<Destination, 'arriveDate' | 'leaveDate'>>)[];
   bookings: (HotelLike & { from?: { location: GeoPoint } })[];
   stops: { day: string; start: string; name: string; location: GeoPoint }[];
   /** Places on the Idea Board not yet scheduled (help place the centre). */
@@ -143,6 +143,9 @@ export function proposeStays(input: {
   const clue: (number | null)[] = nights.map((n) => {
     const h = hotels.find((x) => covers(x, n));
     if (h) return idxOf(h.to.location);
+    // The dates the admin gave each city: you sleep there from arriving until the night before leaving.
+    const planned = dests.findIndex((d) => d.arriveDate && d.leaveDate && d.arriveDate <= n && n < d.leaveDate);
+    if (planned >= 0) return planned;
     const evening = byDay.get(n)?.at(-1)?.location ?? byDay.get(nextDay(n))?.[0]?.location;
     if (evening && inTrip(evening)) return idxOf(evening);
     const arrived = moves.filter((m) => m.endLocal.slice(0, 10) === n && inTrip(m.to.location)).at(-1);
@@ -155,6 +158,26 @@ export function proposeStays(input: {
     // Nothing to go on: share the nights over the destinations in order.
     nights.forEach((_, i) => (city[i] = Math.min(dests.length - 1, Math.floor((i * dests.length) / nights.length))));
     firstClue = 0;
+  }
+  // Runs of nights with no clue go to cities nothing points to yet, if they sit between the
+  // neighbouring clues in the listed order (KL hotel booked, Penang not: the nights after KL are
+  // Penang's) — a city with no booking or plans yet must still get its stay.
+  const seen = new Set(clue.filter((c): c is number => c !== null));
+  for (let i = 0; i < nights.length; ) {
+    if (clue[i] !== null) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < nights.length && clue[j] === null) j++;
+    const prev = i > 0 ? city[i - 1] : null;
+    const next = j < nights.length ? city[j] : null;
+    const unseen = dests.map((_, k) => k).filter((k) => !seen.has(k) && (prev === null || k > prev) && (next === null || k < next));
+    if (unseen.length && firstClue !== -1 && clue.some((c) => c !== null)) {
+      for (let k = i; k < j; k++) city[k] = unseen[Math.min(unseen.length - 1, Math.floor(((k - i) * unseen.length) / (j - i)))];
+      unseen.forEach((k) => seen.add(k));
+    }
+    i = j;
   }
   for (let i = 0; i < nights.length; i++) if (city[i] === null) city[i] = i < firstClue ? city[firstClue] : city[i - 1];
 
@@ -172,6 +195,30 @@ export function proposeStays(input: {
     if (!pts.length) continue;
     s.center = centroid(pts.map((p) => p.location));
     s.nearName = pts.reduce((a, b) => (metersBetween(a.location, s.center) <= metersBetween(b.location, s.center) ? a : b)).name;
+  }
+  return out;
+}
+
+/** Nights (of the trip) that no stay covers. */
+export const nightsWithoutStay = (nights: string[], stays: Pick<Stay, 'checkIn' | 'checkOut'>[]) => nights.filter((n) => !stays.some((s) => s.checkIn <= n && n < s.checkOut));
+
+/**
+ * Proposals cut down to the nights no kept stay covers (split where a kept
+ * stay sits in the middle) — so re-planning never drops a whole city just
+ * because one of its nights overlaps a stay that's being kept.
+ */
+export function trimProposals(proposals: StayProposal[], kept: Pick<Stay, 'checkIn' | 'checkOut'>[]): StayProposal[] {
+  const out: StayProposal[] = [];
+  for (const p of proposals) {
+    let run: StayProposal | null = null;
+    for (let n = p.checkIn; n < p.checkOut; n = nextDay(n)) {
+      if (kept.some((k) => k.checkIn <= n && n < k.checkOut)) {
+        run = null;
+        continue;
+      }
+      if (run) run.checkOut = nextDay(n);
+      else out.push((run = { ...p, checkIn: n, checkOut: nextDay(n) }));
+    }
   }
   return out;
 }
@@ -407,7 +454,7 @@ const dayShift = (date: string, n: number) => new Date(Date.parse(`${date}T00:00
 export function transportGaps(input: {
   startDate: string;
   endDate: string;
-  destinations: Pick<Destination, 'name' | 'location'>[];
+  destinations: (Pick<Destination, 'name' | 'location'> & Partial<Pick<Destination, 'arriveDate'>>)[];
   stays: Pick<Stay, 'destIdx' | 'checkIn' | 'checkOut'>[];
   bookings: { kind: string; startLocal: string; endLocal: string; from?: { location: GeoPoint }; to: { location: GeoPoint } }[];
 }): TransportGap[] {
@@ -418,16 +465,18 @@ export function transportGaps(input: {
   const out: TransportGap[] = [];
   if (!input.destinations.length) return out;
 
-  // City order and the day each move happens: from the stays when planned, else the listed order.
+  // City order and the day each move happens: from each city's dates when given, else from
+  // the stays when they cover every city, else the listed order (a missing stay must not hide a move).
   const legs: { from: number; to: number; date: string }[] = [];
   const stays = [...input.stays].sort((a, b) => a.checkIn.localeCompare(b.checkIn));
-  if (stays.length) {
-    for (let k = 1; k < stays.length; k++) if (stays[k].destIdx !== stays[k - 1].destIdx) legs.push({ from: stays[k - 1].destIdx, to: stays[k].destIdx, date: stays[k].checkIn });
-  } else {
-    for (let i = 1; i < input.destinations.length; i++) legs.push({ from: i - 1, to: i, date: '' });
-  }
-  const first = stays[0]?.destIdx ?? 0;
-  const last = stays.at(-1)?.destIdx ?? input.destinations.length - 1;
+  const dated = input.destinations.map((d, i) => ({ i, arrive: d.arriveDate })).filter((d): d is { i: number; arrive: string } => !!d.arrive);
+  let order: { idx: number; date: string }[];
+  if (dated.length === input.destinations.length) order = dated.sort((a, b) => a.arrive.localeCompare(b.arrive) || a.i - b.i).map((d) => ({ idx: d.i, date: d.arrive }));
+  else if (stays.length && input.destinations.every((_, i) => stays.some((s) => s.destIdx === i))) order = stays.map((s) => ({ idx: s.destIdx, date: s.checkIn }));
+  else order = input.destinations.map((_, i) => ({ idx: i, date: stays.find((s) => s.destIdx === i)?.checkIn ?? '' }));
+  for (let k = 1; k < order.length; k++) if (order[k].idx !== order[k - 1].idx) legs.push({ from: order[k - 1].idx, to: order[k].idx, date: order[k].date });
+  const first = order[0]?.idx ?? 0;
+  const last = order.at(-1)?.idx ?? input.destinations.length - 1;
 
   if (!moves.some((b) => within(b.endLocal.slice(0, 10), input.startDate, 2, 1))) {
     out.push({ key: 'there', kind: 'there', to: input.destinations[first].name, date: input.startDate, text: `No transport booked to get to ${input.destinations[first].name} (arriving by ${fmt(input.startDate)}).` });

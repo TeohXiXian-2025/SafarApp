@@ -52,6 +52,14 @@ export const Destination = PlaceRef.extend({
   /** IANA timezone, e.g. "Asia/Tokyo" — needed for prayer times & schedule. */
   timezone: z.string().max(64),
   countryCode: z.string().length(2).optional(),
+  /**
+   * When the group is in this city (optional): the day you get there and the
+   * day you leave (nights = arriveDate … the night before leaveDate). Stays,
+   * transport alerts, AI Arrange and the backlog use it to know which city
+   * each day is in.
+   */
+  arriveDate: LocalDate.optional(),
+  leaveDate: LocalDate.optional(),
 });
 export type Destination = z.infer<typeof Destination>;
 
@@ -94,11 +102,22 @@ export const MAX_TRIP_DAYS = 60;
 const withinMaxLength = (t: { startDate?: string; endDate?: string }) =>
   !t.startDate || !t.endDate || (Date.parse(t.endDate) - Date.parse(t.startDate)) / 86_400_000 < MAX_TRIP_DAYS;
 
+/** Each city's dates (when given) run forwards and sit inside the trip. */
+const cityDatesOk = (t: { startDate?: string; endDate?: string; destinations?: { arriveDate?: string; leaveDate?: string }[] }) =>
+  (t.destinations ?? []).every(
+    (d) =>
+      (!d.arriveDate || !d.leaveDate || d.leaveDate >= d.arriveDate) &&
+      (!t.startDate || ((!d.arriveDate || d.arriveDate >= t.startDate) && (!d.leaveDate || d.leaveDate >= t.startDate))) &&
+      (!t.endDate || ((!d.arriveDate || d.arriveDate <= t.endDate) && (!d.leaveDate || d.leaveDate <= t.endDate))),
+  );
+const CITY_DATES_MSG = { message: "Each city's dates must be inside the trip, and leaving can't be before arriving", path: ['destinations'] };
+
 /** Input when the admin creates a trip (server fills ids, admin, timezone, timestamps). */
 export const CreateTripInput = z
   .object(tripFields)
   .refine(datesInOrder, { message: 'End date must be on or after start date', path: ['endDate'] })
-  .refine(withinMaxLength, { message: `Trips can be at most ${MAX_TRIP_DAYS} days`, path: ['endDate'] });
+  .refine(withinMaxLength, { message: `Trips can be at most ${MAX_TRIP_DAYS} days`, path: ['endDate'] })
+  .refine(cityDatesOk, CITY_DATES_MSG);
 export type CreateTripInput = z.infer<typeof CreateTripInput>;
 
 /** Admin edits to trip details. Any subset of fields. */
@@ -106,7 +125,8 @@ export const UpdateTripInput = z
   .object(tripFields)
   .partial()
   .refine(datesInOrder, { message: 'End date must be on or after start date', path: ['endDate'] })
-  .refine(withinMaxLength, { message: `Trips can be at most ${MAX_TRIP_DAYS} days`, path: ['endDate'] });
+  .refine(withinMaxLength, { message: `Trips can be at most ${MAX_TRIP_DAYS} days`, path: ['endDate'] })
+  .refine(cityDatesOk, CITY_DATES_MSG);
 export type UpdateTripInput = z.infer<typeof UpdateTripInput>;
 
 /** users/{uid} — written by the user themselves on first sign-in. */

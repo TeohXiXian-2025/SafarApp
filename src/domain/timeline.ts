@@ -87,7 +87,7 @@ export const BUFFER_MIN = 10;
 /** Visits at least this long may run through a prayer time — you pray there. */
 export const LONG_VISIT_MIN = 150;
 
-export type WarningKind = 'overlap' | 'unreachable' | 'closed' | 'hours' | 'prayer' | 'tight' | 'closing' | 'late';
+export type WarningKind = 'overlap' | 'unreachable' | 'closed' | 'hours' | 'prayer' | 'tight' | 'closing' | 'late' | 'checkin';
 /** block = the plan doesn't work as is; risk = it works, but only just. */
 export const SEVERITY: Record<WarningKind, 'block' | 'risk'> = {
   overlap: 'block',
@@ -98,7 +98,22 @@ export const SEVERITY: Record<WarningKind, 'block' | 'risk'> = {
   tight: 'risk',
   closing: 'risk',
   late: 'risk',
+  checkin: 'risk',
 };
+
+/**
+ * What wins when things share a time: getting there (flights, trains) first,
+ * then prayer, then the hotel check-in / check-out, then everything else.
+ */
+export function timePriority(it: Pick<ScheduleItem, 'ref'> & { prayer?: unknown }): number {
+  if (it.prayer) return 1;
+  if (it.ref.kind === 'booking') return it.ref.event === 'checkin' || it.ref.event === 'checkout' ? 2 : 0;
+  return 3;
+}
+
+/** Time order; at the same minute, by timePriority. */
+export const byTimeAndPriority = <T extends Pick<ScheduleItem, 'start' | 'end' | 'orderIndex' | 'ref'> & { prayer?: unknown }>(a: T, b: T) =>
+  a.start.localeCompare(b.start) || timePriority(a) - timePriority(b) || a.orderIndex - b.orderIndex || a.end.localeCompare(b.end);
 
 export interface DayWarning {
   itemId: string;
@@ -119,7 +134,7 @@ const warn = (itemId: string, kind: WarningKind, text: string): DayWarning => ({
  */
 export function dayWarnings(
   day: string,
-  items: (Pick<ScheduleItem, 'id' | 'start' | 'end' | 'orderIndex'> & { transitMin?: number; kind?: 'prayer' | 'side'; label?: string; locked?: boolean })[],
+  items: (Pick<ScheduleItem, 'id' | 'start' | 'end' | 'orderIndex'> & { transitMin?: number; kind?: 'prayer' | 'side'; label?: string; locked?: boolean; checkin?: boolean })[],
   hours: (id: string) => string[] | undefined,
 ): DayWarning[] {
   const out: DayWarning[] = [];
@@ -141,6 +156,11 @@ export function dayWarnings(
       else if (free < it.transitMin + BUFFER_MIN) out.push(warn(it.id, 'tight', `Only ${free - it.transitMin} min to spare after the ~${it.transitMin} min trip${after}.`));
     }
     if (e >= DAY_END) out.push(warn(it.id, 'late', 'Runs past midnight.'));
+    // Prayer comes before the hotel: a check-in during a prayer time waits until after it.
+    if (it.checkin) {
+      const p = prayers.find((x) => toMin(x.start) <= s && s < toMin(x.end));
+      if (p) out.push(warn(it.id, 'checkin', `Check-in falls in ${p.label ?? 'a prayer'} (${toClock(toMin(p.start))}–${toClock(toMin(p.end))}) — pray first, then check in from ${toClock(toMin(p.end))}.`));
+    }
     // Prayer times are locked like bookings; long visits pray on the spot, journeys on board.
     if (it.kind !== 'side' && !it.locked && e - s < LONG_VISIT_MIN) {
       const p = prayers.find((x) => s < toMin(x.end) && Math.max(e, s + 1) > toMin(x.start));

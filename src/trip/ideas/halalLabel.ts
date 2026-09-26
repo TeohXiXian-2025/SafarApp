@@ -30,6 +30,7 @@ export const EVIDENCE_SOURCE: Record<EvidenceSource, string> = {
   nearby: 'Nearby search',
   community: 'Travellers',
   ai: 'General knowledge',
+  directory: 'Certification list',
 };
 
 const TIER_TEXT = {
@@ -47,6 +48,7 @@ const SOURCE_TEXT: Record<string, string> = {
   ai_estimate: 'AI estimate from reviews — unverified',
   community: 'Community reports',
   verified_certificate: 'Verified certificate',
+  directory: 'On an official halal certification list',
 };
 
 /**
@@ -82,8 +84,21 @@ function baseLabel(idea: Idea, community?: HalalSummary | null): HalalLabel | nu
   if (community?.disputed) {
     return { text: 'Disputed — check before you go', tone: 'warn', basis: `${community.reportCount} reports disagree`, evidence };
   }
+  // The first traveller's report (any Safar trip) — shown until a second one confirms or disputes it.
+  if (community?.lean && community.reportCount === 1 && !(h?.source === 'directory')) {
+    const good = community.lean === 'certified' || community.lean === 'muslim_owned';
+    return {
+      text: good ? 'A traveller says halal' : `A traveller reported: ${TIER_TEXT[community.lean].toLowerCase()}`,
+      tone: good ? 'ok' : 'warn',
+      basis: '1 report across Safar trips — one more confirms it',
+      evidence: [{ text: `1 traveller reported it as ${TIER_TEXT[community.lean].toLowerCase()}`, source: 'community' }, ...evidence],
+    };
+  }
   if (!h) return null;
   const basis = SOURCE_TEXT[h.source] ?? h.source;
+  if (food && h.source === 'directory' && h.tier === 'certified') {
+    return { text: `Certified halal${h.certificate ? ` · ${h.certificate.certifier}` : ''}`, tone: 'good', basis, evidence };
+  }
 
   if (!food) {
     // For sights & activities the question is "can we pray, and is the activity OK?"

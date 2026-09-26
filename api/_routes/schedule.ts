@@ -20,7 +20,9 @@ import {
   paths,
   ScheduleItem,
   estimateTravelMin,
+  findSlot,
   GeoPoint,
+  MEAL_WINDOW,
   goodForWhilePraying,
   openingRanges,
   prays,
@@ -32,11 +34,13 @@ import {
   tripDays,
   type Idea,
   type Trip,
+  type MealKey,
   type Unit,
 } from '../../src/domain/index.js';
 import { FieldValue } from 'firebase-admin/firestore';
 import { withTrip } from '../_lib/auth.js';
 import { searchNearbyFood, type NearbyFood } from '../_lib/places.js';
+import { mealPlaces } from '../_lib/meals.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { extractJson } from '../_lib/gemini.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
@@ -44,6 +48,7 @@ import { useDailyQuota } from '../_lib/quota.js';
 import type { RouteTable } from '../_lib/routes.js';
 import {
   approvedSplit,
+  dayCitiesOf,
   dayItems,
   dayProblems,
   frameAt,
@@ -104,7 +109,7 @@ export const scheduleRoutes: RouteTable = {
   /** Put a backlog idea (or split pair) on a day — at `start`, or after the day's last stop. */
   'POST schedule/add': withTrip(
     async (req, { tripId, member }) => {
-      const body = await readJson(req, z.object({ ideaId: Id, day: LocalDate, start: LocalTime.optional() }));
+      const body = await readJson(req, z.object({ ideaId: Id, day: LocalDate, start: LocalTime.optional(), durationMin: z.number().int().min(5).max(24 * 60).optional() }));
       await useDailyQuota(member.uid, 'arrange');
       const data = await loadTripData(tripId);
       assertTripDay(data.trip, body.day);
@@ -116,11 +121,12 @@ export const scheduleRoutes: RouteTable = {
       const split = approvedSplit(data, idea);
       const lead = leadIdea(data, idea);
       const day = (await dayItems(tripId, body.day)).filter((i) => !isPrayerItem(i));
-      const duration = unitFor(lead, split).duration;
+      // A split's length comes from its groups; a single stop can be given its own.
+      const duration = split ? unitFor(lead, split).duration : (body.durationMin ?? unitFor(lead, split).duration);
       const start = body.start ? toMin(body.start) : toMin(nextSlot(withPrayerTimes(data, body.day, day, lead.place.location), duration).start);
 
       const batch = adminDb().batch();
-      const placed = writeStops(batch, tripId, { data, idea: lead, day: body.day, start, orderIndex: day.length, actor: member.uid });
+      const placed = writeStops(batch, tripId, { data, idea: lead, day: body.day, start, durationMin: split ? undefined : duration, orderIndex: day.length, actor: member.uid });
       placed.forEach((id) => batch.update(ideaDocRef(tripId, id), { status: 'scheduled', updatedAt: Date.now() }));
       logActivity(batch, tripId, member.uid, `${member.displayName} added ${split ? `the split at ${lead.place.name}` : idea.place.name} to ${body.day}`);
       await batch.commit();
@@ -144,6 +150,18 @@ export const scheduleRoutes: RouteTable = {
       assertTripDay(data.trip, day);
       const moved = day !== item.day;
       const current = await dayItems(tripId, item.day);
+      // A lunch / dinner stop (no idea behind it): just move / re-time it.
+      if (item.ref.kind === 'custom') {
+        const duration = body.durationMin ?? toMin(item.end) - toMin(item.start);
+        let start = body.start ? toMin(body.start) : toMin(item.start);
+        if (moved && !body.start) start = toMin(nextSlot(withPrayerTimes(data, day, (await dayItems(tripId, day)).filter((i) => !isPrayerItem(i)), item.ref.place?.location), duration).start);
+        const batch = adminDb().batch();
+        batch.delete(itemRef(tripId, item.id));
+        batch.set(itemRef(tripId, item.id), ScheduleItem.parse({ ...item, day, start: toClock(start), end: toClock(start + duration), updatedBy: member.uid, updatedAt: Date.now() }));
+        await batch.commit();
+        await refreshDays(tripId, moved ? [day, item.day] : [day], data);
+        return json({ ok: true });
+      }
       const group = pairIds(item, current);
       const lead = group.find((i) => !isTrackB(i)) ?? item;
       const leadIdea = ideaOf(data, lead);
@@ -246,11 +264,11 @@ export const scheduleRoutes: RouteTable = {
       const frames = framesFor(data, days);
       const ideas = [...data.ideas.values()].filter((i) => (i.status === 'backlog' || i.status === 'scheduled') && !isAltOfSplit(data, i));
       if (!ideas.length) throw new HttpError(409, 'Nothing to arrange yet — approve some ideas on the Idea Board first');
-      const units = ideas.map((i) => unitFor(i, approvedSplit(data, i)));
+      const units = ideas.map((i) => unitFor(i, approvedSplit(data, i), data.trip.destinations));
       const pace = mergePrefs(data.members).pace ?? 'moderate';
       // Straight-line estimates run short of real routes (checked after Apply) — plan with a margin.
       const travel = (a: GeoPoint, b: GeoPoint) => Math.round(estimateTravelMin(a, b) * 1.25);
-      const result = arrangeTrip(frames, units, { maxStops: PACE[pace].maxStops, travel, destinations: data.trip.destinations });
+      const result = arrangeTrip(frames, units, { maxStops: PACE[pace].maxStops, travel, destinations: data.trip.destinations, dayCities: dayCitiesOf(data), meals: true });
 
       const plan: ArrangeJob['plan'] = {
         days: result.days
@@ -258,11 +276,13 @@ export const scheduleRoutes: RouteTable = {
           .map((d) => ({
             day: d.day,
             travelMin: Math.round(d.timing.travelMin),
-            stops: d.timing.placed.map((p) => ({ ideaId: p.id, start: toClock(p.start), end: toClock(p.end) })),
+            stops: d.timing.placed.filter((p) => !p.id.startsWith('meal:')).map((p) => ({ ideaId: p.id, start: toClock(p.start), end: toClock(p.end) })),
             prayers: d.timing.prayers.map((p) => ({ key: p.key, start: toClock(p.start), end: toClock(p.end) })),
+            meals: d.timing.placed.filter((p) => p.id.startsWith('meal:')).map((p) => ({ key: p.id.slice(5) as MealKey, start: toClock(p.start), end: toClock(p.end), ...(p.at ? { near: p.at } : {}) })),
           })),
         unplaced: result.unplaced.map((u) => ({ ideaId: u.id, reason: u.reason })),
       };
+      await pickRestaurants(plan);
       await addNotes(plan, data);
 
       const ref = adminDb().collection(paths.jobs(tripId)).doc();
@@ -295,13 +315,19 @@ export const scheduleRoutes: RouteTable = {
           const ids = writeStops(batch, tripId, { data, idea, day: d.day, start: toMin(s.start), durationMin: split ? undefined : toMin(s.end) - toMin(s.start), orderIndex, actor: member.uid });
           ids.forEach((id) => scheduled.add(id));
         });
+        // Lunch / dinner at the restaurant the plan picked (skipped when none was found nearby).
+        for (const m of d.meals) {
+          if (!m.place) continue;
+          batch.set(itemRef(tripId, mealItemId(d.day, m.key)), mealItem({ day: d.day, meal: m.key, start: m.start, end: m.end, place: m.place, phone: m.phone, members: data.trip.memberIds, actor: member.uid }));
+        }
       }
       const wasScheduled = new Set(before.flatMap((i) => (i.ref.kind === 'idea' ? [i.ref.ideaId] : [])));
       for (const id of new Set([...scheduled, ...wasScheduled])) {
         if (data.ideas.has(id)) batch.update(ideaDocRef(tripId, id), { status: scheduled.has(id) ? 'scheduled' : 'backlog', updatedAt: Date.now() });
       }
       batch.update(snap.ref, { status: 'applied', before, appliedAt: Date.now() });
-      logActivity(batch, tripId, member.uid, `${member.displayName} applied AI Arrange (${scheduled.size} stops over ${job.plan.days.length} days)`);
+      const meals = job.plan.days.reduce((n, d) => n + d.meals.filter((m) => m.place).length, 0);
+      logActivity(batch, tripId, member.uid, `${member.displayName} applied AI Arrange (${scheduled.size} stops${meals ? ` + ${meals} meals` : ''} over ${job.plan.days.length} days)`);
       await batch.commit();
       await refreshDays(tripId, [...job.plan.days.map((d) => d.day), ...before.map((i) => i.day)], data);
       // With real travel times in, re-check each day; anything 🔴 is re-timed right away.
@@ -444,8 +470,10 @@ export const scheduleRoutes: RouteTable = {
         }),
       );
       const data = await loadTripData(tripId);
-      if (prays(data.members.find((m) => m.uid === member.uid) ?? member)) {
-        throw new HttpError(409, 'This is for members who don’t pray — turn prayer breaks off in your preferences first.');
+      // Members who said they pray have their break; anyone who hasn't said (no preferences yet) may choose.
+      const me = data.members.find((m) => m.uid === member.uid) ?? member;
+      if (me.prefs?.prayerReminders) {
+        throw new HttpError(409, 'You have prayer breaks on — turn them off in your preferences to pick something else.');
       }
       const ref = itemRef(tripId, body.itemId);
       const snap = await ref.get();
@@ -510,6 +538,106 @@ export const scheduleRoutes: RouteTable = {
       return json({ text: out.plan.slice(0, 400) });
     },
     { perMinute: 6 },
+  ),
+
+  /**
+   * "No lunch planned": halal places to eat around where the group is at that
+   * meal time — the group's own food ideas in the backlog first, then the
+   * best-rated halal-listed / community-verified restaurants nearby.
+   */
+  'POST schedule/meal-options': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ day: LocalDate, meal: z.enum(['lunch', 'dinner']), near: GeoPoint }));
+      await useDailyQuota(member.uid, 'food');
+      const data = await loadTripData(tripId);
+      const [a, b] = MEAL_WINDOW[body.meal];
+      const openThen = (hours?: string[]) => {
+        const r = openingRanges(hours, body.day);
+        return r === null || r.some(([o, c]) => o < b && c > a + 45);
+      };
+      const ideas = [...data.ideas.values()]
+        .filter((i) => i.status === 'backlog' && i.place.category === 'food' && !isAltOfSplit(data, i) && metersBetween(i.place.location, body.near) < 3000 && openThen(i.place.openingHours))
+        .sort((x, y) => metersBetween(x.place.location, body.near) - metersBetween(y.place.location, body.near))
+        .slice(0, 4)
+        .map((i) => ({ ideaId: i.id, name: i.place.name, walkMin: estimateTravelMin(body.near, i.place.location), typeLabel: i.place.typeLabel ?? 'Restaurant' }));
+      const places = await mealPlaces(body.near, 6).catch(() => []);
+      return json({ ideas, places: places.filter((p) => !ideas.some((i) => data.ideas.get(i.ideaId)?.place.placeId === p.placeId)) });
+    },
+    { perMinute: 20 },
+  ),
+
+  /** Add a lunch / dinner stop at a restaurant (not an idea) in the meal window, fitting around the day. */
+  'POST schedule/add-meal': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(
+        req,
+        z.object({
+          day: LocalDate,
+          meal: z.enum(['lunch', 'dinner']),
+          place: z.object({ name: z.string().min(1).max(200), location: GeoPoint, placeId: z.string().max(300).optional() }),
+          phone: z.string().max(40).optional(),
+        }),
+      );
+      await useDailyQuota(member.uid, 'arrange');
+      const data = await loadTripData(tripId);
+      assertTripDay(data.trip, body.day);
+      const items = (await dayItems(tripId, body.day)).filter((i) => !isPrayerItem(i) && !isTrackB(i) && i.id !== mealItemId(body.day, body.meal));
+      const prayers = lockedPrayers(frameAt(data, body.day, body.place.location).prayers);
+      const ends = itemEnds(data, items);
+      const [a, b] = MEAL_WINDOW[body.meal];
+      const taken = [...items.map((i) => ({ start: toMin(i.start), end: Math.max(toMin(i.end), toMin(i.start)), loc: ends.get(i.id)?.out })), ...prayers.map((p) => ({ start: p.start, end: p.end }))];
+      // First time in the meal window that fits (travel from / to the stops around it), else the window's start.
+      let start = a;
+      let length = 60;
+      for (const d of [60, 45]) {
+        const s = findSlot({ day: body.day, items: taken, duration: d, loc: body.place.location, after: a });
+        if (s !== null && s + d <= b + 30) {
+          start = s;
+          length = d;
+          break;
+        }
+      }
+      const batch = adminDb().batch();
+      batch.set(itemRef(tripId, mealItemId(body.day, body.meal)), mealItem({ day: body.day, meal: body.meal, start: toClock(start), end: toClock(start + length), place: body.place, phone: body.phone, members: data.trip.memberIds, actor: member.uid }));
+      logActivity(batch, tripId, member.uid, `${member.displayName} added ${body.meal} at ${body.place.name} on ${body.day}`);
+      await batch.commit();
+      await refreshDay(tripId, body.day, data);
+      return json({ ok: true }, { status: 201 });
+    },
+    { perMinute: 20 },
+  ),
+
+  /**
+   * Bad weather: swap an outdoor stop for an indoor idea (backlog — or a
+   * backup, for the admin) at the same time. The outdoor one goes back to
+   * the backlog for another day.
+   */
+  'POST schedule/swap': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ id: Id, ideaId: Id }));
+      await useDailyQuota(member.uid, 'arrange');
+      const [data, item] = await Promise.all([loadTripData(tripId), loadMovable(tripId, body.id)]);
+      const idea = data.ideas.get(body.ideaId);
+      if (!idea) throw new HttpError(404, 'Idea not found');
+      if (idea.status === 'backup' && member.role !== 'admin') throw new HttpError(403, 'Only the admin can bring a backup idea onto the plan');
+      if (idea.status !== 'backlog' && idea.status !== 'backup') throw new HttpError(409, `${idea.place.name} isn't in the backlog`);
+      const group = pairIds(item, await dayItems(tripId, item.day));
+      const batch = adminDb().batch();
+      for (const g of group) {
+        batch.delete(itemRef(tripId, g.id));
+        const old = ideaOf(data, g);
+        if (old) batch.update(ideaDocRef(tripId, old.id), { status: 'backlog', updatedAt: Date.now() });
+      }
+      const placed = writeStops(batch, tripId, { data, idea, day: item.day, start: toMin(item.start), orderIndex: item.orderIndex, actor: member.uid });
+      placed.forEach((id) => batch.update(ideaDocRef(tripId, id), { status: 'scheduled', updatedAt: Date.now() }));
+      const was = ideaOf(data, item)?.place.name ?? 'a stop';
+      logActivity(batch, tripId, member.uid, `${member.displayName} swapped ${was} for ${idea.place.name} on ${item.day} (weather)`);
+      await batch.commit();
+      await refreshDay(tripId, item.day, data);
+      await alertAdmin(tripId, item.day, member, data);
+      return json({ ok: true });
+    },
+    { perMinute: 20 },
   ),
 
   /** Close a preview without applying it. */
@@ -591,3 +719,44 @@ async function addNotes(plan: ArrangeJob['plan'], data: TripData) {
   }
 }
 
+
+/** Timeline id of a day's lunch / dinner stop (one each). */
+export const mealItemId = (day: string, meal: MealKey) => `meal_${day}_${meal}`;
+
+export function mealItem(o: { day: string; meal: MealKey; start: string; end: string; place: { name: string; location: GeoPoint; placeId?: string; address?: string }; phone?: string; members: string[]; actor: string }): ScheduleItem {
+  return ScheduleItem.parse({
+    id: mealItemId(o.day, o.meal),
+    day: o.day,
+    start: o.start,
+    end: o.end,
+    ref: { kind: 'custom', title: `${o.meal === 'lunch' ? 'Lunch' : 'Dinner'} · ${o.place.name}`, place: o.place, meal: o.meal, ...(o.phone ? { phone: o.phone } : {}) },
+    track: 'all',
+    memberUids: o.members,
+    locked: false,
+    orderIndex: 50,
+    updatedBy: o.actor,
+    updatedAt: Date.now(),
+  });
+}
+
+/** Restaurant lookups per AI Arrange (each is 1–2 Places calls, cached a week per spot). */
+const MAX_MEAL_LOOKUPS = 16;
+
+/** A halal restaurant near where each meal slot lands (best-rated verified / listed first). */
+async function pickRestaurants(plan: ArrangeJob['plan'] & { days: { meals: { near?: GeoPoint }[] }[] }) {
+  let n = 0;
+  const taken = new Set<string>();
+  for (const d of plan.days) {
+    for (const m of d.meals as (ArrangeJob['plan']['days'][number]['meals'][number] & { near?: GeoPoint })[]) {
+      const near = m.near;
+      delete m.near;
+      if (!near || n++ >= MAX_MEAL_LOOKUPS) continue;
+      const best = (await mealPlaces(near, 6).catch(() => [])).find((p) => !taken.has(p.placeId));
+      if (!best) continue;
+      taken.add(best.placeId);
+      m.place = { placeId: best.placeId, name: best.name, location: best.location };
+      if (best.phone) m.phone = best.phone;
+      m.halal = `${best.verdict.text}${best.verdict.basis ? ` · ${best.verdict.basis}` : ''}`.slice(0, 120);
+    }
+  }
+}

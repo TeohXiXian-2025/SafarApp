@@ -81,20 +81,22 @@ try {
   assert.equal((await bob.call('ideas/vote', { ideaId: towers, value: -1, tag: 'too_expensive', reason: 'RM 98 for the skybridge' }, q)).status, 200);
   ok('👎 needs a reason (typed text for "Other")');
 
-  // Eve joins after the idea was added: not waited for.
+  // Eve joins while voting is still open: she's waited for too (the 24 h deadline doesn't move).
   assert.equal((await eve.call('invites/accept', { token: inv.body.token })).status, 200);
   await db.doc(`trips/${tripId}/members/${eve.uid}`).update({ prefs: base });
   await alice.call('ideas/vote', { ideaId: towers, value: 1 }, q);
   await cara.call('ideas/vote', { ideaId: towers, value: 1 }, q);
   assert.equal((await idea(tripId, towers)).status, 'voting');
-  const v = await dan.call('ideas/vote', { ideaId: towers, value: -1, tag: 'been_before' }, q);
+  const waiting = await dan.call('ideas/vote', { ideaId: towers, value: -1, tag: 'been_before' }, q);
+  assert.equal(waiting.body.status, 'voting', 'still waiting for Eve, who joined midway');
+  const v = await eve.call('ideas/vote', { ideaId: towers, value: 1 }, q);
   assert.equal(v.body.status, 'mixed');
   let i1 = await idea(tripId, towers);
   assert.ok(i1.choiceEndsAt - Date.now() > 23 * 3600e3);
   const alts = i1.options.filter((o) => o.type === 'alternative');
   assert.ok(alts.length >= 1, JSON.stringify(i1.options));
   assert.ok(i1.options.some((o) => o.type === 'join') && i1.options.some((o) => o.type === 'free_time'));
-  ok(`split votes once the 4 original members voted (Eve, who joined later, isn't waited for); options: ${i1.options.map((o) => o.title).join(' | ')}`);
+  ok(`split votes once everyone voted — incl. Eve, who joined midway and was waited for; options: ${i1.options.map((o) => o.title).join(' | ')}`);
 
   // ── Choosing ────────────────────────────────────────────────────────────
   assert.equal((await alice.call('ideas/choose', { ideaId: towers, optionId: alts[0].id }, q)).status, 403);

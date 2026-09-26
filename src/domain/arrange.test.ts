@@ -330,3 +330,43 @@ describe('prayerPlaceOnRoute', () => {
     expect(prayerPlaceOnRoute([middle, byTo], from, to)?.name).toBe('byTo');
   });
 });
+
+describe('arrangeTrip — cities and meals', () => {
+  const OSAKA = { lat: 34.69, lng: 135.5 };
+  const TOKYO = { lat: 35.68, lng: 139.76 };
+  const days = ['2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13'];
+  const frames = days.map((day) => frame({ day, base: TOKYO, baseKnown: false }));
+  // Tokyo on the 10th–11th, Osaka on the 12th–13th.
+  const dayCities = new Map(days.map((d, i) => [d, [i < 2 ? 0 : 1]]));
+
+  it('never plans a stop on a day the group is in another city', () => {
+    const units = [
+      unit('t1', 60, { loc: TOKYO, city: 0 }),
+      unit('t2', 60, { loc: { lat: 35.7, lng: 139.8 }, city: 0 }),
+      unit('o1', 60, { loc: OSAKA, city: 1 }),
+      unit('o2', 60, { loc: { lat: 34.7, lng: 135.52 }, city: 1 }),
+      unit('o3', 60, { loc: { lat: 34.67, lng: 135.49 }, city: 1 }),
+    ];
+    const r = arrangeTrip(frames, units, { maxStops: 5, travel: flat, dayCities });
+    const dayOf = new Map(r.days.flatMap((d) => d.timing.placed.map((p) => [p.id, d.day] as const)));
+    for (const id of ['t1', 't2']) expect(['2026-11-10', '2026-11-11']).toContain(dayOf.get(id));
+    for (const id of ['o1', 'o2', 'o3']) expect(['2026-11-12', '2026-11-13']).toContain(dayOf.get(id));
+    expect(r.unplaced).toEqual([]);
+  });
+
+  it('adds a lunch slot in the lunch window when a day out has no food stop', () => {
+    const units = [unit('a', 150, { loc: TOKYO }), unit('b', 150, { loc: TOKYO }), unit('c', 120, { loc: TOKYO })];
+    const r = arrangeTrip([frame({ base: TOKYO })], units, { maxStops: 5, travel: flat, meals: true });
+    const lunch = r.days[0].timing.placed.find((p) => p.id === 'meal:lunch');
+    expect(lunch).toBeDefined();
+    expect(lunch!.start).toBeGreaterThanOrEqual(h('11:30'));
+    expect(lunch!.end).toBeLessThanOrEqual(h('14:00'));
+    expect(r.days[0].timing.placed.filter((p) => !p.id.startsWith('meal:')).length).toBe(3);
+  });
+
+  it("doesn't add a meal when a food stop already covers it", () => {
+    const units = [unit('a', 120, { loc: TOKYO }), unit('ramen', 60, { loc: TOKYO, food: true }), unit('c', 120, { loc: TOKYO })];
+    const r = arrangeTrip([frame({ base: TOKYO, end: h('16:00') })], units, { maxStops: 5, travel: flat, meals: true });
+    expect(r.days[0].timing.placed.some((p) => p.id === 'meal:lunch')).toBe(false);
+  });
+});

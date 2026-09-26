@@ -101,11 +101,13 @@ export function journeyPrayers(j: {
   const handled = new Set<PrayerKey>();
   for (const w of affected) {
     if (handled.has(w.key)) continue;
-    const originW = here(atOrigin, w.key, Math.max(w.start, dep - 60_000)) ?? w;
+    // The same prayer's window where you set off — it must already have started
+    // (at the origin, on the origin's clock) in time to pray before boarding.
+    const originW = atOrigin.find((x) => x.key === w.key && Math.abs(x.start - w.start) < 12 * 3_600_000 && x.start + need <= boardBy && x.end > boardBy - need);
     // The window you land in (not tomorrow's).
     const destW = atDest.find((x) => x.key === w.key && x.start <= outAt && x.end > arr) ?? null;
     const L = LABEL[w.key];
-    if (originW.start + need <= boardBy && originW.end > originW.start) {
+    if (originW) {
       out.push({ prayer: w.key, where: 'before', text: `${L} starts ${clock(originW.start, oOff)} — pray it at ${from} before boarding.` });
       continue;
     }
@@ -125,7 +127,12 @@ export function journeyPrayers(j: {
       }
       if (w.key === earlier && laterW) {
         handled.add(later);
-        out.push({ prayer: w.key, where: 'jamak_takhir', text: `Jamak ta'khir: pray ${L} and ${LABEL[later]} together (${qasar(earlier)}) after landing, before ${clock(laterW.end, dOff)} ${j.to.name} time.` });
+        const from2 = Math.max(laterW.start, outAt);
+        out.push({
+          prayer: w.key,
+          where: 'jamak_takhir',
+          text: `Jamak ta'khir: pray ${L} and ${LABEL[later]} together (${qasar(earlier)}) after landing — from ${clock(from2, dOff)} until ${clock(laterW.end, dOff)} ${j.to.name} time.`,
+        });
         continue;
       }
     }
@@ -135,5 +142,7 @@ export function journeyPrayers(j: {
       text: `${L} falls during the ${flight ? 'flight' : 'journey'} — pray on board: seated if you can't stand, facing the qiblat as best you can, with tayammum if you can't take wudu.`,
     });
   }
-  return out;
+  // "Pray Zuhur before boarding" is already part of "jamak taqdim: Zuhur and Asar together".
+  const combined = new Set(out.filter((p) => p.where === 'jamak_taqdim').map((p) => PAIR[p.prayer]));
+  return out.filter((p) => !(p.where === 'before' && combined.has(p.prayer)));
 }

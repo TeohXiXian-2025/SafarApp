@@ -7,7 +7,7 @@
 import { BedDouble, Check, ExternalLink, Loader2, Pencil, Plus, RefreshCw, Star, ThumbsDown, ThumbsUp, Trash2, TriangleAlert, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { Booking, formatMoney, groupHotelBudget, HotelOption, paths, Stay, suggestStayTimes, toMinor, tripNights, uncoveredNights } from '../../domain';
+import { Booking, cityOf, formatMoney, groupHotelBudget, HotelOption, nextDay, nightsWithoutStay, paths, Stay, suggestStayTimes, toMinor, tripNights, uncoveredNights } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Badge, Button, Card, cx, ErrorBanner, Field, Input, Select, Sheet, Spinner } from '../../ui';
@@ -60,6 +60,34 @@ export function StaysSection({ bookings, onUpload, onEditBooking }: { bookings: 
   const budget = groupHotelBudget(members.map((m) => m.prefs));
   const sorted = [...stays.data].sort((a, b) => a.checkIn.localeCompare(b.checkIn));
 
+  // Nights no stay covers (e.g. a city's stay was removed): shown in place, one tap plans them again.
+  const gaps = useMemo(() => {
+    if (stays.loading || !stays.data.length) return [];
+    const runs: { checkIn: string; checkOut: string; city: string }[] = [];
+    for (const n of nightsWithoutStay(nights, stays.data)) {
+      const planned = trip.destinations.find((d) => d.arriveDate && d.leaveDate && d.arriveDate <= n && n < d.leaveDate);
+      const hotel = hotels.find((h) => h.startLocal.slice(0, 10) <= n && n < h.endLocal.slice(0, 10));
+      const city = planned?.name ?? (hotel ? trip.destinations[cityOf(trip.destinations, hotel.to.location)].name : '');
+      const last = runs.at(-1);
+      if (last && last.checkOut === n && last.city === city) last.checkOut = nextDay(n);
+      else runs.push({ checkIn: n, checkOut: nextDay(n), city });
+    }
+    return runs;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stays.loading, stays.data, nights.join(), hotels, trip.destinations]);
+  const [filling, setFilling] = useState(false);
+  const fill = async () => {
+    setFilling(true);
+    setError('');
+    try {
+      await api.post('stays/plan', { fill: true }, { tripId: trip.id });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not plan the stay.');
+    } finally {
+      setFilling(false);
+    }
+  };
+
   const replan = async () => {
     if (!confirm('Re-plan stays from the current timeline? Stays with a picked hotel are kept.')) return;
     setReplanning(true);
@@ -104,7 +132,32 @@ export function StaysSection({ bookings, onUpload, onEditBooking }: { bookings: 
       ) : stays.loading || planning ? (
         <Spinner label="Planning where you'll stay…" />
       ) : (
-        sorted.map((s) => <StayCard key={s.id} stay={s} booked={bookingsOf(s, hotels)} journeys={bookings} onEdit={() => setEditing(s)} onUpload={onUpload} />)
+        [...sorted.map((s) => ({ at: s.checkIn, stay: s })), ...gaps.map((g) => ({ at: g.checkIn, gap: g }))]
+          .sort((a, b) => a.at.localeCompare(b.at))
+          .map((x) =>
+            'stay' in x && x.stay ? (
+              <StayCard key={x.stay.id} stay={x.stay} booked={bookingsOf(x.stay, hotels)} journeys={bookings} onEdit={() => setEditing(x.stay)} onUpload={onUpload} />
+            ) : 'gap' in x && x.gap ? (
+              <Card key={`gap-${x.gap.checkIn}`} className="p-4 flex flex-wrap items-center gap-3 border-dashed">
+                <span className="w-10 h-10 rounded-xl bg-[#FDF3E1] text-[#96590B] flex items-center justify-center shrink-0">
+                  <BedDouble className="w-5 h-5" />
+                </span>
+                <div className="flex-1 min-w-[12rem]">
+                  <p className="font-bold text-[#161C23]">{x.gap.city || 'No stay planned'}</p>
+                  <p className="text-sm text-[#6D7A77]">
+                    {formatDay(x.gap.checkIn)} → {formatDay(x.gap.checkOut)} · no stay planned for these nights
+                  </p>
+                </div>
+                {isAdmin ? (
+                  <Button loading={filling} onClick={() => void fill()}>
+                    Plan {x.gap.city ? `the ${x.gap.city} stay` : 'this stay'}
+                  </Button>
+                ) : (
+                  <p className="text-xs text-[#6D7A77]">The admin can plan it.</p>
+                )}
+              </Card>
+            ) : null,
+          )
       )}
 
       {/* Hotel bookings that don't belong to any stay (e.g. uploaded before stays were planned). */}

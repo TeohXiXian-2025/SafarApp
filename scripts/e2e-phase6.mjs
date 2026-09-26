@@ -141,10 +141,10 @@ try {
   assert.ok(!planned.includes(altId), 'the alternative is planned with its original');
   assert.ok(plan.days.some((d) => d.prayers.length), 'prayer breaks for Alice');
   for (const d of plan.days) {
-    const all = [...d.stops.map((s) => [s.start, s.end, s.ideaId]), ...d.prayers.map((p) => [p.start, p.end, p.key])].sort();
+    const all = [...d.stops.map((s) => [s.start, s.end, s.ideaId]), ...d.prayers.map((p) => [p.start, p.end, p.key]), ...(d.meals ?? []).map((m) => [m.start, m.end, m.key])].sort();
     for (let i = 1; i < all.length; i++) assert.ok(toMin(all[i][0]) >= toMin(all[i - 1][1]), `${d.day}: ${all[i - 1]} overlaps ${all[i]}`);
   }
-  ok(`preview in ${((Date.now() - t0) / 1000).toFixed(1)}s: ${plan.days.map((d) => `${d.day}: ${d.stops.length} stops + ${d.prayers.map((p) => `${p.key} ${p.start}`).join(', ')}`).join(' | ')}; unplaced ${plan.unplaced.length}`);
+  ok(`preview in ${((Date.now() - t0) / 1000).toFixed(1)}s: ${plan.days.map((d) => `${d.day}: ${d.stops.length} stops + ${d.prayers.map((p) => `${p.key} ${p.start}`).join(', ')}${(d.meals ?? []).map((m) => ` + ${m.key} ${m.start} ${m.place?.name ?? '(no place)'}`).join('')}`).join(' | ')}; unplaced ${plan.unplaced.length}`);
   plan.days.forEach((d) => d.note && console.log(`     ${d.day}: ${d.note}`));
   assert.equal((await schedule(tripId)).filter((i) => !i.locked && !i.prayer).length, 0);
   ok('preview changes nothing');

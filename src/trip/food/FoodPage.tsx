@@ -301,6 +301,13 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
               {i.walkMin} min walk · {i.distanceM < 1000 ? `${i.distanceM} m` : `${(i.distanceM / 1000).toFixed(1)} km`}
             </span>
           </p>
+          {i.phone ? (
+            <a href={`tel:${i.phone.replace(/[^\d+]/g, '')}`} className="mt-0.5 inline-flex items-center gap-1 text-xs font-semibold text-[#00685F] tabular-nums">
+              <Phone className="w-3 h-3" /> {i.phone}
+            </a>
+          ) : (
+            <p className="mt-0.5 text-[11px] text-[#9AA5A3]">No phone number listed</p>
+          )}
         </div>
         {i.openNow !== undefined && (
           <span className="shrink-0">
@@ -409,8 +416,8 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
           </Button>
         )}
         {i.phone && (
-          <a href={`tel:${i.phone.replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-1 min-h-9 px-2.5 text-sm font-bold text-[#00685F]">
-            <Phone className="w-4 h-4" /> Call
+          <a href={`tel:${i.phone.replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-1 min-h-9 px-2.5 text-sm font-bold text-[#00685F]" aria-label={`Call ${i.name} (${i.phone})`}>
+            <Phone className="w-4 h-4" /> Call to ask about halal
           </a>
         )}
         <a href={maps} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 min-h-9 px-2.5 text-sm font-bold text-[#00685F]">

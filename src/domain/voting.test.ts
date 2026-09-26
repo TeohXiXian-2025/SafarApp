@@ -32,11 +32,20 @@ describe('tally and status', () => {
     expect(statusFromTally(tallyIdea(idea({ votes: {} }), ALL), true)).toBe('rejected');
   });
 
-  it('someone who joins later is not waited for, but their vote counts', () => {
+  it('someone who joins while voting is open is waited for (the deadline stays), and their vote counts', () => {
     const members = [...ALL, 'eve'];
     const all4 = { ali: up, bob: up, cara: up, dan: up };
-    expect(statusFromTally(tallyIdea(idea({ votes: all4 }), members), false)).toBe('backlog');
+    expect(tallyIdea(idea({ votes: all4 }), members).pending).toEqual(['eve']);
+    expect(statusFromTally(tallyIdea(idea({ votes: all4 }), members), false)).toBe('voting');
+    // The 24 h ran out before she voted: she abstains.
+    expect(statusFromTally(tallyIdea(idea({ votes: all4 }), members), true)).toBe('backlog');
     expect(statusFromTally(tallyIdea(idea({ votes: { ...all4, eve: down } }), members), false)).toBe('mixed');
+  });
+
+  it('an idea already decided does not wait for someone who joins afterwards', () => {
+    expect(tallyIdea(idea({ status: 'mixed', votes: { ali: up, bob: down, cara: up, dan: up } }), [...ALL, 'eve']).pending).toEqual([]);
+    // Split alternatives need no votes at all.
+    expect(tallyIdea(idea({ voters: [], votes: {} }), ALL).pending).toEqual([]);
   });
 
   it('someone who leaves no longer counts or blocks', () => {

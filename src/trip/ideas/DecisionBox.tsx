@@ -3,7 +3,7 @@
 //                 sees the groups that would form and accepts / backs up / rejects
 //   accepted    → the groups (if split), "I can't go" to step out (no approval
 //                 needed), "Rejoin the group" to come back
-import { Check, GitFork, Plus, RefreshCw, Send, Users } from 'lucide-react';
+import { Check, GitFork, Plus, RefreshCw, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   aloneIn,
@@ -48,8 +48,6 @@ export function DecisionBox({ idea, split, alts }: { idea: Idea; split: Split | 
   const { trip, members, me, isAdmin } = useTrip();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [note, setNote] = useState('');
-  const [noteSent, setNoteSent] = useState(false);
   const [proposing, setProposing] = useState(false);
   const [stepping, setStepping] = useState(false);
   const asked = useRef(false);
@@ -167,40 +165,6 @@ export function DecisionBox({ idea, split, alts }: { idea: Idea; split: Split | 
               />
             </div>
           )}
-          {/* A note is posted to the idea's comments, so everyone sees it (and gets notified). */}
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const text = note.trim();
-              if (!text) return;
-              void act('note', async () => {
-                await api.post('ideas/comment', { ideaId: idea.id, text }, q);
-                setNote('');
-                setNoteSent(true);
-              });
-            }}
-          >
-            <Input
-              value={note}
-              maxLength={300}
-              onChange={(e) => {
-                setNote(e.target.value);
-                setNoteSent(false);
-              }}
-              placeholder="Note for the group (optional)"
-              className="min-h-9 text-sm"
-            />
-            <button
-              type="submit"
-              disabled={!!busy || !note.trim()}
-              aria-label="Send note"
-              className="shrink-0 w-9 h-9 rounded-xl bg-[#1D4E89] text-white inline-flex items-center justify-center disabled:opacity-50"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
-          {noteSent && <p className="text-[11px] text-[#0B6B45]">Sent — it's in the comments below.</p>}
         </div>
 
         <p className="text-[11px] text-[#3F5873]">

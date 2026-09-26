@@ -23,6 +23,19 @@ function method(countryCode?: string): CalculationParameters {
   }
 }
 
+/**
+ * The country a timezone belongs to, for the zones whose local calculation
+ * method differs from the default — so an airport or place with no country
+ * code (e.g. KLIA on a booking) still uses JAKIM's method, not MWL's.
+ */
+const ZONE_COUNTRY: Record<string, string> = {
+  'Asia/Kuala_Lumpur': 'MY', 'Asia/Kuching': 'MY', 'Asia/Singapore': 'SG', 'Asia/Brunei': 'BN',
+  'Asia/Jakarta': 'ID', 'Asia/Pontianak': 'ID', 'Asia/Makassar': 'ID', 'Asia/Jayapura': 'ID',
+  'Europe/Istanbul': 'TR', 'Asia/Riyadh': 'SA', 'Asia/Dubai': 'AE', 'Asia/Qatar': 'QA', 'Asia/Kuwait': 'KW',
+  'Africa/Cairo': 'EG', 'Asia/Karachi': 'PK', 'Asia/Kolkata': 'IN', 'Asia/Calcutta': 'IN', 'Asia/Dhaka': 'BD',
+};
+export const countryOfZone = (timeZone: string) => ZONE_COUNTRY[timeZone] ?? (/^America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Toronto|Vancouver|Edmonton|Winnipeg|Halifax|Detroit)/.test(timeZone) ? 'US' : undefined);
+
 /** Minutes after midnight, in the place's timezone. */
 function localMinutes(d: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d);
@@ -39,7 +52,7 @@ export interface DayPrayers {
 
 export function prayerTimesOn(date: string, at: GeoPoint, timeZone: string, countryCode?: string): DayPrayers {
   const [y, m, d] = date.split('-').map(Number);
-  const p = new PrayerTimes(new Coordinates(at.lat, at.lng), new Date(y, m - 1, d), method(countryCode));
+  const p = new PrayerTimes(new Coordinates(at.lat, at.lng), new Date(y, m - 1, d), method(countryCode ?? countryOfZone(timeZone)));
   const min = (x: Date) => localMinutes(x, timeZone);
   return { date, sunrise: min(p.sunrise), times: { fajr: min(p.fajr), dhuhr: min(p.dhuhr), asr: min(p.asr), maghrib: min(p.maghrib), isha: min(p.isha) } };
 }

@@ -13,8 +13,10 @@ const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID';
 export interface MapStop {
   id: string;
   kind: 'stop' | 'booking' | 'side' | 'prayer';
-  /** Pin text: "1", "2b", "•", "🕌". */
+  /** Pin text: "1", "2b", "•". */
   label: string;
+  /** A small mark on the pin: 🕌 for a prayer place, 🍽 for a meal. */
+  badge?: string;
   title: string;
   location: GeoPoint;
   color: string;
@@ -46,13 +48,15 @@ export function DayMap({ stops, links = [], selectedId, onSelect }: { stops: Map
                 {s.meet && <span className="mb-0.5 whitespace-nowrap rounded-md bg-[#161C23] px-1.5 py-0.5 text-[10px] font-bold text-white shadow">🚩 {s.meet}</span>}
                 <span
                   className={cx(
-                    'flex items-center justify-center rounded-full font-bold text-white shadow-md border-2 border-white transition-transform',
-                    s.kind === 'prayer' ? 'w-6 h-6 text-[11px]' : 'w-7 h-7 text-xs',
+                    'relative flex items-center justify-center font-bold text-white shadow-md border-2 border-white transition-transform w-7 h-7 text-xs',
+                    // Prayer places: a rounded square, so they read as "the mosque" at a glance.
+                    s.kind === 'prayer' ? 'rounded-lg' : 'rounded-full',
                     on && 'scale-125 ring-4 ring-black/20',
                   )}
                   style={{ background: s.color }}
                 >
                   {s.label}
+                  {s.badge && <span className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-white text-[10px] leading-4 text-center shadow">{s.badge}</span>}
                 </span>
                 {on && <span className="mt-1 max-w-40 truncate rounded bg-white px-1.5 py-0.5 text-[11px] font-semibold text-[#161C23] shadow">{s.title}</span>}
               </span>

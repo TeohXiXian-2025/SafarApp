@@ -34,7 +34,14 @@ export interface Unit {
   prayerWalkMin?: number;
   /** Must happen within this window (a timing middle ground the admin accepted). */
   window?: [number, number];
+  /** Index of the trip city it's in — it's only planned on days the group is in that city. */
+  city?: number;
+  /** A meal slot with no place yet: eaten near the stop before it (no travel), a restaurant is found after. */
+  floating?: boolean;
+  meal?: MealKey;
 }
+
+export type MealKey = 'lunch' | 'dinner';
 
 export interface Block {
   start: number;
@@ -79,6 +86,8 @@ export interface Timed {
   id: string;
   start: number;
   end: number;
+  /** Where a floating meal ends up (the stop before it). */
+  at?: GeoPoint;
 }
 
 export type UnfitReason = 'closed' | 'hours' | 'time';
@@ -102,10 +111,13 @@ type Travel = (a: GeoPoint, b: GeoPoint) => number;
 
 export const PRAYER_WALK_DEFAULT = 10;
 /** Lunch 11:30–14:00 and dinner 18:00–20:30 — food stops are pulled towards these. */
-const MEALS: [number, number][] = [
-  [11 * 60 + 30, 14 * 60],
-  [18 * 60, 20 * 60 + 30],
-];
+export const MEAL_WINDOW: Record<MealKey, [number, number]> = {
+  lunch: [11 * 60 + 30, 14 * 60],
+  dinner: [18 * 60, 20 * 60 + 30],
+};
+const MEALS: [number, number][] = [MEAL_WINDOW.lunch, MEAL_WINDOW.dinner];
+/** How long a meal the plan adds takes. */
+export const MEAL_MIN = 60;
 /** How late the day may run and how many stops fit, by the group's slowest pace. */
 export const PACE: Record<MemberPrefs['pace'], { end: number; maxStops: number }> = {
   relaxed: { end: 18 * 60 + 30, maxStops: 3 },
@@ -201,7 +213,9 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
   let fromPrev = frame.baseKnown;
 
   for (const u of units) {
-    const move = fromPrev ? travelOr(travel, prevLoc, u.loc) : 0;
+    // A meal with no place yet is eaten right where the group is.
+    const loc = u.floating ? prevLoc : u.loc;
+    const move = fromPrev && !u.floating ? travelOr(travel, prevLoc, loc) : 0;
     const hoursOpen = openingRanges(u.hours, frame.day);
     // A required window narrows the opening hours (or stands in for them).
     const open = u.window
@@ -234,7 +248,7 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
       return null;
     };
 
-    const ready = arriveAfter(prayers, cursor, move + (fromPrev ? buffer : 0));
+    const ready = arriveAfter(prayers, cursor, move + (fromPrev && !u.floating ? buffer : 0));
     let start = fit(ready);
     if (start === null) {
       if (opts.strict) {
@@ -249,12 +263,12 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
       continue;
     }
     if (!placed.length) leftAt = start - move - (fromPrev ? buffer : 0);
-    placed.push({ id: u.id, start, end, loc: u.loc });
-    out.placed.push({ id: u.id, start, end });
+    placed.push({ id: u.id, start, end, loc });
+    out.placed.push({ id: u.id, start, end, ...(u.floating ? { at: loc } : {}) });
     out.travelMin += move;
     out.cost += move + 0.5 * (start - ready) + mealPenalty(u, start);
     cursor = end;
-    prevLoc = u.loc;
+    prevLoc = loc;
     fromPrev = true;
   }
   out.prayers = placePrayers(prayers, placed, leftAt, frame.base);
@@ -321,6 +335,48 @@ export function planDay(frame: DayFrame, units: Unit[], travel: Travel = estimat
   return improveOrder(frame, orderByDistance(frame.base, units), travel);
 }
 
+/** Whether a day's timed stops already include a meal in this window (a food stop starting within it, or a bit before). */
+export function hasMeal(placed: { start: number; end: number; food?: boolean }[], meal: MealKey): boolean {
+  const [a, b] = MEAL_WINDOW[meal];
+  return placed.some((p) => p.food && p.start < b && p.end > a - 30);
+}
+
+/** The group is out during this meal: the day's stops start before it ends and run past its start. */
+export function outForMeal(placed: { start: number; end: number }[], meal: MealKey): boolean {
+  if (!placed.length) return false;
+  const [a, b] = MEAL_WINDOW[meal];
+  return Math.min(...placed.map((p) => p.start)) < b - 30 && Math.max(...placed.map((p) => p.end)) > a + 30;
+}
+
+/**
+ * Adds a lunch and / or dinner slot to a planned day that has no food stop
+ * at that time while the group is out: tries it at every position of the
+ * visiting order and keeps the one that costs least without dropping any
+ * stop. The restaurant is picked afterwards, near where the slot lands.
+ */
+export function addMeals(frame: DayFrame, order: Unit[], timing: DayTiming, travel: Travel = estimateTravelMin): { order: Unit[]; timing: DayTiming } {
+  let best = { order, timing };
+  for (const meal of ['lunch', 'dinner'] as MealKey[]) {
+    const food = new Set(best.order.filter((u) => u.food).map((u) => u.id));
+    const placed = best.timing.placed.filter((p) => !p.id.startsWith('meal:'));
+    if (hasMeal(best.timing.placed.map((p) => ({ ...p, food: food.has(p.id) })), meal) || !outForMeal(placed, meal)) continue;
+    const kept = new Set(best.timing.placed.map((p) => p.id));
+    let pick: { order: Unit[]; timing: DayTiming } | null = null;
+    for (const duration of [MEAL_MIN, 45]) {
+      const unit: Unit = { id: `meal:${meal}`, loc: frame.base, duration, food: true, floating: true, meal, window: MEAL_WINDOW[meal] };
+      for (let i = 0; i <= best.order.length; i++) {
+        const cand = [...best.order.slice(0, i), unit, ...best.order.slice(i)];
+        const t = timeSequence(frame, cand, { strict: true, travel });
+        const ok = t.placed.some((p) => p.id === unit.id) && [...kept].every((id) => t.placed.some((p) => p.id === id));
+        if (ok && (!pick || t.cost < pick.timing.cost)) pick = { order: cand, timing: t };
+      }
+      if (pick) break;
+    }
+    if (pick) best = pick;
+  }
+  return best;
+}
+
 // ─── Whole trip ─────────────────────────────────────────────────────────────
 
 export interface ArrangedDay {
@@ -373,26 +429,49 @@ const centroid = (us: Unit[], fallback: GeoPoint) =>
 export function arrangeTrip(
   frames: DayFrame[],
   units: Unit[],
-  opts: { maxStops: number; travel?: Travel; destinations?: Pick<Destination, 'location' | 'timezone' | 'countryCode'>[] },
+  opts: {
+    maxStops: number;
+    travel?: Travel;
+    destinations?: Pick<Destination, 'location' | 'timezone' | 'countryCode'>[];
+    /** Which trip cities the group is in each day (empty / missing = unknown: any city). */
+    dayCities?: Map<string, number[]>;
+    /** Add lunch / dinner slots to days with no food stop at meal time. */
+    meals?: boolean;
+  },
 ): Arrangement {
   const travel = opts.travel ?? estimateTravelMin;
   const usable = frames.filter((f) => freeMinutes(f) >= 60);
   const unplaced: Arrangement['unplaced'] = [];
   if (!usable.length) return { days: frames.map((f) => ({ day: f.day, order: [], timing: timeSequence(f, [], { strict: true, travel }) })), unplaced: units.map((u) => ({ id: u.id, reason: 'time' })) };
+  /** A stop goes only on a day the group is in its city (unknown days take any city). */
+  const cityOk = (f: DayFrame, u: Unit) => {
+    const cs = opts.dayCities?.get(f.day);
+    return !cs?.length || u.city === undefined || cs.includes(u.city);
+  };
 
-  // 1. Areas → days. Most-loaded clusters pick first; each takes the free day whose base is nearest.
-  const groups = cluster(units, Math.min(usable.length, units.length)).sort((a, b) => b.length - a.length);
+  // 1. Areas → days, city by city. Most-loaded clusters pick first; each takes the free day of its city whose base is nearest.
   const byDay = new Map(usable.map((f) => [f.day, [] as Unit[]]));
   const taken = new Set<string>();
-  for (const g of groups) {
-    const c = centroid(g, usable[0].base);
-    const f = usable.filter((x) => !taken.has(x.day)).sort((a, b) => metersBetween(a.base, c) - metersBetween(b.base, c) || a.day.localeCompare(b.day))[0];
-    if (!f) break;
-    taken.add(f.day);
-    byDay.get(f.day)!.push(...g);
+  for (const city of [...new Set(units.map((u) => u.city))]) {
+    const mine = units.filter((u) => u.city === city);
+    const days = usable.filter((f) => cityOk(f, mine[0]));
+    if (!days.length) {
+      mine.forEach((u) => unplaced.push({ id: u.id, reason: 'time' }));
+      continue;
+    }
+    const groups = cluster(mine, Math.min(days.length, mine.length)).sort((a, b) => b.length - a.length);
+    for (const g of groups) {
+      const c = centroid(g, days[0].base);
+      const f =
+        days.filter((x) => !taken.has(x.day)).sort((a, b) => metersBetween(a.base, c) - metersBetween(b.base, c) || a.day.localeCompare(b.day))[0] ??
+        // More areas than free days (a travel day shared by two cities): the least-loaded day.
+        [...days].sort((a, b) => byDay.get(a.day)!.length - byDay.get(b.day)!.length || metersBetween(a.base, c) - metersBetween(b.base, c))[0];
+      taken.add(f.day);
+      byDay.get(f.day)!.push(...g);
+    }
   }
 
-  // 2. Respect free time and pace: overflow (furthest from the day's centre first) moves to the day with room that's nearest.
+  // 2. Respect free time and pace: overflow (furthest from the day's centre first) moves to the nearest day with room, in its city.
   const room = (f: DayFrame, us: Unit[]) => us.length < opts.maxStops && load(us) <= freeMinutes(f);
   const pool: Unit[] = [];
   for (const f of usable) {
@@ -402,7 +481,7 @@ export function arrangeTrip(
     while (us.length && !(us.length <= opts.maxStops && load(us) <= freeMinutes(f))) pool.push(us.pop()!);
   }
   for (const u of pool.sort((a, b) => b.duration - a.duration)) {
-    const f = usable.filter((x) => room(x, [...byDay.get(x.day)!, u])).sort((a, b) => metersBetween(centroid(byDay.get(a.day)!, a.base), u.loc) - metersBetween(centroid(byDay.get(b.day)!, b.base), u.loc))[0];
+    const f = usable.filter((x) => cityOk(x, u) && room(x, [...byDay.get(x.day)!, u])).sort((a, b) => metersBetween(centroid(byDay.get(a.day)!, a.base), u.loc) - metersBetween(centroid(byDay.get(b.day)!, b.base), u.loc))[0];
     if (f) byDay.get(f.day)!.push(u);
     else unplaced.push({ id: u.id, reason: 'time' });
   }
@@ -426,7 +505,7 @@ export function arrangeTrip(
       const u = d.order.find((x) => x.id === miss.id)!;
       let best: { day: string; order: Unit[]; timing: DayTiming; delta: number } | null = null;
       for (const g of usable) {
-        if (g.day === f.day) continue;
+        if (g.day === f.day || !cityOk(g, u)) continue;
         const other = days.get(g.day)!;
         const kept = other.order.filter((x) => other.timing.placed.some((p) => p.id === x.id));
         if (kept.length >= opts.maxStops) continue;
@@ -446,10 +525,33 @@ export function arrangeTrip(
     days.set(f.day, { ...days.get(f.day)!, order: days.get(f.day)!.order.filter((x) => placed.has(x.id)), timing: { ...days.get(f.day)!.timing, unfit: [] } });
   }
 
+  // 4. Meals: a lunch / dinner slot where the day has no food stop while the group is out.
+  if (opts.meals) {
+    for (const f of usable) {
+      const d = days.get(f.day)!;
+      if (d.order.length) days.set(f.day, { day: f.day, ...addMeals(f, d.order, d.timing, travel) });
+    }
+  }
+
   return {
     days: frames.map((f) => days.get(f.day) ?? { day: f.day, order: [], timing: timeSequence(f, [], { strict: true, travel }) }),
     unplaced,
   };
+}
+
+/**
+ * Days with no hotel or arrival only know the first destination as their
+ * base; when the day's city is known, start from that city instead (and pray
+ * on its clock).
+ */
+export function withCityBase(frames: DayFrame[], dayCities: Map<string, number[]>, destinations: Pick<Destination, 'location' | 'timezone' | 'countryCode'>[]): DayFrame[] {
+  return frames.map((f) => {
+    const cs = dayCities.get(f.day);
+    if (f.baseKnown || !cs?.length) return f;
+    const dest = destinations[cs[cs.length - 1]];
+    if (!dest) return f;
+    return { ...f, base: dest.location, prayers: f.prayers ? prayerTimesOn(f.day, dest.location, dest.timezone, dest.countryCode) : null };
+  });
 }
 
 // ─── Prayer breaks on a hand-made day ───────────────────────────────────────
@@ -551,6 +653,9 @@ export function nearestDestination<D extends Pick<Destination, 'location'>>(dest
   return [...destinations].sort((a, b) => metersBetween(a.location, at) - metersBetween(b.location, at))[0];
 }
 
+/** Time kept for checking in / dropping bags at the hotel. */
+export const CHECKIN_MIN = 30;
+
 /** Same-day journeys longer than this change city: the day starts after arriving (or ends before leaving). */
 const CITY_CHANGE_M = 30_000;
 /** A place further than this from every destination is outside the trip (home, a stopover). */
@@ -617,6 +722,11 @@ export function dayFrames(
         // Landing back home: the trip is over.
         if (outside(b.to.location)) inTo = Math.min(inTo, toMin(eTime));
       }
+    }
+    // Checking in takes a while: stops don't overlap it (it gives way to journeys and prayer, not to sightseeing).
+    for (const h of hotels) {
+      const [ciDay, ciTime] = h.startLocal.split('T');
+      if (ciDay === day && toMin(ciTime) >= start && toMin(ciTime) < end) blocks.push({ start: toMin(ciTime), end: toMin(ciTime) + CHECKIN_MIN });
     }
     const hotel = hotels.find((h) => h.startLocal.slice(0, 10) <= day && day <= h.endLocal.slice(0, 10));
     const known = hotel?.to.location ?? arrivedAt;

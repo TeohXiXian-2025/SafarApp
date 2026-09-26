@@ -59,6 +59,18 @@ async function firstInWindow(key: string, seconds: number): Promise<boolean> {
   return ((await res.json()) as { result: string | null }).result === 'OK';
 }
 
+/** Cut at a word boundary with "…" — phones show ~2 lines of a notification and clip the rest mid-word. */
+export function shorten(text: string, max: number): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:·—-]+$/, '')}…`;
+}
+/** What fits a phone's notification banner (collapsed: ~40 + ~2×45 characters). */
+const PUSH_TITLE_MAX = 50;
+const PUSH_BODY_MAX = 110;
+
 export interface Note {
   kind: NotifyKind;
   title: string;
@@ -97,7 +109,7 @@ export async function notify(
             const sub = PushSub.safeParse(d.data());
             if (!sub.success) return;
             try {
-              await webpush.sendNotification(sub.data, JSON.stringify({ title: note.title, body: note.body, url: note.url, tag: note.tag ?? note.kind }), {
+              await webpush.sendNotification(sub.data, JSON.stringify({ title: shorten(note.title, PUSH_TITLE_MAX), body: shorten(note.body, PUSH_BODY_MAX), url: note.url, tag: note.tag ?? note.kind }), {
                 TTL: 12 * 3600,
                 urgency: note.kind === 'decide' || note.kind === 'choose' || note.kind === 'vote' ? 'high' : 'normal',
                 timeout: 5000,

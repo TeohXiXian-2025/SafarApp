@@ -14,14 +14,12 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldQuestion,
-  Sparkles,
   Star,
   ThumbsDown,
   ThumbsUp,
   Trash2, Coffee } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
-  conflictKey,
   HalalSummary,
   ideaConflicts,
   mustConfirm,
@@ -73,14 +71,8 @@ const SENTIMENT = {
   skip: { text: 'Reviewers say skip', tone: 'bad' },
 } as const;
 
-const SUGGESTION_TYPE = { alternative: 'Alternative', split: 'Split up briefly', timing: 'Timing', prep: 'Prepare' } as const;
 /** Accepted onto the plan (or heading there) despite a conflict. */
 const ACCEPTED: Idea['status'][] = ['backlog', 'scheduled', 'split_pending'];
-/**
- * Where the AI middle ground is shown. While voting the card only lists the
- * conflicts; on split votes the blue split box already offers middle grounds.
- */
-const MIDDLE_GROUND: Idea['status'][] = ['backlog', 'scheduled'];
 
 const fmtDist = (m: number) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
 const fmtDay = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
@@ -97,7 +89,6 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
   const [details, setDetails] = useState(false);
   const [reporting, setReporting] = useState(false);
   const autoRetried = useRef(false);
-  const autoResolved = useRef('');
 
   const q = { tripId: trip.id };
   const act = async (key: string, fn: () => Promise<unknown>) => {
@@ -150,20 +141,7 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
   };
   const votingLeft = idea.status === 'voting' && idea.votingEndsAt ? Math.ceil((idea.votingEndsAt - Date.now()) / 3_600_000) : null;
   const muslimCheck = idea.status === 'voting' && !!me.prefs?.halalRequired;
-  const cKey = conflictKey(conflicts);
   const accepted = ACCEPTED.includes(idea.status);
-  const showMiddle = MIDDLE_GROUND.includes(idea.status);
-  const suggestions = showMiddle && idea.resolution?.key === cKey ? idea.resolution.suggestions : null;
-  const resolve = (force = false) => act('resolve', () => api.post('ideas/resolve', { ideaId: idea.id, force }, q));
-  // Only the admin and the affected members trigger the AI (it's cached per conflict set on the server).
-  const mayResolve = isAdmin || conflicts.some((c) => c.uid === me.uid);
-  useEffect(() => {
-    if (showMiddle && conflicts.length && !suggestions && !pending && mayResolve && autoResolved.current !== cKey) {
-      autoResolved.current = cKey;
-      void resolve();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showMiddle, cKey, !!suggestions, pending]);
 
   const label = halalLabel(idea, community.data);
   const prayer = idea.halal?.prayer;
@@ -390,7 +368,7 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
         <DecisionBox idea={idea} split={split ?? null} alts={alts ?? new Map()} />
 
         {!!conflicts.length && (
-          <ConflictBox conflicts={conflicts} accepted={accepted} suggestions={suggestions} busy={busy === 'resolve'} canResolve={mayResolve && showMiddle} onResolve={() => resolve(!!suggestions)} />
+          <ConflictBox conflicts={conflicts} accepted={accepted} />
         )}
 
         {/* Reviews */}
@@ -527,21 +505,7 @@ function NearbyList({ title, places }: { title: string; places: NearbyPlace[] })
   );
 }
 
-function ConflictBox({
-  conflicts,
-  accepted,
-  suggestions,
-  busy,
-  canResolve,
-  onResolve,
-}: {
-  conflicts: Conflict[];
-  accepted: boolean;
-  suggestions: NonNullable<Idea['resolution']>['suggestions'] | null;
-  busy: boolean;
-  canResolve: boolean;
-  onResolve: () => void;
-}) {
+function ConflictBox({ conflicts, accepted }: { conflicts: Conflict[]; accepted: boolean }) {
   const blocker = conflicts.some((c) => c.severity === 'blocker');
   const byMember = new Map<string, { name: string; details: string[] }>();
   for (const c of conflicts) {
@@ -562,37 +526,6 @@ function ConflictBox({
           </li>
         ))}
       </ul>
-      {!!suggestions?.length && (
-        <div className="pt-2 border-t border-black/10 space-y-1.5">
-          <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-[#00685F]">
-            <Sparkles className="w-3.5 h-3.5" /> Middle ground
-          </p>
-          <ul className="space-y-1.5">
-            {suggestions.map((s) => (
-              <li key={s.title} className="bg-white/70 rounded-lg px-2.5 py-1.5">
-                <p className="text-xs font-bold text-[#161C23]">
-                  {s.title} <span className="font-semibold text-[10px] text-[#6D7A77]">· {SUGGESTION_TYPE[s.type]}</span>
-                </p>
-                <p className="text-xs text-[#3E4947]">{s.detail}</p>
-                {!!s.forUids.length && (
-                  <p className="text-[10px] text-[#6D7A77] mt-0.5">
-                    For {s.forUids
-                      .map((u) => byMember.get(u)?.name)
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {canResolve && (
-        <button type="button" onClick={onResolve} disabled={busy} className="inline-flex items-center gap-1.5 min-h-8 text-xs font-bold text-[#00685F] disabled:opacity-60">
-          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-          {busy ? 'Finding a middle ground…' : suggestions ? 'Suggest again' : 'Suggest a middle ground'}
-        </button>
-      )}
     </section>
   );
 }

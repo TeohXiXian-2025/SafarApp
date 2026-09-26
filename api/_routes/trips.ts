@@ -56,7 +56,8 @@ export const tripRoutes: RouteTable = {
 
       // Validate the merged result, so e.g. a new endDate can't precede the old startDate.
       const dates = { startDate: input.startDate ?? current.startDate, endDate: input.endDate ?? current.endDate };
-      UpdateTripInput.parse(dates);
+      // …and every city's dates still fit inside the (possibly new) trip dates.
+      UpdateTripInput.parse({ ...dates, destinations: input.destinations ?? current.destinations.map(({ timezone: _tz, ...d }) => d) });
 
       const { destinations, ...rest } = input;
       const update: Partial<Trip> = { ...rest, ...dates, updatedAt: Date.now() };

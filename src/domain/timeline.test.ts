@@ -115,3 +115,29 @@ describe('findSlot', () => {
     expect(findSlot({ day: '2026-12-07', items: [], duration: 600, hours: HOURS })).toBeNull(); // 10 h won't fit 9–5
   });
 });
+
+describe('same-time priority (journey > prayer > hotel > the rest)', () => {
+  const it0 = (id: string, ref: any, extra: object = {}) => ({ id, start: '15:00', end: '15:00', orderIndex: 0, ref, ...extra });
+  it('orders things that share a minute', async () => {
+    const { byTimeAndPriority } = await import('./timeline');
+    const list = [
+      it0('stop', { kind: 'idea', ideaId: 'x' }),
+      it0('checkin', { kind: 'booking', bookingId: 'h', event: 'checkin' }),
+      it0('prayer', { kind: 'custom', title: 'Asr' }, { prayer: {} }),
+      it0('arrive', { kind: 'booking', bookingId: 'f', event: 'arrive' }),
+    ];
+    expect([...list].sort(byTimeAndPriority as any).map((x) => x.id)).toEqual(['arrive', 'prayer', 'checkin', 'stop']);
+  });
+  it('a check-in during a prayer says to pray first', async () => {
+    const { dayWarnings } = await import('./timeline');
+    const w = dayWarnings(
+      '2026-11-10',
+      [
+        { id: 'p', start: '15:00', end: '15:30', orderIndex: 0, kind: 'prayer', label: 'Asr prayer' },
+        { id: 'ci', start: '15:10', end: '15:10', orderIndex: 1, locked: true, checkin: true },
+      ],
+      () => undefined,
+    );
+    expect(w.find((x) => x.itemId === 'ci')?.kind).toBe('checkin');
+  });
+});

@@ -63,13 +63,20 @@ export async function recomputeSummary(idea: Pick<Idea, 'placeKey'> & { place: P
   };
   const today = new Date().toISOString().slice(0, 10);
   const cert = reports.find((r) => r.photo?.kind === 'certificate' && r.photo.certifier && r.photo.nameMatches !== false && (!r.photo.expiresOn || r.photo.expiresOn >= today))?.photo;
+  const base = summarizeReports(reports, Date.now(), weightOf);
+  // Hard evidence counts on its own, no second report needed: a checked certificate photo
+  // makes it certified; a menu photo showing pork (and no certificate) makes it not halal.
+  const menuPork = reports.some((r) => r.photo?.kind === 'menu' && r.photo.porkItems.length > 0);
+  const hard = cert ? { tier: 'certified' as const, disputed: false } : menuPork && !base.tier ? { tier: 'not_halal' as const, disputed: false, flags: { ...base.flags, servesPork: true } } : {};
   const summary = HalalSummary.parse({
     placeKey: idea.placeKey,
     name: idea.place.name,
-    ...summarizeReports(reports, Date.now(), weightOf),
+    ...base,
+    ...hard,
     ...(cert ? { certificate: { certifier: cert.certifier!, ...(cert.expiresOn ? { expiresOn: cert.expiresOn } : {}) } } : {}),
     updatedAt: Date.now(),
   });
+  if (summary.tier) delete summary.lean;
   const batch = db.batch();
   batch.set(db.doc(paths.halalSummary(idea.placeKey)), summary);
   // Once there's a consensus, each reporter's track record moves with it (a changed report moves it back).
