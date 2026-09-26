@@ -136,6 +136,8 @@ interface Row {
   phone?: string;
   /** A prayer time during the visit is prayed there (room on site, a place a few minutes away, or ask staff). */
   prayInside?: boolean;
+  /** A prayer time not saved yet (the server is still finding its place). */
+  provisional?: boolean;
   /** A prayer room on site / a prayer place a few minutes away is actually known. */
   prayerKnown?: boolean;
 }
@@ -429,7 +431,7 @@ export function TimelinePage() {
   // Order shown while a reorder is on its way to the server.
   const [pending, setPending] = useState<{ day: string; order: string[] } | null>(null);
   useEffect(() => setPending(null), [schedule.data]);
-  const rows = useMemo(() => {
+  const savedRows = useMemo(() => {
     const base = rowsByDay.get(day) ?? [];
     if (pending?.day !== day) return base;
     // Keep bookings and prayer times where they are; fill the movable slots in the new order
@@ -438,6 +440,76 @@ export function TimelinePage() {
     const queue = pending.order.flatMap((id) => byId.get(id) ?? []);
     return base.map((r) => (r.item.locked || r.prayer || !pending.order.includes(r.item.id) ? r : (queue.shift() ?? r)));
   }, [rowsByDay, day, pending]);
+
+  // Prayer times and the day's local timezone (from where the group is that day;
+  // with no hotel or arrival, from where the day's stops are).
+  const firstStop = savedRows.find((r) => !r.prayer && !r.item.locked)?.in;
+  const frame = useMemo(
+    () =>
+      rebaseFrame(
+        withCityBase(dayFrames([day], bookings.data, trip.destinations, { pace: mergePrefs(members).pace ?? 'moderate', praying: members.some(prays) }), dayCities, trip.destinations)[0],
+        firstStop,
+        trip.destinations,
+      ),
+    [day, bookings.data, trip.destinations, members, firstStop, dayCities],
+  );
+  const dayDest = nearestDestination(trip.destinations, frame.baseKnown ? frame.base : (firstStop ?? frame.base));
+  const tz = dayDest.timezone;
+  // The prayer breaks this day should have (worked out here, the same way as the server).
+  const slots = useMemo(
+    () =>
+      prayerBreaks(
+        frame.prayers,
+        savedRows.filter((r) => !r.prayer && !isSide(r.item.track)).map((r) => ({ id: r.item.id, start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), loc: r.out, prayerWalkMin: prayerWalkOf(r.idea) })),
+        frame.base,
+        journeySpans(
+          savedRows.flatMap((r) => {
+            const ref = r.item.ref;
+            if (ref.kind !== 'booking' || ref.event === 'checkin' || ref.event === 'checkout') return [];
+            const b = bookingMap.get(ref.bookingId);
+            return b ? [{ start: toMin(r.item.start), end: toMin(r.item.end), event: ref.event, bookingId: b.id, flight: b.kind === 'flight' }] : [];
+          }),
+        ),
+        frame.inTrip,
+      ).prayers,
+    [frame, savedRows, bookingMap],
+  );
+  // Prayer breaks saved before prayer times were locked (or with stale times) → re-place them once.
+  const expected = slots.map((p) => `${PRAYER_LABEL[p.key]}@${toClock(p.start)}`).sort().join();
+  /**
+   * The day as shown: the saved blocks, plus — until the server has saved
+   * them (the first time a day is opened it looks up a prayer place for
+   * each) — the day's prayer times straight away, "finding a prayer place…".
+   */
+  const rows = useMemo(() => {
+    const have = new Set(savedRows.filter((r) => r.prayer && r.item.prayer).map((r) => r.item.prayer!.prayer));
+    const missing = slots.filter((p) => !have.has(PRAYER_LABEL[p.key]));
+    if (!missing.length) return savedRows;
+    const extra: Row[] = missing.map((p) => ({
+      item: {
+        id: `pr_${day}_${p.key}`,
+        day,
+        start: toClock(p.start),
+        end: toClock(p.end),
+        ref: { kind: 'custom', title: `${PRAYER_LABEL[p.key]} prayer` },
+        track: 'all',
+        memberUids: [...prayingUids],
+        prayer: { prayer: PRAYER_LABEL[p.key], at: toClock(p.start), fillerPicks: {} },
+        locked: false,
+        orderIndex: 0,
+        updatedBy: 'system',
+        updatedAt: 0,
+      } as ScheduleItem,
+      title: `${PRAYER_LABEL[p.key]} prayer`,
+      icon: <MapPin className="w-4 h-4" />,
+      prayer: true,
+      provisional: true,
+      in: p.at,
+      out: p.at,
+    }));
+    return [...savedRows, ...extra].sort((x, y) => byTimeAndPriority(x.item, y.item));
+  }, [savedRows, slots, day, prayingUids]);
+
 
   // ── The day as one chain: travel between every pair of blocks (stops, prayer places, bookings) ──
   const model = useMemo(() => dayModel(rows, bookingMap), [rows, bookingMap]);
@@ -469,49 +541,17 @@ export function TimelinePage() {
   const risks = dayList.length - blocks;
   const [fixing, setFixing] = useState(false);
 
-  // Prayer times and the day's local timezone (from where the group is that day;
-  // with no hotel or arrival, from where the day's stops are).
-  const firstStop = rows.find((r) => !r.prayer && !r.item.locked)?.in;
-  const frame = useMemo(
-    () =>
-      rebaseFrame(
-        withCityBase(dayFrames([day], bookings.data, trip.destinations, { pace: mergePrefs(members).pace ?? 'moderate', praying: members.some(prays) }), dayCities, trip.destinations)[0],
-        firstStop,
-        trip.destinations,
-      ),
-    [day, bookings.data, trip.destinations, members, firstStop, dayCities],
-  );
-  const dayDest = nearestDestination(trip.destinations, frame.baseKnown ? frame.base : (firstStop ?? frame.base));
-  const tz = dayDest.timezone;
-  // Prayer breaks saved before prayer times were locked (or with stale times) → re-place them once.
-  const expected = useMemo(
-    () =>
-      prayerBreaks(
-        frame.prayers,
-        rows.filter((r) => !r.prayer && !isSide(r.item.track)).map((r) => ({ id: r.item.id, start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), loc: r.out, prayerWalkMin: prayerWalkOf(r.idea) })),
-        frame.base,
-        journeySpans(
-          rows.flatMap((r) => {
-            const ref = r.item.ref;
-            if (ref.kind !== 'booking' || ref.event === 'checkin' || ref.event === 'checkout') return [];
-            const b = bookingMap.get(ref.bookingId);
-            return b ? [{ start: toMin(r.item.start), end: toMin(r.item.end), event: ref.event, bookingId: b.id, flight: b.kind === 'flight' }] : [];
-          }),
-        ),
-        frame.inTrip,
-      ).prayers.map((p) => `${PRAYER_LABEL[p.key]}@${toClock(p.start)}`).sort().join(),
-    [frame, rows, bookingMap],
-  );
-  const actual = rows.filter((r) => r.prayer && r.item.prayer).map((r) => `${r.item.prayer!.prayer}@${r.item.start}`).sort().join();
+  const noPlace = savedRows.filter((r) => r.prayer && r.item.prayer && !r.item.prayer.facility && !longVisitAround(savedRows, r)).length;
+  const actual = savedRows.filter((r) => r.prayer && r.item.prayer).map((r) => `${r.item.prayer!.prayer}@${r.item.start}`).sort().join();
   const refreshed = useRef(new Set<string>());
   useEffect(() => {
     // Once per day per expected set (a changed flight or hotel changes what's expected → refresh again).
-    const key = `${day}|${expected}|${offChain}`;
-    if (loading || (expected === actual && !offChain) || !navigator.onLine || refreshed.current.has(key)) return;
+    const key = `${day}|${expected}|${offChain}|${noPlace ? 'find' : ''}`;
+    if (loading || (expected === actual && !offChain && !noPlace) || !navigator.onLine || refreshed.current.has(key)) return;
     refreshed.current.add(key);
     void api.post('schedule/refresh', { day }, { tripId: trip.id }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expected, actual, offChain, day]);
+  }, [expected, actual, offChain, noPlace, day]);
 
   // Live weather for today and tomorrow (further out the forecast isn't worth acting on): the alert shows
   // whichever day you're looking at — the day before and on the day.
@@ -2125,7 +2165,11 @@ function PrayerRow({
           </p>
           {until !== undefined && <p className="text-[11px] text-[#8A6A1F]">Its time lasts until {fmtClock(until)} ({zoneName}) — pray any time before then if plans slip</p>}
           <p className="text-xs text-[#6B5A2E]">
-            {f
+            {row.provisional
+              ? 'Finding a prayer place nearby…'
+              : f?.far
+              ? `Nearest mosque: ${f.name} · ~${f.walkMin} min away${f.via ? ` (via ${f.via})` : ''} — or pray at any clean, quiet spot here`
+              : f
               ? `${f.name} · ${f.walkMin ? `${f.walkMin} min walk` : 'on site'}${f.via ? ` (via ${f.via})` : ''}`
               : inside
                 ? 'No prayer room known here yet — ask staff (big venues often have one), or any clean, quiet spot'
@@ -2133,9 +2177,11 @@ function PrayerRow({
             {f && route && !(inside && p.basis === 'inside') && <span className="text-[#6D7A77]"> · {route}</span>}
           </p>
         </button>
-        <button type="button" onClick={onPlace} className="mt-1 text-xs font-semibold text-[#8A6A1F] underline underline-offset-2">
-          📍 Change place{p.chosen ? ' (chosen)' : ''}
-        </button>
+        {!row.provisional && (
+          <button type="button" onClick={onPlace} className="mt-1 text-xs font-semibold text-[#8A6A1F] underline underline-offset-2">
+            📍 Change place{p.chosen ? ' (chosen)' : ''}
+          </button>
+        )}
         {pairInside && (
           <p className="mt-1 text-xs text-[#6B5A2E]">
             🧳 Travellers may pray {MALAY_NAME[p.prayer]} and {MALAY_NAME[pairInside]} together now (jamak taqdim{p.prayer === 'Maghrib' ? ', Maghrib 3 + Isyak 2' : ', 2 rakaat each'}) — one stop, and the rest of {inside?.title ?? 'the visit'} is free. Follow your madhhab.
@@ -2169,7 +2215,7 @@ function PrayerRow({
               : `${g.unsure.map(g.name).join(', ')} haven't said whether they pray — free time by default; they can join the prayer or pick something.`}
           </p>
         )}
-        {canPick && (
+        {canPick && !row.provisional && (
           <button type="button" onClick={onPick} className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-[#1D4E89] px-2.5 py-1 text-xs font-semibold text-white">
             ☕ {myPick ? `You: ${myPick.title} — change` : iPray ? 'Not praying? Choose what to do' : 'Choose what to do meanwhile'}
           </button>

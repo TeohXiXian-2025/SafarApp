@@ -223,7 +223,7 @@ await check('Mapillary (backup street photos)', async () => {
 }, { optional: true });
 await check('OpenStreetMap Overpass (no key)', async () => {
   const q = `[out:json][timeout:10];nwr["amenity"="place_of_worship"]["religion"="muslim"](around:2000,${KL.lat},${KL.lng});out center 3;`;
-  const r = await getJson('https://overpass-api.de/api/interpreter', { method: 'POST', body: `data=${encodeURIComponent(q)}`, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+  const r = await getJson('https://overpass-api.de/api/interpreter', { method: 'POST', body: `data=${encodeURIComponent(q)}`, headers: { 'content-type': 'application/x-www-form-urlencoded', 'User-Agent': 'Safar/1.0 (group travel planner)' } });
   return `ok; ${r.elements?.length ?? 0} mosque(s)`;
 }, { optional: true });
 

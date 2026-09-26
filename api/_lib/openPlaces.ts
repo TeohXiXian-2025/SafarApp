@@ -219,11 +219,39 @@ export type GoogleBudget = keyof typeof BUDGET_ENV;
 export const googleDailyCap = (kind: GoogleBudget) => Number(process.env[BUDGET_ENV[kind]]) || BUDGET_DEFAULT[kind];
 const budgetDoc = (kind: GoogleBudget) => adminDb().doc(`apiUsage/google_${kind}_${new Date().toISOString().slice(0, 10)}`);
 
+/** Google's daily quotas reset at midnight Pacific time (08:00 UTC in winter, 07:00 in summer — 08:00 is safe). */
+const nextGoogleReset = (now = Date.now()) => {
+  const d = new Date(now);
+  const reset = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 8);
+  return reset > now ? reset : reset + 86_400_000;
+};
+/** Until when Google refused each kind (quota exceeded) — remembered here and in Firestore, so nobody waits for it again. */
+const refusedUntil = new Map<GoogleBudget, number>();
+const refusedDoc = (kind: GoogleBudget) => adminDb().doc(`apiUsage/google_refused_${kind}`);
+
+/** Google said "quota exceeded": skip it until its quota resets. */
+export async function googleRefused(kind: GoogleBudget) {
+  const until = nextGoogleReset();
+  refusedUntil.set(kind, until);
+  await refusedDoc(kind).set({ until, at: Date.now() }).catch(() => {});
+}
+
+/** Whether Google already refused this kind until its next reset (no request needed to find out). */
+export async function googleOut(kind: GoogleBudget): Promise<boolean> {
+  const known = refusedUntil.get(kind);
+  if (known !== undefined) return known > Date.now();
+  const until = Number((await refusedDoc(kind).get().catch(() => null))?.get('until') ?? 0);
+  refusedUntil.set(kind, until);
+  return until > Date.now();
+}
+
 /**
- * Takes one Google request from today's budget; false when it's used up (the
- * backup sources answer instead — before Google would bill or refuse).
+ * Takes one Google request from today's budget; false when it's used up or
+ * Google refused until its reset (the backup sources answer instead — before
+ * Google would bill or refuse).
  */
 export async function takeGoogle(kind: GoogleBudget): Promise<boolean> {
+  if (await googleOut(kind)) return false;
   const ref = budgetDoc(kind);
   return adminDb()
     .runTransaction(async (tx) => {

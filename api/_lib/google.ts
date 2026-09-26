@@ -1,6 +1,8 @@
 import type { GeoPoint, PlaceRef } from '../../src/domain/index.js';
 import { requireEnv } from './env.js';
 import { HttpError } from './http.js';
+import { AIRPORTS } from './airports.js';
+import { googleOut, googleRefused } from './openPlaces.js';
 
 interface TzResult {
   timeZoneId: string;
@@ -48,8 +50,40 @@ export async function localToInstant(location: GeoPoint, local: string): Promise
   return { iso: `${local}:00${sign}${hh}:${mm}`, timeZoneId: tz.timeZoneId };
 }
 
-/** Best match for free text ("KUL Kuala Lumpur International Airport") via Places Text Search (New). */
+/** An airport by its IATA code, from the built-in table (instant, no API). */
+export function airportByCode(code?: string): PlaceRef | null {
+  const c = code?.trim().toUpperCase();
+  const a = c && /^[A-Z]{3}$/.test(c) ? AIRPORTS[c] : undefined;
+  if (!a) return null;
+  const [name, lat, lng, city, country] = a;
+  return { name, location: { lat, lng }, address: [city, country].filter(Boolean).join(', ') };
+}
+
+/** Photon (OpenStreetMap search, no key) — the backup when Google's text search is out. */
+async function photonPlace(query: string): Promise<PlaceRef | null> {
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query.slice(0, 200))}&limit=1&lang=en`;
+  const res = await fetch(url, { headers: { 'user-agent': 'Safar/1.0 (group travel planner)' }, signal: AbortSignal.timeout(6000) }).catch(() => null);
+  if (!res?.ok) return null;
+  const f = ((await res.json().catch(() => null)) as { features?: { geometry?: { coordinates?: [number, number] }; properties?: { name?: string; street?: string; city?: string; country?: string; osm_type?: string; osm_id?: number } }[] } | null)?.features?.[0];
+  const c = f?.geometry?.coordinates;
+  if (!f?.properties?.name || !c) return null;
+  const p = f.properties;
+  const osmId = p.osm_type && p.osm_id ? `${{ N: 'node', W: 'way', R: 'relation' }[p.osm_type] ?? p.osm_type}/${p.osm_id}` : undefined;
+  const address = [p.street, p.city, p.country].filter(Boolean).join(', ');
+  return { name: p.name!.slice(0, 200), location: { lat: c[1], lng: c[0] }, ...(address ? { address: address.slice(0, 300) } : {}), ...(osmId ? { osmId } : {}) };
+}
+
+/**
+ * Best match for free text ("Roma Termini", "Hotel Spadai, Florence"): Google
+ * Places Text Search while it answers, else Photon (OpenStreetMap).
+ */
 export async function findPlace(query: string): Promise<PlaceRef | null> {
+  if (await googleOut('text')) return photonPlace(query);
+  const google = await googleFindPlace(query);
+  return google ?? (await photonPlace(query));
+}
+
+async function googleFindPlace(query: string): Promise<PlaceRef | null> {
   const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: {
@@ -60,6 +94,7 @@ export async function findPlace(query: string): Promise<PlaceRef | null> {
     body: JSON.stringify({ textQuery: query.slice(0, 200), pageSize: 1 }),
     signal: AbortSignal.timeout(8000),
   }).catch(() => null);
+  if (res?.status === 429) await googleRefused('text');
   if (!res?.ok) return null;
   const body = (await res.json()) as {
     places?: { id: string; displayName?: { text: string }; formattedAddress?: string; location?: { latitude: number; longitude: number } }[];

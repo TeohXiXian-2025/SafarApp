@@ -16,7 +16,7 @@ import { withTrip } from '../_lib/auth.js';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminBucket, adminDb } from '../_lib/firebaseAdmin.js';
 import { extractJson } from '../_lib/gemini.js';
-import { findPlace, localToInstant } from '../_lib/google.js';
+import { airportByCode, findPlace, localToInstant } from '../_lib/google.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { logActivity } from '../_lib/trip.js';
@@ -131,7 +131,12 @@ async function toDraft(e: Extracted, members: Member[], uploaderUid: string): Pr
   const fromQuery = hotel ? '' : leg(e.fromCode, e.fromName, e.fromCity);
   const toQuery = hotel ? [e.toName, e.toAddress || e.toCity].filter((x) => x?.trim()).join(', ') : leg(e.toCode, e.toName, e.toCity);
 
-  const [from, to] = await Promise.all([fromQuery ? findPlace(fromQuery) : null, findPlace(toQuery)]);
+  // Flights: the airport straight from its code (built-in table, no API); anything else by search.
+  const flight = e.kind === 'flight';
+  const [from, to] = await Promise.all([
+    hotel ? null : ((flight && airportByCode(e.fromCode)) || (fromQuery ? findPlace(fromQuery) : null)),
+    (flight && airportByCode(e.toCode)) || findPlace(toQuery),
+  ]);
   if (!hotel && !from) warnings.push(`Couldn't find "${fromQuery}" on the map — please pick it.`);
   if (!to) warnings.push(`Couldn't find "${toQuery}" on the map — please pick it.`);
 

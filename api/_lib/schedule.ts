@@ -49,6 +49,7 @@ import {
   type Unit,
 } from '../../src/domain/index.js';
 import { cachedLeg } from './directions.js';
+import { rememberPlaces } from './openPlaces.js';
 import { adminDb } from './firebaseAdmin.js';
 import { searchFoodText, searchNearby } from './places.js';
 import { loadTrip } from './trip.js';
@@ -61,8 +62,10 @@ const MAX_NEW_LEGS = 24;
 const MAX_MOSQUE_LOOKUPS = 6;
 /** A prayer room this close to a venue's pin counts as inside / at it (big parks and malls are wide). */
 const VENUE_ROOM_M = 900;
-/** Beyond this (straight line, ~30 min on foot) a prayer place isn't worth suggesting for a break. */
+/** Beyond this (straight line, ~30 min on foot) a prayer place isn't a walk away. */
 const MAX_PRAYER_WALK_M = 2200;
+/** With nothing within a walk, the nearest mosque up to this far is still shown ("nearest — or a quiet spot here"). */
+const FAR_PRAYER_M = 8000;
 
 export const itemRef = (tripId: string, id: string) => adminDb().doc(`${paths.schedule(tripId)}/${id}`);
 export const ideaDocRef = (tripId: string, id: string) => adminDb().doc(paths.idea(tripId, id));
@@ -346,8 +349,16 @@ async function facilityFor(data: TripData, slot: PrayerSlot, stops: ScheduleItem
     for (const p of (await searchNearby(from, ['mosque'], 2000, 3).catch(() => null)) ?? []) add({ name: p.name, location: p.location, placeId: p.placeId, type: facilityType(p.name), ...(p.source && p.source !== 'google' ? { via: p.source === 'traveller' ? 'traveller reports' : 'OpenStreetMap' } : {}) });
     best = prayerPlaceOnRoute(cands, from, to);
   }
-  // Better to say "any clean, quiet spot works" than send people on a long walk.
-  if (!best || reachOf(best) > MAX_PRAYER_WALK_M) return undefined;
+  // Nothing within a walk: the nearest one further out (up to FAR_PRAYER_M), shown as "the nearest —
+  // or any clean, quiet spot here" rather than just "no mosque".
+  if ((!best || reachOf(best) > MAX_PRAYER_WALK_M) && lookups.n++ < MAX_MOSQUE_LOOKUPS) {
+    for (const p of (await searchNearby(from, ['mosque'], FAR_PRAYER_M, 3).catch(() => null)) ?? []) add({ name: p.name, location: p.location, placeId: p.placeId, type: facilityType(p.name), ...(p.source && p.source !== 'google' ? { via: p.source === 'traveller' ? 'traveller reports' : 'OpenStreetMap' } : {}) });
+  }
+  const nearest = [...cands].sort((a, b) => reachOf(a) - reachOf(b))[0];
+  if (!best || reachOf(best) > MAX_PRAYER_WALK_M) {
+    if (!nearest || reachOf(nearest) > FAR_PRAYER_M) return undefined;
+    return { ...nearest, walkMin: estimateTravelMin(from, nearest.location), far: true };
+  }
   // Walk from whichever end it's nearer (you may pray on arriving at the next stop).
   return { ...best, walkMin: Math.round((reachOf(best) * 1.3) / 80) };
 }
@@ -445,6 +456,8 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
   const found: ScheduleItem[] = [];
   // Ideas already on this day (their status may not be updated in `data` yet).
   const onDay = new Set(all.flatMap((i) => (i.ref.kind === 'idea' ? [i.ref.ideaId] : [])));
+  // Prayer places Google found this time — remembered for every trip (backup sources remember their own).
+  const remember: Facility[] = [];
   for (const slot of prayers) {
     const id = prayerItemId(day, slot.key);
     const was = previous.find((p) => p.id === id)?.prayer;
@@ -454,6 +467,7 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
       ? { name: chosen.name, location: chosen.location, ...(chosen.placeId ? { placeId: chosen.placeId } : {}), type: facilityType(chosen.name), walkMin: Math.round((metersBetween(slot.at, chosen.location) * 1.3) / 80) }
       : await facilityFor(data, slot, stops, ends, [...previous, ...found], lookups);
     if (facility) found.push({ prayer: { prayer: PRAYER_LABEL[slot.key], at: toClock(slot.start), facility } } as ScheduleItem);
+    if (facility && !chosen && !facility.via) remember.push(facility);
     const filler = fillerFor(data, facility?.location ?? slot.at, used, onDay, slot, day);
     if (filler) used.add(filler.id);
     const why = chosen ? { basis: 'chosen' as const, basisName: chosen.name } : prayerBasis(data, slot, stops, frame.baseKnown);
@@ -485,6 +499,7 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
     );
   }
   await batch.commit();
+  await rememberPlaces(['mosque'], remember.map((f) => ({ placeId: f.placeId ?? `mem_${f.name}`, name: f.name, location: f.location, types: ['mosque'], source: 'google' as const })), 'google');
 }
 
 // ─── Travel legs ────────────────────────────────────────────────────────────
@@ -503,6 +518,7 @@ export async function refreshLegs(tripId: string, day: string, data: TripData) {
   const batch = adminDb().batch();
   let writes = 0;
   let calls = 0;
+  const todo: { id: string; fromId: string; a: GeoPoint; b: GeoPoint }[] = [];
   for (const it of all.filter((i) => isTrackB(i) && i.transitFromPrev)) {
     batch.update(itemRef(tripId, it.id), { transitFromPrev: FieldValue.delete() });
     writes++;
@@ -523,9 +539,17 @@ export async function refreshLegs(tripId: string, day: string, data: TripData) {
     }
     if (leg && leg.fromId === prev.id && leg.at && Date.now() - leg.at < LEG_TTL) continue;
     if (calls++ >= MAX_NEW_LEGS) break;
-    const fresh = await cachedLeg(a, b);
-    batch.update(itemRef(tripId, it.id), { transitFromPrev: fresh ? { ...fresh, fromId: prev.id, at: Date.now() } : FieldValue.delete() });
-    writes++;
+    todo.push({ id: it.id, fromId: prev.id, a, b });
+  }
+  // Measured 6 at a time rather than one after another.
+  for (let k = 0; k < todo.length; k += 6) {
+    await Promise.all(
+      todo.slice(k, k + 6).map(async (t) => {
+        const fresh = await cachedLeg(t.a, t.b).catch(() => null);
+        batch.update(itemRef(tripId, t.id), { transitFromPrev: fresh ? { ...fresh, fromId: t.fromId, at: Date.now() } : FieldValue.delete() });
+        writes++;
+      }),
+    );
   }
   if (writes) await batch.commit();
 }

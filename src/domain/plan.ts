@@ -138,6 +138,8 @@ export const PrayerPairing = z.object({
     walkMin: z.number().int().nonnegative(),
     /** Found by a backup source when Google was out ("OpenStreetMap") — credited on the card. */
     via: z.string().max(40).optional(),
+    /** The nearest one, but further than a walk (walkMin = the trip there): pray at a quiet spot, or go. */
+    far: z.boolean().optional(),
   })
     .optional(),
   /**

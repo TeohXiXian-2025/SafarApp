@@ -80,13 +80,10 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…',
   const [error, setError] = useState('');
   const session = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
   // Backup search (OpenStreetMap) when Google's fails or its script never loads.
-  const [backup, setBackup] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [osm, setOsm] = useState<PhotonHit[]>([]);
-  useEffect(() => {
-    if (places) return;
-    const t = setTimeout(() => setBackup(true), 6000);
-    return () => clearTimeout(t);
-  }, [places]);
+  // The box never waits for Google's script: until it has loaded (or when Google's search fails), OpenStreetMap answers.
+  const backup = failed || !places;
   useEffect(() => {
     if (!backup || text.trim().length < 2) return setOsm([]);
     let cancelled = false;
@@ -123,7 +120,7 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…',
         }
       } catch {
         // Google's search is out: carry on with OpenStreetMap.
-        if (!cancelled) setBackup(true);
+        if (!cancelled) setFailed(true);
       }
     }, 250);
     return () => {
@@ -141,7 +138,17 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…',
 
   const pick = async (s: google.maps.places.AutocompleteSuggestion) => {
     const place = s.placePrediction!.toPlace();
-    await place.fetchFields({ fields: ['id', 'displayName', 'formattedAddress', 'location', 'addressComponents'] });
+    try {
+      await place.fetchFields({ fields: ['id', 'displayName', 'formattedAddress', 'location', 'addressComponents'] });
+    } catch {
+      // Google can't give its details right now: find the same place on OpenStreetMap and use that.
+      session.current = null;
+      const label = [s.placePrediction!.mainText?.text, s.placePrediction!.secondaryText?.text].filter(Boolean).join(', ') || s.placePrediction!.text.text;
+      const [hit] = await photonSearch(label, 'any');
+      if (!hit) return setError("Couldn't load that place — try typing it again.");
+      setFailed(true);
+      return pickOsm(hit);
+    }
     session.current = null; // session ends with the details fetch
     if (!place.location) return setError('That place has no location — try another.');
     const country = place.addressComponents?.find((c) => c.types.includes('country'))?.shortText ?? undefined;
@@ -168,8 +175,7 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…',
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder={places || backup ? placeholder : 'Loading place search…'}
-        disabled={!places && !backup}
+        placeholder={placeholder}
         autoFocus={autoFocus}
         className="pl-10"
         aria-label="Search destinations"

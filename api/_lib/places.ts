@@ -4,7 +4,7 @@ import { optionalEnv, requireEnv } from './env.js';
 import { HttpError } from './http.js';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from './firebaseAdmin.js';
-import { isGooglePlaceId, openNearby, rememberPlaces, takeGoogle, textKinds, type OpenPlace, type PlaceSource } from './openPlaces.js';
+import { googleRefused, isGooglePlaceId, openNearby, rememberPlaces, takeGoogle, textKinds, type OpenPlace, type PlaceSource } from './openPlaces.js';
 
 const BASE_FIELDS = [
   'id',
@@ -219,15 +219,16 @@ export async function searchNearby(center: GeoPoint, includedTypes: string[], ra
 
 /** The same search around the same spot (~110 m) within a week: answered from Firestore, no call at all. */
 const SEARCH_CACHE_MS = 7 * 86_400_000;
+const EMPTY_CACHE_MS = 3_600_000;
 async function cachedSearch<T>(key: [string, GeoPoint, string[], number, number], run: () => Promise<T[] | null>): Promise<T[] | null> {
   const [kind, at, types, radius, max] = key;
   const id = `${kind}_${at.lat.toFixed(3)}_${at.lng.toFixed(3)}_${Math.round(radius)}_${max}_${[...types].sort().join('.')}`.replace(/\//g, '_').slice(0, 1400);
   const ref = adminDb().doc(`searchCache/${id}`);
   const hit = (await ref.get().catch(() => null))?.data();
-  if (hit && Date.now() - Number(hit.at) < SEARCH_CACHE_MS) return hit.places as T[];
+  if (hit && Date.now() - Number(hit.at) < (hit.empty ? EMPTY_CACHE_MS : SEARCH_CACHE_MS)) return hit.empty ? (hit.failed ? null : []) : (hit.places as T[]);
   const found = await run();
-  // Only real answers are kept (a failure, or nothing found, is asked again next time).
-  if (found?.length) await ref.set({ at: Date.now(), places: found }).catch(() => {});
+  // Real answers are kept a week; "nothing" (or every source failing) an hour, so nobody waits for it again right away.
+  await ref.set(found?.length ? { at: Date.now(), places: found } : { at: Date.now(), empty: true, failed: found === null }).catch(() => {});
   return found;
 }
 
@@ -263,6 +264,7 @@ async function googleNearby(
     }),
     signal: AbortSignal.timeout(6000),
   }).catch(() => null);
+  if (res?.status === 429) await googleRefused('nearby');
   if (!res?.ok) return null; // unknown, not "none nearby"
   const places = ((await res.json()) as { places?: RawPlace[] }).places ?? [];
   return places
@@ -320,6 +322,7 @@ async function foodRequest(endpoint: 'searchNearby' | 'searchText', body: object
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(8000),
   }).catch(() => null);
+  if (res?.status === 429) await googleRefused(endpoint === 'searchText' ? 'text' : 'nearby');
   if (!res?.ok) return null;
   const places = ((await res.json()) as { places?: RawFood[] }).places ?? [];
   return places.filter((p) => p.location && p.displayName?.text).map(toFood);
