@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupHotelBudget, hotelJourneyProblem, nightsWithoutStay, proposeStays, trimProposals, scoreHotel, suggestStayTimes, transportGaps, tripNights, uncoveredNights, type ScoreContext } from './stays';
+import { groupHotelBudget, hotelJourneyProblem, nightsWithoutStay, proposeStays, travelNights, trimProposals, scoreHotel, suggestStayTimes, transportGaps, tripNights, uncoveredNights, type ScoreContext } from './stays';
 
 const KL = { lat: 3.139, lng: 101.6869 };
 const PENANG = { lat: 5.4141, lng: 100.3288 };
@@ -12,6 +12,33 @@ describe('nights', () => {
     expect(nights).toEqual(['2026-12-07', '2026-12-08', '2026-12-09']);
     expect(uncoveredNights(nights, [hotel('2026-12-07', '2026-12-09')])).toEqual(['2026-12-09']);
     expect(tripNights('2026-12-07', '2026-12-07')).toEqual([]);
+  });
+});
+
+describe('nights spent travelling need no hotel', () => {
+  const [KUL, DOH, FCO, VCE, DXB] = [{ lat: 2.7456, lng: 101.7072 }, { lat: 25.2731, lng: 51.6081 }, { lat: 41.8003, lng: 12.2389 }, { lat: 45.5053, lng: 12.3519 }, { lat: 25.2532, lng: 55.3657 }];
+  const leg = (from: typeof KUL, to: typeof KUL, startAt: string, endAt: string) => ({ kind: 'flight', startLocal: startAt.slice(0, 16), endLocal: endAt.slice(0, 16), startAt, endAt, from: { location: from }, to: { location: to } });
+  const out = [leg(KUL, DOH, '2026-11-19T20:25:00+08:00', '2026-11-19T23:30:00+03:00'), leg(DOH, FCO, '2026-11-20T01:40:00+03:00', '2026-11-20T06:35:00+01:00')];
+  const home = [leg(VCE, DXB, '2026-11-27T15:25:00+01:00', '2026-11-27T23:30:00+04:00'), leg(DXB, KUL, '2026-11-28T02:50:00+04:00', '2026-11-28T14:20:00+08:00')];
+  const rome = { kind: 'hotel', startLocal: '2026-11-20T15:00', endLocal: '2026-11-27T11:00', to: { location: FCO } };
+
+  it('transit: KL → Doha → Rome and Venice → Dubai → KL — the nights in the air / at the airport are not flagged', () => {
+    expect([...travelNights([...out, ...home])]).toEqual(['2026-11-19', '2026-11-27']);
+    expect(uncoveredNights(tripNights('2026-11-19', '2026-11-28'), [...out, ...home, rome])).toEqual([]);
+  });
+  it('direct overnight flight (lands the next day, or two days later)', () => {
+    expect([...travelNights([leg(KUL, FCO, '2026-11-19T23:30:00+08:00', '2026-11-20T06:35:00+01:00')])]).toEqual(['2026-11-19']);
+    expect([...travelNights([leg(KUL, FCO, '2026-11-19T23:30:00+08:00', '2026-11-21T06:35:00+01:00')])]).toEqual(['2026-11-19', '2026-11-20']);
+  });
+  it('a long layover (overnight stop over 12 h) still needs a hotel', () => {
+    const stopover = [leg(KUL, DOH, '2026-11-19T20:25:00+08:00', '2026-11-19T23:30:00+03:00'), leg(DOH, FCO, '2026-11-20T14:00:00+03:00', '2026-11-20T18:00:00+01:00')];
+    expect(uncoveredNights(['2026-11-19'], stopover)).toEqual(['2026-11-19']);
+  });
+  it('no stay is proposed for a travel night; stays end / start around it', () => {
+    const r = proposeStays({ startDate: '2026-11-19', endDate: '2026-11-28', destinations: [{ location: FCO }, { location: VCE }], bookings: [...out, ...home, rome], stops: [] });
+    expect(r.some((s) => s.checkIn <= '2026-11-19' && '2026-11-19' < s.checkOut)).toBe(false);
+    expect(r.some((s) => s.checkIn <= '2026-11-27' && '2026-11-27' < s.checkOut)).toBe(false);
+    expect(nightsWithoutStay(tripNights('2026-11-19', '2026-11-28'), r, [...out, ...home])).toEqual([]);
   });
 });
 

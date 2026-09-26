@@ -19,7 +19,6 @@ import {
   sharesOf,
   splitProblem,
 } from '../../src/domain/index.js';
-import { FieldValue } from 'firebase-admin/firestore';
 import { withTrip } from '../_lib/auth.js';
 import { adminBucket, adminDb } from '../_lib/firebaseAdmin.js';
 import { extractJson } from '../_lib/gemini.js';
@@ -271,9 +270,10 @@ export const expenseRoutes: RouteTable = {
     async (req, { tripId, member }) => {
       const { id } = await readJson(req, z.object({ id: Id }));
       const current = await loadExpense(tripId, id);
-      // A payment can also be undone by the person who received it.
-      const receiver = current.settlement && current.split.mode === 'equal' && current.split.uids.includes(member.uid);
-      if (!receiver) assertCanEdit(current, member);
+      if (current.settlement) {
+        // A payment is undone only by the person who received it (who confirmed it) — not the payer, not the admin.
+        if (!(current.split.mode === 'equal' && current.split.uids.includes(member.uid))) throw new HttpError(403, 'Only the person who received this payment can undo it');
+      } else assertCanEdit(current, member);
       const db = adminDb();
       const batch = db.batch();
       batch.delete(db.doc(`${paths.expenses(tripId)}/${id}`));
@@ -283,24 +283,6 @@ export const expenseRoutes: RouteTable = {
       return json({ ok: true });
     },
     { perMinute: 30 },
-  ),
-
-  /**
-   * "X paid me back for this bill": only the person who paid the bill ticks it
-   * (or un-ticks it). That share is then settled in the balances.
-   */
-  'POST expenses/paid-back': withTrip(
-    async (req, { tripId, member }) => {
-      const body = await readJson(req, z.object({ id: Id, uid: Id, paid: z.boolean() }));
-      const e = await loadExpense(tripId, body.id);
-      if (e.paidBy !== member.uid) throw new HttpError(403, 'Only the person who paid this bill can tick who paid them back');
-      if (body.uid === e.paidBy || !(body.uid in sharesOf(e))) throw new HttpError(400, 'That person has no share in this bill');
-      await adminDb()
-        .doc(`${paths.expenses(tripId)}/${body.id}`)
-        .update({ [`paidBack.${body.uid}`]: body.paid ? Date.now() : FieldValue.delete(), updatedAt: Date.now() });
-      return json({ ok: true });
-    },
-    { perMinute: 60 },
   ),
 
   /** Record "from paid to" — confirmed by the person who received it. Amount in trip-currency minor units. */

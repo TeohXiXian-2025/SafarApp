@@ -9,7 +9,7 @@ export function JourneyPrayerList({ list }: { list: JourneyPrayer[] }) {
           <li key={p.prayer}>{p.text}</li>
         ))}
       </ul>
-      <p className="mt-1 text-[11px] text-[#6D7A77] whitespace-normal">Prayers before boarding or after you land are on the timeline as normal prayer times. Travellers may combine (jamak) and shorten (qasar) prayers — follow your own madhhab or ask your ustaz if unsure.</p>
+      <p className="mt-1 text-[11px] text-[#6D7A77] whitespace-normal">Prayers before boarding or after you land are on the timeline as normal prayer times. A time “in the air” is where the plane is then, so it's earlier or later than at either airport — it won't match the prayer times on the ground. Travellers may combine (jamak) and shorten (qasar) prayers — follow your own madhhab or ask your ustaz if unsure.</p>
     </details>
   );
 }

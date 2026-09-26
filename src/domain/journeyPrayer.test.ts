@@ -81,6 +81,15 @@ describe('in-flight prayer times (at the plane’s position, like in-flight calc
   });
   it('the flight card names when and where the qiblat is for prayers on board', () => {
     const r = journeyPrayers({ kind: 'flight', startAt: '2026-11-10T09:50:00+08:00', endAt: '2026-11-10T18:05:00+09:00', from: KUL, to: KIX });
-    expect(r.find((p) => p.prayer === 'dhuhr')?.text).toMatch(/begins in the air at about 12:\d\d PM \(KLIA time\).*qiblat is behind you, on the left/);
+    expect(r.find((p) => p.prayer === 'dhuhr')?.text).toMatch(/begins in the air at about 12:\d\d PM KLIA time \/ 1:\d\d PM Kansai time.*qiblat is behind you, on the left/);
+  });
+  it('Doha → Rome overnight: Subuh in the air is given on the Rome clock too (the day on the timeline is on Rome time)', () => {
+    const DOH = { location: { lat: 25.2731, lng: 51.6081 }, timezone: 'Asia/Qatar', name: 'Doha' };
+    const FCO = { location: { lat: 41.8003, lng: 12.2389 }, timezone: 'Europe/Rome', name: 'Rome' };
+    const [subuh] = journeyPrayers({ kind: 'flight', startAt: '2026-11-20T01:40:00+03:00', endAt: '2026-11-20T06:35:00+01:00', from: DOH, to: FCO });
+    const m = /about (\d+):(\d\d) AM Doha time \/ (\d+):(\d\d) AM Rome time/.exec(subuh.text)!;
+    expect(m).not.toBeNull();
+    // The same instant: two hours apart.
+    expect(Number(m[1]) * 60 + Number(m[2]) - (Number(m[3]) * 60 + Number(m[4]))).toBe(120);
   });
 });

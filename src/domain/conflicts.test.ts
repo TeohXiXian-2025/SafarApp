@@ -37,6 +37,14 @@ describe('ideaConflicts', () => {
     expect(ideaConflicts(idea({}), [member('a', { halalRequired: true, halalTier: 'pork_free' })])[0].severity).toBe('warning');
     expect(ideaConflicts(idea({ tier: 'muslim_owned', flags: { servesPork: true } }), [member('a', { halalRequired: true })])[0].kind).toBe('pork');
   });
+  it('"Listed as halal" never reads as unconfirmed; only "certified only" asks for the certificate', () => {
+    const listed = idea({ source: 'google' });
+    expect(ideaConflicts(listed, [member('a', { halalRequired: true, halalTier: 'muslim_owned' })])).toEqual([]);
+    expect(ideaConflicts(idea({ source: 'osm', tier: 'muslim_owned' }), [member('a', { halalRequired: true, halalTier: 'muslim_owned' })])).toEqual([]);
+    const [c] = ideaConflicts(idea({ source: 'google', tier: 'muslim_owned' }), [member('a', { halalRequired: true, halalTier: 'certified' })]);
+    expect(c).toMatchObject({ kind: 'halal', severity: 'warning' });
+    expect(c.detail).toMatch(/listed as halal on Google Maps/);
+  });
   it('community consensus overrides the listing', () => {
     const cs = ideaConflicts(idea({ tier: 'certified', source: 'google' }), [member('a', { halalRequired: true, halalTier: 'certified' })], { communityTier: 'pork_free' });
     expect(cs[0].kind).toBe('halal');

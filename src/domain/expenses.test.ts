@@ -88,10 +88,12 @@ describe('split amount — by item', () => {
     const shares = sharesOf({ split, amountMinor: 4400, tripAmountMinor: 4400 });
     expect(shares.ali + shares.bob + shares.cara).toBe(4400);
   });
-  it('a share the payer ticked as paid back no longer counts in the balances', async () => {
+  it('paying back is one settle-up payment — an old per-bill tick never counts it twice', async () => {
     const { balances } = await import('./expenses');
     const e = { paidBy: 'ali', split: { mode: 'equal' as const, uids: ['ali', 'bob'] }, amountMinor: 1000, tripAmountMinor: 1000 };
+    const payment = { paidBy: 'bob', split: { mode: 'equal' as const, uids: ['ali'] }, amountMinor: 500, tripAmountMinor: 500 };
     expect(balances([e], ['ali', 'bob'])).toEqual({ ali: 500, bob: -500 });
-    expect(balances([{ ...e, paidBack: { bob: 1 } }], ['ali', 'bob'])).toEqual({ ali: 0, bob: 0 });
+    expect(balances([e, payment], ['ali', 'bob'])).toEqual({ ali: 0, bob: 0 });
+    expect(balances([{ ...e, paidBack: { bob: 1 } }, payment] as never, ['ali', 'bob'])).toEqual({ ali: 0, bob: 0 });
   });
 });

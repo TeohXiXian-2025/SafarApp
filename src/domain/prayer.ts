@@ -16,7 +16,7 @@ export const PRAYER_LABEL: Record<PrayerKey, string> = { fajr: 'Fajr', dhuhr: 'D
  *   minutes — the old 20° Subuh was 8–12 min early; now within 1–2 min.
  * - Indonesia (Kemenag): +2 min ihtiyat on top of the 20° / 18° method.
  */
-function method(countryCode?: string): CalculationParameters {
+export function calcMethod(countryCode?: string): CalculationParameters {
   switch (countryCode?.toUpperCase()) {
     case 'MY': {
       const p = new CalculationParameters('Other', 18, 18);
@@ -71,7 +71,7 @@ export interface DayPrayers {
 
 export function prayerTimesOn(date: string, at: GeoPoint, timeZone: string, countryCode?: string): DayPrayers {
   const [y, m, d] = date.split('-').map(Number);
-  const p = new PrayerTimes(new Coordinates(at.lat, at.lng), new Date(y, m - 1, d), method(countryCode ?? countryOfZone(timeZone)));
+  const p = new PrayerTimes(new Coordinates(at.lat, at.lng), new Date(y, m - 1, d), calcMethod(countryCode ?? countryOfZone(timeZone)));
   const min = (x: Date) => localMinutes(x, timeZone);
   return { date, sunrise: min(p.sunrise), times: { fajr: min(p.fajr), dhuhr: min(p.dhuhr), asr: min(p.asr), maghrib: min(p.maghrib), isha: min(p.isha) } };
 }

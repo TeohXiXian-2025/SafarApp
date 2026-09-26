@@ -93,15 +93,48 @@ interface HotelLike {
   kind: string;
   startLocal: string;
   endLocal: string;
+  /** Instants with offsets (journeys): for layover lengths across timezones. */
+  startAt?: string;
+  endAt?: string;
+  from?: { location: GeoPoint };
   to: { location: GeoPoint };
 }
 
 const covers = (h: HotelLike, night: string) => h.startLocal.slice(0, 10) <= night && night < h.endLocal.slice(0, 10);
 
-/** Nights no hotel booking covers ("No place to sleep on 10 Dec"). */
+/** Longest wait between two legs that's still one journey (you stay at the airport — no hotel). */
+const LAYOVER_MAX_MS = 12 * 3_600_000;
+/** The next leg leaves from where the last one landed (same airport / city). */
+const CONNECT_M = 60_000;
+
+/**
+ * Nights spent travelling, not in a bed: a journey that lands on a later date
+ * than it left (overnight or longer flights), or connecting legs through a
+ * layover (lands 23:30, next leg 01:40 — the night is in transit). A layover
+ * longer than 12 h is a stop: that night still needs a hotel.
+ */
+export function travelNights(bookings: HotelLike[]): Set<string> {
+  const ms = (local: string, iso?: string) => Date.parse(iso ?? `${local}:00Z`);
+  const legs = bookings.filter((b) => b.kind !== 'hotel').sort((a, b) => ms(a.startLocal, a.startAt) - ms(b.startLocal, b.startAt));
+  // Each chain of connecting legs: from the first departure date to the last arrival date.
+  const chains: { start: string; end: string; arrMs: number; at: GeoPoint }[] = [];
+  for (const l of legs) {
+    const dep = ms(l.startLocal, l.startAt);
+    const prev = l.from && chains.find((c) => metersBetween(c.at, l.from!.location) < CONNECT_M && dep >= c.arrMs && dep - c.arrMs <= LAYOVER_MAX_MS);
+    const leg = { end: l.endLocal.slice(0, 10), arrMs: ms(l.endLocal, l.endAt), at: l.to.location };
+    if (prev) Object.assign(prev, leg);
+    else chains.push({ start: l.startLocal.slice(0, 10), ...leg });
+  }
+  const out = new Set<string>();
+  for (const c of chains) for (let n = c.start; n < c.end; n = nextDay(n)) out.add(n);
+  return out;
+}
+
+/** Nights no hotel booking covers ("No place to sleep on 10 Dec") — nights on a plane or in transit don't need one. */
 export function uncoveredNights(nights: string[], bookings: HotelLike[]): string[] {
   const hotels = bookings.filter((b) => b.kind === 'hotel');
-  return nights.filter((n) => !hotels.some((h) => covers(h, n)));
+  const moving = travelNights(bookings);
+  return nights.filter((n) => !moving.has(n) && !hotels.some((h) => covers(h, n)));
 }
 
 export interface StayProposal {
@@ -182,9 +215,12 @@ export function proposeStays(input: {
   for (let i = 0; i < nights.length; i++) if (city[i] === null) city[i] = i < firstClue ? city[firstClue] : city[i - 1];
 
   const out: StayProposal[] = [];
+  // Nights on a plane / in transit get no stay (the stays either side end / start around them).
+  const moving = travelNights(input.bookings);
   nights.forEach((n, i) => {
+    if (moving.has(n)) return;
     const last = out.at(-1);
-    if (last && last.destIdx === city[i]) last.checkOut = nextDay(n);
+    if (last && last.destIdx === city[i] && last.checkOut === n) last.checkOut = nextDay(n);
     else out.push({ destIdx: city[i]!, checkIn: n, checkOut: nextDay(n), center: dests[city[i]!].location });
   });
   // Centre = the middle of that stay's planned stops in that city (else Idea Board places there).
@@ -199,8 +235,11 @@ export function proposeStays(input: {
   return out;
 }
 
-/** Nights (of the trip) that no stay covers. */
-export const nightsWithoutStay = (nights: string[], stays: Pick<Stay, 'checkIn' | 'checkOut'>[]) => nights.filter((n) => !stays.some((s) => s.checkIn <= n && n < s.checkOut));
+/** Nights (of the trip) that no stay covers — except nights spent travelling (with `bookings`). */
+export const nightsWithoutStay = (nights: string[], stays: Pick<Stay, 'checkIn' | 'checkOut'>[], bookings: HotelLike[] = []) => {
+  const moving = travelNights(bookings);
+  return nights.filter((n) => !moving.has(n) && !stays.some((s) => s.checkIn <= n && n < s.checkOut));
+};
 
 /**
  * Proposals cut down to the nights no kept stay covers (split where a kept

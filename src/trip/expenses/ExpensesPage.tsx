@@ -188,7 +188,7 @@ function SettleUp({ transfers, nameOf, money }: { transfers: Transfer[]; nameOf:
     <Card className="p-4 space-y-3">
       <div>
         <h2 className="font-bold text-[#161C23]">Settle up</h2>
-        <p className="text-xs text-[#6D7A77]">The fewest payments that make everyone square. Pay by bank transfer, DuitNow or cash — the person who receives it ticks it here.</p>
+        <p className="text-xs text-[#6D7A77]">The fewest payments that make everyone square. Pay by bank transfer, DuitNow or cash — only the person who receives it ticks it here (not the admin). This covers every bill: no need to tick receipts one by one.</p>
       </div>
       <ul className="space-y-2">
         {sorted.map((t) => {
@@ -275,23 +275,11 @@ function ExpenseRow({ expense: e, nameOf, money, stop, onEdit }: { expense: Expe
   const [error, setError] = useState('');
   const shares = sharesOf(e);
   const myShare = shares[me.uid] ?? 0;
-  const iPaid = e.paidBy === me.uid;
   const owers = Object.entries(shares).filter(([u, v]) => u !== e.paidBy && v > 0);
-  const [ticking, setTicking] = useState<string>();
-  const tick = async (uid: string, paid: boolean) => {
-    setTicking(uid);
-    setError('');
-    try {
-      await api.post('expenses/paid-back', { id: e.id, uid, paid }, { tripId: trip.id });
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not save.');
-    } finally {
-      setTicking(undefined);
-    }
-  };
+  // Payments are undone only by whoever received them (they confirmed it); bills by whoever added / paid them, or the admin.
   const receiver = e.settlement && e.split.mode === 'equal' && e.split.uids.includes(me.uid);
-  const canEdit = e.createdBy === me.uid || e.paidBy === me.uid || isAdmin;
-  const canDelete = canEdit || receiver;
+  const canEdit = !e.settlement && (e.createdBy === me.uid || e.paidBy === me.uid || isAdmin);
+  const canDelete = e.settlement ? receiver : canEdit;
 
   const remove = async () => {
     if (!confirm(e.settlement ? 'Undo this payment?' : `Delete “${e.title}”?`)) return;
@@ -357,29 +345,11 @@ function ExpenseRow({ expense: e, nameOf, money, stop, onEdit }: { expense: Expe
         </div>
       </div>
       {owers.length > 0 && (
-        <ul className="ml-12 space-y-1">
-          {owers.map(([u, v]) => {
-            const back = !!e.paidBack?.[u];
-            return (
-              <li key={u} className="flex items-center gap-2 text-xs">
-                <label className={cx('flex items-center gap-2 flex-1 min-w-0', iPaid ? 'cursor-pointer' : 'cursor-default')}>
-                  <input
-                    type="checkbox"
-                    className="w-4 h-4 accent-[#00685F]"
-                    checked={back}
-                    disabled={!iPaid || ticking === u}
-                    onChange={() => void tick(u, !back)}
-                    aria-label={`${nameOf(u)} paid ${nameOf(e.paidBy)} back`}
-                  />
-                  <span className={cx('truncate', back ? 'text-[#6D7A77] line-through' : 'text-[#161C23]')}>
-                    {u === me.uid ? 'You' : nameOf(u)} owe{u === me.uid ? '' : 's'} {money(v)}
-                  </span>
-                </label>
-                <span className={cx('shrink-0', back ? 'text-[#00685F] font-semibold' : 'text-[#9AA5A3]')}>{back ? 'paid back ✓' : iPaid ? 'tick when paid' : `${nameOf(e.paidBy)} ticks it`}</span>
-              </li>
-            );
-          })}
-        </ul>
+        // Who owes the payer what for this bill — paying back is confirmed once, in Settle up.
+        <p className="ml-12 text-xs text-[#6D7A77]">
+          {owers.map(([u, v]) => `${u === me.uid ? 'Your' : `${nameOf(u)}'s`} share ${money(v)}`).join(' · ')}
+          {' · '}paid back through Settle up
+        </p>
       )}
       {(e.receiptPath || canDelete) && (
         <div className="flex justify-end gap-1">

@@ -55,7 +55,7 @@ export function StaysSection({ bookings, onUpload, onEditBooking }: { bookings: 
 
   const hotels = bookings.filter((b) => b.kind === 'hotel');
   const nights = tripNights(trip.startDate, trip.endDate);
-  const missing = uncoveredNights(nights, hotels);
+  const missing = uncoveredNights(nights, bookings);
   const budgetText = (major: number) => formatMoney(toMinor(major, trip.currency), trip.currency).replace(/\.00$/, '');
   const budget = groupHotelBudget(members.map((m) => m.prefs));
   const sorted = [...stays.data].sort((a, b) => a.checkIn.localeCompare(b.checkIn));
@@ -64,7 +64,7 @@ export function StaysSection({ bookings, onUpload, onEditBooking }: { bookings: 
   const gaps = useMemo(() => {
     if (stays.loading || !stays.data.length) return [];
     const runs: { checkIn: string; checkOut: string; city: string }[] = [];
-    for (const n of nightsWithoutStay(nights, stays.data)) {
+    for (const n of nightsWithoutStay(nights, stays.data, bookings)) {
       const planned = trip.destinations.find((d) => d.arriveDate && d.leaveDate && d.arriveDate <= n && n < d.leaveDate);
       const hotel = hotels.find((h) => h.startLocal.slice(0, 10) <= n && n < h.endLocal.slice(0, 10));
       const city = planned?.name ?? (hotel ? trip.destinations[cityOf(trip.destinations, hotel.to.location)].name : '');
@@ -74,7 +74,7 @@ export function StaysSection({ bookings, onUpload, onEditBooking }: { bookings: 
     }
     return runs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stays.loading, stays.data, nights.join(), hotels, trip.destinations]);
+  }, [stays.loading, stays.data, nights.join(), hotels, bookings, trip.destinations]);
   const [filling, setFilling] = useState(false);
   const fill = async () => {
     setFilling(true);

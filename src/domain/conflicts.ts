@@ -65,6 +65,10 @@ export function ideaConflicts(
   const food = idea.place.category === 'food';
   const tier = opts.communityTier ?? h?.tier;
   const listedOnly = !opts.communityTier && h && h.source !== 'ai_estimate' && h.source !== 'verified_certificate';
+  // What the card calls "Listed as halal" (a Google / Foursquare / OSM listing, no pork seen): the
+  // conflicts must say the same thing — only "certified only" can still want more than a listing.
+  const listedHalal = !!listedOnly && food && h.source !== 'directory' && h.verdict === 'friendly' && !h.flags.servesPork;
+  const listedWhere = { google: 'Google Maps', foursquare: 'Foursquare', osm: 'OpenStreetMap' }[h?.source ?? ''] ?? 'a halal listing';
 
   for (const m of members) {
     const p = m.prefs;
@@ -77,7 +81,10 @@ export function ideaConflicts(
       } else if (food) {
         const required = p.halalTier === 'not_halal' ? 'pork_free' : p.halalTier;
         if (h.flags.servesPork) add('pork', 'blocker', 'Serves pork.');
-        else if (tier && !tierSatisfies(tier, required)) {
+        else if (listedHalal) {
+          // "Muslim-owned is fine" / "Pork-free is fine": a halal listing meets it.
+          if (required === 'certified') add('halal', 'warning', `Wants certified halal only — it's listed as halal on ${listedWhere}, but no certificate is confirmed yet. Ask to see it there.`);
+        } else if (tier && !tierSatisfies(tier, required)) {
           add('halal', 'blocker', `Needs "${HALAL_TIER_LABELS[required]}" — this place is ${HALAL_TIER_LABELS[tier].toLowerCase()}.`);
         } else if (!tier) {
           add('halal', 'warning', `Needs "${HALAL_TIER_LABELS[required]}" — halal status here is unconfirmed.`);
@@ -85,7 +92,7 @@ export function ideaConflicts(
           add('halal', 'warning', 'Needs certified halal — it is listed as halal but no certificate has been confirmed.');
         }
       }
-      if (h.flags.servesAlcohol) add('alcohol', 'warning', food ? 'Serves alcohol.' : 'Alcohol is served here.');
+      if (h.flags.servesAlcohol) add('alcohol', 'warning', listedHalal ? 'The food is listed as halal, but alcohol is also served here.' : food ? 'Serves alcohol.' : 'Alcohol is served here.');
     }
 
     if (p.prayerReminders && h?.prayer && farFromPrayer) {

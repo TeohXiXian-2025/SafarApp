@@ -517,7 +517,7 @@ function ConflictBox({ conflicts, accepted }: { conflicts: Conflict[]; accepted:
     <section className={cx('rounded-xl border px-3 py-2.5 text-sm space-y-2', blocker ? 'bg-[#FDECEA] border-[#F2B8B5]' : 'bg-[#FDF3E1] border-[#F0C987]')}>
       <p className={cx('flex items-center gap-2 font-bold', blocker ? 'text-[#B3261E]' : 'text-[#96590B]')}>
         <AlertTriangle className="w-4 h-4 shrink-0" />
-        {accepted ? 'Accepted with conflicts' : 'Conflicts with preferences'}
+        {accepted ? 'Accepted with conflicts' : blocker ? 'Conflicts with preferences' : 'Worth checking first'}
       </p>
       <ul className="space-y-1 text-xs text-[#161C23]">
         {[...byMember].map(([uid, m]) => (

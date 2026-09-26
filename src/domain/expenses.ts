@@ -63,7 +63,11 @@ export const Expense = z.object({
   settlement: z.boolean().default(false),
   receiptPath: z.string().max(300).optional(),
   note: z.string().max(300).optional(),
-  /** People who paid the payer back for this bill — ticked by the payer only (when did it arrive). */
+  /**
+   * Old per-bill "paid back" ticks. No longer counted: paying back is recorded
+   * once, in Settle up, by the person who receives it — two places to tick
+   * made the same money count twice. Kept so older expenses still parse.
+   */
   paidBack: z.record(z.string(), Millis).default({}),
   createdBy: Id,
   createdAt: Millis,
@@ -143,19 +147,14 @@ export function splitProblem(split: ExpenseSplit, amountMinor: number): string |
 
 /**
  * Net per person in trip-currency minor units: + = is owed money, − = owes.
- * A share the payer ticked as paid back is settled (it no longer counts).
+ * Paying back is a settle-up payment (an expense with `settlement`), so it
+ * counts here like any other — the only record of money changing hands.
  */
-export function balances(expenses: (Pick<Expense, 'paidBy' | 'split' | 'tripAmountMinor' | 'amountMinor'> & { paidBack?: Record<string, number> })[], memberIds: string[]): Record<string, number> {
+export function balances(expenses: Pick<Expense, 'paidBy' | 'split' | 'tripAmountMinor' | 'amountMinor'>[], memberIds: string[]): Record<string, number> {
   const net: Record<string, number> = Object.fromEntries(memberIds.map((u) => [u, 0]));
   for (const e of expenses) {
     net[e.paidBy] = (net[e.paidBy] ?? 0) + e.tripAmountMinor;
-    for (const [u, share] of Object.entries(sharesOf(e))) {
-      net[u] = (net[u] ?? 0) - share;
-      if (u !== e.paidBy && e.paidBack?.[u]) {
-        net[u] += share;
-        net[e.paidBy] -= share;
-      }
-    }
+    for (const [u, share] of Object.entries(sharesOf(e))) net[u] = (net[u] ?? 0) - share;
   }
   return net;
 }

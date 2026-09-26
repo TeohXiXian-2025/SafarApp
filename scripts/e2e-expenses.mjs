@@ -143,10 +143,11 @@ try {
   const n2 = await net();
   assert.equal(n2[cara.uid], 0);
   ok('only Ali (who received the money) can confirm Cara paid him → Cara is square; Cara and Bob can’t tick it');
-  // The receiver can undo it.
+  // Only the receiver can undo it — not Cara who sent it (she's its payer).
+  assert.equal((await cara.call('expenses/delete', { id: s.body.id }, q)).status, 403);
   assert.equal((await ali.call('expenses/delete', { id: s.body.id }, q)).status, 200);
   assert.equal((await net())[cara.uid], n1[cara.uid]);
-  ok('Ali (who received it) can undo the payment');
+  ok('only Ali (who received it) can undo the payment — Cara, who sent it, can’t');
 
   // Receipt: upload into Bob's own folder, AI reads it, anyone in the trip can view it.
   const path = `trips/${q.tripId}/users/${bob.uid}/receipts/${run}.pdf`;
@@ -178,14 +179,7 @@ try {
   assert.equal(badItems.status, 400);
   ok('split amount by item saved (Cara: her Nasi Kandar half + both teh tarik + her part of the service); an item nobody had is refused');
 
-  // Paid back: only Bob (who paid the bill) ticks Cara off — Cara can't tick herself.
-  assert.equal((await cara.call('expenses/paid-back', { id: byItem.body.id, uid: cara.uid, paid: true }, q)).status, 403);
-  assert.equal((await bob.call('expenses/paid-back', { id: byItem.body.id, uid: cara.uid, paid: true }, q)).status, 200);
-  const ticked = (await db.doc(`trips/${q.tripId}/expenses/${byItem.body.id}`).get()).data();
-  assert.ok(ticked.paidBack[cara.uid] > 0);
-  assert.equal((await bob.call('expenses/paid-back', { id: byItem.body.id, uid: cara.uid, paid: false }, q)).status, 200);
   assert.equal((await bob.call('expenses/delete', { id: byItem.body.id }, q)).status, 200);
-  ok('only the bill’s payer can tick “paid back” (Cara can’t tick herself); it can be un-ticked');
   const withReceipt = await add(bob, { title: rc.body.title, amountMinor: 3344, currency: 'MYR', paidBy: bob.uid, split: { mode: 'equal', uids: all }, receiptPath: path, date: '2026-12-08' });
   assert.equal(withReceipt.status, 201);
   const link = await cara.call('expenses/receipt-url', { id: withReceipt.body.id }, q);
