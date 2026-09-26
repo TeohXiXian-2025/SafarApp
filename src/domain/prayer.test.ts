@@ -45,3 +45,28 @@ describe('planningDate', () => {
     expect(planningDate('2026-11-01', '2026-11-05', 'Asia/Tokyo', now)).toBe('2026-11-01');
   });
 });
+
+describe('prayer times match the official national tables', () => {
+  const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const near = (got: number, want: string, tol = 2) => expect(Math.abs(got - (Number(want.slice(0, 2)) * 60 + Number(want.slice(3))))).toBeLessThanOrEqual(tol);
+  it('Kuala Lumpur, 1 Dec 2026 = JAKIM e-Solat (WLY01) within 2 min', async () => {
+    const { prayerTimesOn } = await import('./prayer');
+    const p = prayerTimesOn('2026-12-01', { lat: 3.139, lng: 101.6869 }, 'Asia/Kuala_Lumpur');
+    // Official: Subuh 05:52, Zohor 13:05, Asar 16:27, Maghrib 19:02, Isyak 20:16.
+    near(p.times.fajr, '05:52');
+    near(p.times.dhuhr, '13:05');
+    near(p.times.asr, '16:27');
+    near(p.times.maghrib, '19:02');
+    near(p.times.isha, '20:16');
+    expect(clock(p.times.fajr) >= '05:50').toBe(true);
+  });
+  it('Tokyo matches the standard (Aladhan MWL) within 1 min', async () => {
+    const { prayerTimesOn } = await import('./prayer');
+    const p = prayerTimesOn('2026-12-01', { lat: 35.68, lng: 139.76 }, 'Asia/Tokyo', 'JP');
+    near(p.times.fajr, '05:01', 1);
+    near(p.times.dhuhr, '11:30', 1);
+    near(p.times.asr, '14:10', 1);
+    near(p.times.maghrib, '16:28', 1);
+    near(p.times.isha, '17:53', 1);
+  });
+});

@@ -1,16 +1,35 @@
 // Prayer times (computed offline with adhan) and the visit windows between
 // them — so a place with no mosque nearby can still work if the group goes
 // after one prayer and is back before the next. Pure functions.
-import { CalculationMethod, Coordinates, PrayerTimes, type CalculationParameters } from 'adhan';
+import { CalculationMethod, CalculationParameters, Coordinates, Madhab, PrayerTimes } from 'adhan';
 import type { GeoPoint } from './common.js';
 
 export type PrayerKey = 'fajr' | 'dhuhr' | 'asr' | 'maghrib' | 'isha';
 export const PRAYER_LABEL: Record<PrayerKey, string> = { fajr: 'Fajr', dhuhr: 'Dhuhr', asr: 'Asr', maghrib: 'Maghrib', isha: 'Isha' };
 
-/** Local method by country; Muslim World League elsewhere. */
+/**
+ * Local method by country; Muslim World League elsewhere (it matches Aladhan
+ * and most published timetables within a minute). Where a national body's
+ * official table differs from the textbook method, it's calibrated against
+ * that table (checked Sep 2026 for a whole year, several zones):
+ * - Malaysia (JAKIM e-Solat): Subuh / Isyak at 18° plus JAKIM's safety
+ *   minutes — the old 20° Subuh was 8–12 min early; now within 1–2 min.
+ * - Indonesia (Kemenag): +2 min ihtiyat on top of the 20° / 18° method.
+ */
 function method(countryCode?: string): CalculationParameters {
   switch (countryCode?.toUpperCase()) {
-    case 'MY': case 'SG': case 'ID': case 'BN': return CalculationMethod.Singapore();
+    case 'MY': {
+      const p = new CalculationParameters('Other', 18, 18);
+      p.madhab = Madhab.Shafi;
+      p.adjustments = { fajr: 1, sunrise: 0, dhuhr: 2, asr: 1, maghrib: 1, isha: 1 };
+      return p;
+    }
+    case 'ID': {
+      const p = CalculationMethod.Singapore();
+      p.adjustments = { fajr: 2, sunrise: 0, dhuhr: 2, asr: 2, maghrib: 2, isha: 1 };
+      return p;
+    }
+    case 'SG': case 'BN': return CalculationMethod.Singapore();
     case 'TR': return CalculationMethod.Turkey();
     case 'SA': return CalculationMethod.UmmAlQura();
     case 'AE': return CalculationMethod.Dubai();

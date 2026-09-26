@@ -137,7 +137,10 @@ try {
   assert.ok(day1.find((i) => i.id === `idea_${A}`).start >= b2.end);
   assert.equal((await item(tripId, checkinId)).start, '15:00');
   const a2 = await item(tripId, `idea_${A}`);
-  assert.equal(a2.transitFromPrev.fromId, `idea_${B}`);
+  // Its travel leg comes from whatever is right before it (a stop that can't overlap a prayer or the
+  // hotel check-in moves past them — prayer and check-in come before sightseeing).
+  const chain1 = day1.filter((i) => !i.prayer);
+  assert.equal(a2.transitFromPrev.fromId, chain1[chain1.findIndex((i) => i.id === `idea_${A}`) - 1].id);
   ok(`reorder re-times the day (${day1.map((i) => `${i.start}${i.locked ? '🔒' : ''}`).join(', ')}); booking untouched; legs follow the new order`);
 
   assert.equal((await alice.call('schedule/update', { id: checkinId, start: '10:00' }, q)).status, 409);
@@ -150,7 +153,8 @@ try {
   assert.equal(c2.start, '09:00');
   assert.equal(c2.transitFromPrev, undefined);
   const ck = await item(tripId, checkinId);
-  assert.equal(ck.transitFromPrev.fromId, `idea_${A}`);
+  const chainNow = (await dayItems(tripId, '2026-12-07')).filter((i) => !i.prayer);
+  assert.equal(ck.transitFromPrev.fromId, chainNow[chainNow.findIndex((i) => i.id === checkinId) - 1].id);
   ok('moved to another day → first stop there; the old day’s legs are recomputed');
 
   const dur = await alice.call('schedule/update', { id: `idea_${C}`, start: '10:15', durationMin: 45 }, q);
@@ -159,15 +163,15 @@ try {
   assert.deepEqual([c3.start, c3.end], ['10:15', '11:00']);
   ok('re-timed and shortened');
 
-  // A conflict on purpose: Central Market opens at 10:00 — put it at 06:00, then "Fix this day".
-  await alice.call('schedule/update', { id: `idea_${C}`, start: '06:00' }, q);
+  // A conflict on purpose: Central Market opens at 10:00 — put it at 07:00 (clear of Subuh), then "Fix this day".
+  await alice.call('schedule/update', { id: `idea_${C}`, start: '07:00' }, q);
   const preview = await alice.call('schedule/fixday', { day: '2026-12-08' }, q);
   assert.equal(preview.status, 200, JSON.stringify(preview.body));
-  assert.equal((await item(tripId, `idea_${C}`)).start, '06:00'); // preview changes nothing
+  assert.equal((await item(tripId, `idea_${C}`)).start, '07:00'); // a typed time stays; preview changes nothing
   const fixed = await alice.call('schedule/fixday', { day: '2026-12-08', apply: true }, q);
   const c4 = await item(tripId, `idea_${C}`);
   assert.ok(c4.start >= '10:00', `now ${c4.start}`);
-  ok(`"Fix this day" moves a stop out of closed hours: 06:00 → ${c4.start} (preview first; ${fixed.body.removed.length} removed)`);
+  ok(`"Fix this day" moves a stop out of closed hours: 07:00 → ${c4.start} (preview first; ${fixed.body.removed.length} removed)`);
 
   assert.equal((await alice.call('ideas/decide', { ideaId: A, action: 'reject' }, q)).status, 409);
   ok('admin can’t reject an idea that’s on the timeline');
@@ -180,6 +184,38 @@ try {
   assert.equal((await alice.call('ideas/delete', { ideaId: B }, q)).status, 200);
   assert.equal(await item(tripId, `idea_${B}`), undefined);
   ok('deleting an idea also removes its timeline slot');
+
+  // ── A flight changes, is cancelled and replaced: the server alone keeps the timeline right ──
+  const prayerIds = async (day) => (await dayItems(tripId, day)).filter((i) => i.prayer).map((i) => i.prayer.prayer);
+  const flight = (startLocal, endLocal, from = { name: 'Kuala Lumpur International Airport', location: { lat: 2.7456, lng: 101.7072 } }) => ({
+    kind: 'flight', carrier: 'MH', number: '603', travellerUids: [alice.uid], from, to: { name: 'Singapore Changi Airport', location: { lat: 1.3644, lng: 103.9915 } }, startLocal, endLocal,
+  });
+  const f1 = await alice.call('bookings/create', { source: 'manual', draft: flight('2026-12-09T14:00', '2026-12-09T15:05') }, q);
+  assert.equal(f1.status, 201, JSON.stringify(f1.body));
+  let pr = await prayerIds('2026-12-09');
+  // Zuhur (~13:08) starts too close to boarding → on the flight card, not the timeline; Asar is after leaving.
+  assert.ok(!pr.includes('Dhuhr') && !pr.includes('Asr'), pr.join());
+  const anchors1 = (await dayItems(tripId, '2026-12-09')).filter((i) => i.ref.kind === 'booking' && i.ref.bookingId === f1.body.id);
+  assert.deepEqual(anchors1.map((a) => a.start), ['14:00']);
+  ok(`flight home at 14:00 → prayer blocks that day: ${pr.join(', ') || 'none'} (Zuhur goes on the flight card)`);
+
+  const f1b = await alice.call('bookings/update', { id: f1.body.id, draft: flight('2026-12-09T18:30', '2026-12-09T19:35') }, q);
+  assert.equal(f1b.status, 200, JSON.stringify(f1b.body));
+  pr = await prayerIds('2026-12-09');
+  assert.ok(pr.includes('Dhuhr') && pr.includes('Asr'), pr.join());
+  assert.deepEqual((await dayItems(tripId, '2026-12-09')).filter((i) => i.ref.bookingId === f1.body.id).map((a) => a.start), ['18:30']);
+  ok(`flight moved to 18:30 → anchor moved; Zuhur and Asar back on the timeline without opening the app (${pr.join(', ')})`);
+
+  assert.equal((await alice.call('bookings/delete', { id: f1.body.id }, q)).status, 200);
+  const subang = { name: 'Sultan Abdul Aziz Shah Airport', location: { lat: 3.1306, lng: 101.5494 } };
+  const f2 = await alice.call('bookings/create', { source: 'manual', draft: flight('2026-12-09T10:00', '2026-12-09T11:00', subang) }, q);
+  assert.equal(f2.status, 201, JSON.stringify(f2.body));
+  const day3 = await dayItems(tripId, '2026-12-09');
+  assert.equal(day3.filter((i) => i.ref.kind === 'booking' && i.ref.bookingId === f1.body.id).length, 0, 'old flight anchors gone');
+  assert.deepEqual(day3.filter((i) => i.ref.kind === 'booking' && i.ref.bookingId === f2.body.id).map((a) => a.start), ['10:00']);
+  pr = await prayerIds('2026-12-09');
+  assert.ok(!pr.includes('Dhuhr') && !pr.includes('Asr'), pr.join());
+  ok(`cancelled + new flight from another airport (Subang 10:00) → old anchors gone, new ones in, prayers re-planned (${pr.join(', ') || 'none after leaving'})`);
 
   console.log(`\n${passed} checks passed.\n`);
 } catch (err) {

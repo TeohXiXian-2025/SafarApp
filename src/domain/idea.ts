@@ -295,6 +295,8 @@ export const Idea = z.object({
   source: IdeaSource,
   notes: z.string().max(1000).optional(),
   estDurationMin: z.number().int().min(5).max(24 * 60).default(60),
+  /** Someone picked the length by hand — the AI's pick no longer overrides it. */
+  durationSetBy: Id.optional(),
   halal: HalalAssessment.optional(),
   sentiment: Sentiment.optional(),
   analysis: z.object({ status: z.enum(['pending', 'done', 'error']), at: Millis, error: z.string().max(300).optional() }).optional(),
@@ -341,6 +343,23 @@ export const Idea = z.object({
   updatedAt: Millis,
 });
 export type Idea = z.infer<typeof Idea>;
+
+/**
+ * How long a stop takes, as a few ranges instead of exact minutes — easier to
+ * plan with and to fix. The AI picks one per place (from its type and
+ * reviews); anyone can switch it with one tap. `min` is what gets planned.
+ */
+export const DURATION_RANGES = [
+  { min: 30, label: 'Quick', range: 'up to 30 min', hint: 'café, snack, photo spot' },
+  { min: 60, label: '~1 h', range: '45 min – 1 h', hint: 'a meal, small shrine, a shop' },
+  { min: 90, label: '~1½ h', range: '1 – 1½ h', hint: 'popular restaurant, small museum' },
+  { min: 120, label: '~2 h', range: '1½ – 2 h', hint: 'museum, market, garden' },
+  { min: 180, label: 'Half day', range: '2½ – 3 h', hint: 'big park, zoo, aquarium, shopping area' },
+  { min: 300, label: 'Most of the day', range: '4 – 5 h+', hint: 'theme park, day hike' },
+] as const;
+export const DURATION_MINUTES = DURATION_RANGES.map((r) => r.min);
+/** The range a length falls in (nearest). */
+export const durationRange = (min: number) => DURATION_RANGES.reduce((a, b) => (Math.abs(b.min - min) < Math.abs(a.min - min) ? b : a));
 
 export const placeIsStale = (idea: Pick<Idea, 'place' | 'createdAt'>, now = Date.now()) =>
   !!idea.place.placeId && now - (idea.place.fetchedAt ?? idea.createdAt) > PLACE_REFRESH_MS;

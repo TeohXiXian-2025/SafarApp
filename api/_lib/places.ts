@@ -58,12 +58,12 @@ export function categorize(types: string[], primaryType?: string): IdeaCategory 
 
 /** Typical visit length by category (minutes) — refined later by the scheduler. */
 export const DEFAULT_DURATION: Record<IdeaCategory, number> = {
-  food: 75,
+  food: 60,
   attraction: 90,
   activity: 120,
   shopping: 90,
   nature: 120,
-  culture: 75,
+  culture: 90,
   nightlife: 90,
   other: 60,
 };

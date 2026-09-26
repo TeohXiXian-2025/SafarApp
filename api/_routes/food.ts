@@ -9,6 +9,7 @@ import { z } from 'zod';
 import {
   estimateTravelMin,
   foodVerdict,
+  nearestDestination,
   HalalReport,
   HalalTier,
   type FoodGuess,
@@ -21,7 +22,7 @@ import {
   type FoodVerdict,
   type HalalAssessment,
 } from '../../src/domain/index.js';
-import { cachedAnalyses, cachedAnalysis, runAnalysis } from '../_lib/analysis.js';
+import { cachedAnalyses, cachedAnalysis, checksLeftToday, runAnalysis } from '../_lib/analysis.js';
 import { withTrip } from '../_lib/auth.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { osmPoint, overpass, similarName } from '../_lib/halal.js';
@@ -33,20 +34,23 @@ import { Type } from '@google/genai';
 import { extractJson } from '../_lib/gemini.js';
 import { optionalEnv } from '../_lib/env.js';
 import { recomputeSummary } from './ideas.js';
+import { loadTrip } from '../_lib/trip.js';
 
 /** AI guesses per place are kept this long (shared by every trip). */
 const GUESS_TTL_MS = 30 * 86_400_000;
 const guessRef = (placeKey: string) => adminDb().doc(`foodGuess/${placeKey}`);
 /**
- * Full checks started automatically or for a whole tab, for the whole app per
- * day. Each needs a Google Place Details call with reviews (~1,000 free a
- * month), which idea checks and manual checks also use — so keep ~450/month here.
+ * Full checks started automatically or for a whole tab. Each reads Google
+ * reviews (the scarce, paid-for call), so they share the monthly budget with
+ * idea and manual checks (see analysis.ts): what's left this month, spread
+ * evenly over the days left — at least a few a day while any is left.
  */
-const AUTO_CHECKS_PER_DAY = 15;
 const AUTO_PER_REQUEST = 10;
 
 /** Takes `n` from today's app-wide allowance (Upstash, else a Firestore counter). Returns how many you got. */
 async function takeAutoChecks(n: number): Promise<number> {
+  const { today, month } = await checksLeftToday();
+  const AUTO_CHECKS_PER_DAY = Math.min(month, Math.max(today, 5));
   const day = new Date().toISOString().slice(0, 10);
   const url = optionalEnv('UPSTASH_REDIS_REST_URL');
   const token = optionalEnv('UPSTASH_REDIS_REST_TOKEN');
@@ -74,6 +78,8 @@ async function takeAutoChecks(n: number): Promise<number> {
 
 /** Today's use of the automatic checks (for the usage card). */
 export async function autoCheckUsage(): Promise<{ used: number; cap: number }> {
+  const { today, month } = await checksLeftToday();
+  const AUTO_CHECKS_PER_DAY = Math.min(month, Math.max(today, 5));
   const day = new Date().toISOString().slice(0, 10);
   const url = optionalEnv('UPSTASH_REDIS_REST_URL');
   const token = optionalEnv('UPSTASH_REDIS_REST_TOKEN');
@@ -192,14 +198,14 @@ export interface FoodItem extends NearbyFood {
   photo?: string;
 }
 
-function toItem(p: NearbyFood, at: GeoPoint, ctx: { analysis?: HalalAssessment; community?: HalalSummary; listed: 'google' | 'osm' | 'name' | null; guess?: FoodGuess; wait?: FoodItem['wait']; ideaId?: string }): FoodItem {
+function toItem(p: NearbyFood, at: GeoPoint, ctx: { analysis?: HalalAssessment; community?: HalalSummary; listed: 'google' | 'osm' | 'name' | null; guess?: FoodGuess; wait?: FoodItem['wait']; ideaId?: string; country?: string }): FoodItem {
   const flags = { ...(ctx.analysis?.flags ?? {}), ...(ctx.community?.flags ?? {}) };
   return {
     ...p,
     placeKey: paths.placeKey({ placeId: p.placeId }),
     distanceM: Math.round(metersBetween(at, p.location)),
     walkMin: estimateTravelMin(at, p.location),
-    verdict: foodVerdict({ community: ctx.community ?? null, analysis: ctx.analysis ?? null, listed: ctx.listed, guess: ctx.guess ?? null }),
+    verdict: foodVerdict({ community: ctx.community ?? null, analysis: ctx.analysis ?? null, listed: ctx.listed, guess: ctx.guess ?? null, place: p, country: ctx.country ?? null }),
     guessed: !!ctx.guess,
     ...(flags.servesPork !== undefined ? { pork: flags.servesPork } : {}),
     ...(flags.servesAlcohol !== undefined ? { alcohol: flags.servesAlcohol } : {}),
@@ -215,6 +221,8 @@ export const foodRoutes: RouteTable = {
       const at = await readJson(req, GeoPoint);
       await useDailyQuota(member.uid, 'food');
       const db = adminDb();
+      // The country decides what "no halal sign" means (most places are halal in Malaysia, not in Japan).
+      const country = nearestDestination((await loadTrip(tripId)).destinations, at).countryCode;
       const [found, osm, ideas] = await Promise.all([
         findFood(at),
         // OpenStreetMap is a bonus source — don't let a slow Overpass server hold up the list.
@@ -249,6 +257,7 @@ export const foodRoutes: RouteTable = {
           ...(guesses.get(keys[i]) ? { guess: guesses.get(keys[i]) } : {}),
           ...(w ? { wait: { minutes: Number(w.minutes), agoMin: Math.round((Date.now() - Number(w.at)) / 60_000) } } : {}),
           ...(onBoard.has(p.placeId) ? { ideaId: onBoard.get(p.placeId) } : {}),
+          ...(country ? { country } : {}),
         });
       });
       items.sort((a, b) => a.distanceM - b.distanceM);
@@ -369,6 +378,7 @@ export const foodRoutes: RouteTable = {
       const placeKey = paths.placeKey({ placeId });
       let result = await cachedAnalysis(placeKey);
       if (!result) {
+        if ((await checksLeftToday()).month <= 0) throw new HttpError(429, "This month's halal checks are used up — the label shown is from free signals; ask the restaurant (tap Call) or report it after eating.");
         await useDailyQuota(member.uid, 'analyze');
         result = await runAnalysis(placeId, placeKey);
       }

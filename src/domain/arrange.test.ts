@@ -370,3 +370,19 @@ describe('arrangeTrip — cities and meals', () => {
     expect(r.days[0].timing.placed.some((p) => p.id === 'meal:lunch')).toBe(false);
   });
 });
+
+describe('pushForward (travel time on a hand-made day)', () => {
+  it('moves only the stop that can’t be reached in time, keeps chosen gaps', async () => {
+    const { pushForward } = await import('./arrange');
+    const far = { lat: HOTEL.lat + 0.09, lng: HOTEL.lng }; // ~10 km away
+    const units = [
+      unit('a', 60, { notBefore: h('09:00') }),
+      unit('b', 60, { loc: far, notBefore: h('10:05') }), // 5 min after a — far too soon
+      unit('c', 60, { loc: far, notBefore: h('15:00') }), // a long gap after b — kept
+    ];
+    const moved = pushForward(frame(), units, (x, y) => (x === y ? 0 : estimateTravelMin(x, y)));
+    expect(moved.has('a')).toBe(false);
+    expect(moved.get('b')!).toBeGreaterThanOrEqual(h('10:00') + estimateTravelMin(HOTEL, far) + 10);
+    expect(moved.has('c')).toBe(false);
+  });
+});

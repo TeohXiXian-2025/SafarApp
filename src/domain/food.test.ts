@@ -39,3 +39,26 @@ describe('AI pre-screen guesses', () => {
     expect(foodVerdict({ guess: { verdict: 'unknown', reason: '' } }).bucket).toBe('unknown');
   });
 });
+
+describe('placeRule — free signals so few places stay "not sure"', () => {
+  const r = (name: string, types: string[], country: string) => foodVerdict({ place: { name, types }, country }).bucket;
+  it('Japan: no halal sign = not halal; pork-ish food = not halal; often-halal cuisines = likely', () => {
+    expect(r('Rokurinsha', ['ramen_restaurant', 'restaurant'], 'JP')).toBe('not_halal');
+    expect(r("McDonald's Meidaimae", ['fast_food_restaurant', 'cafe', 'restaurant'], 'JP')).toBe('not_halal');
+    expect(r('Island Kitchen', ['chicken_restaurant', 'restaurant'], 'JP')).toBe('not_halal');
+    expect(r('Saray Kebab', ['turkish_restaurant', 'restaurant'], 'JP')).toBe('likely');
+    expect(r('Sushi Zanmai', ['sushi_restaurant', 'restaurant'], 'JP')).toBe('friendly');
+    expect(r('T’s Tantan Vegan', ['vegan_restaurant', 'restaurant'], 'JP')).toBe('friendly');
+    expect(r('Blue Bottle Coffee', ['cafe', 'coffee_shop'], 'JP')).toBe('unknown');
+  });
+  it('Malaysia: most places likely halal; pork words and Chinese kitchens are not', () => {
+    expect(r('Serai Chicken Rice', ['chicken_restaurant', 'restaurant'], 'MY')).toBe('likely');
+    expect(r('Ayam BBQ Pak Mat', ['barbecue_restaurant', 'restaurant'], 'MY')).toBe('likely');
+    expect(r('Sun Fong Bak Kut Teh', ['restaurant'], 'MY')).toBe('not_halal');
+    expect(r('Restoran Pik Wah', ['chinese_restaurant', 'restaurant'], 'MY')).toBe('unknown');
+    expect(r('古厝咖啡屋 Kopi House', ['restaurant'], 'MY')).toBe('unknown');
+  });
+  it('a listing or a traveller report always beats the rule', () => {
+    expect(foodVerdict({ listed: 'google', place: { name: 'Chabuzen', types: ['ramen_restaurant'] }, country: 'JP' }).bucket).toBe('halal');
+  });
+});

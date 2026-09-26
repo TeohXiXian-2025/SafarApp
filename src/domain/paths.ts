@@ -38,6 +38,8 @@ export const paths = {
   placeKey: (p: { placeId?: string; osmId?: string }) =>
     p.placeId ? `g_${p.placeId}` : `osm_${(p.osmId ?? '').replace('/', '_')}`,
   halalSummary: (placeKey: string) => `halalSummary/${placeKey}`,
+  /** "There's a prayer room here" reports for a venue, shared by every trip. */
+  prayerSpot: (placeKey: string) => `prayerSpots/${placeKey}`,
   halalReports: (placeKey: string) => `halalReports/${placeKey}/reports`,
   halalReport: (placeKey: string, uid: string) => `halalReports/${placeKey}/reports/${uid}`,
   certifiers: () => 'certifiers',

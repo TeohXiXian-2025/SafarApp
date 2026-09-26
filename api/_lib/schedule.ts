@@ -23,6 +23,7 @@ import {
   paths,
   PRAYER_LABEL,
   planDay,
+  pushForward,
   journeySpans,
   goodForWhilePraying,
   openingRanges,
@@ -45,7 +46,7 @@ import {
 } from '../../src/domain/index.js';
 import { travelLeg } from './directions.js';
 import { adminDb } from './firebaseAdmin.js';
-import { searchNearby } from './places.js';
+import { searchFoodText, searchNearby } from './places.js';
 import { loadTrip } from './trip.js';
 
 /** Google allows caching route results for up to 30 days. */
@@ -54,6 +55,8 @@ const LEG_TTL = 30 * 86_400_000;
 const MAX_NEW_LEGS = 12;
 /** Mosque lookups per day refresh (most stops already know their nearest prayer space). */
 const MAX_MOSQUE_LOOKUPS = 6;
+/** A prayer room this close to a venue's pin counts as inside / at it (big parks and malls are wide). */
+const VENUE_ROOM_M = 900;
 /** Beyond this (straight line, ~30 min on foot) a prayer place isn't worth suggesting for a break. */
 const MAX_PRAYER_WALK_M = 2200;
 
@@ -295,6 +298,25 @@ async function facilityFor(data: TripData, slot: PrayerSlot, stops: ScheduleItem
   const add = (f: Omit<Facility, 'walkMin'>) => {
     if (!cands.some((c) => c.name === f.name && metersBetween(c.location, f.location) < 50)) cands.push({ ...f, walkMin: 0 });
   };
+  // A prayer during a long visit (theme park, festival, hike, market…): pray at the venue if at all
+  // possible — a prayer room travellers reported there, one the Halal Radar found on site, or one
+  // a search finds inside / right next to it — before sending anyone out to a mosque.
+  const venue = inside && before?.ref.kind === 'idea' ? data.ideas.get(before.ref.ideaId) : undefined;
+  if (venue) {
+    const spot = (await adminDb().doc(paths.prayerSpot(venue.placeKey)).get()).data() as { note?: string; count?: number } | undefined;
+    if (spot?.count) {
+      return { name: `${venue.place.name} — prayer room${spot.note ? ` (${spot.note})` : ''}`, location: venue.place.location, ...(venue.place.placeId ? { placeId: venue.place.placeId } : {}), type: 'prayer_room', walkMin: 0 };
+    }
+    if (venue.halal?.prayer?.access === 'onsite' || venue.halal?.flags.prayerSpaceOnSite) {
+      return { name: `${venue.place.name} — prayer space on site (ask staff)`, location: venue.place.location, ...(venue.place.placeId ? { placeId: venue.place.placeId } : {}), type: 'prayer_room', walkMin: 0 };
+    }
+    if (lookups.n++ < MAX_MOSQUE_LOOKUPS) {
+      const rooms = (await searchFoodText(venue.place.location, 'prayer room musalla surau', VENUE_ROOM_M, 6).catch(() => null)) ?? [];
+      for (const r of rooms.filter((x) => metersBetween(x.location, venue.place.location) <= VENUE_ROOM_M && /pray|musal|musholl?a|surau|masjid|mosque|礼拝|기도/i.test(x.name))) {
+        add({ name: r.name, location: r.location, placeId: r.placeId, type: facilityType(r.name) === 'mosque' ? 'prayer_room' : facilityType(r.name) });
+      }
+    }
+  }
   for (const it of [before, after]) {
     const idea = it?.ref.kind === 'idea' ? data.ideas.get(it.ref.ideaId) : undefined;
     const pr = idea?.halal?.prayer;
@@ -458,11 +480,73 @@ export async function refreshLegs(tripId: string, day: string, data: TripData) {
   if (writes) await batch.commit();
 }
 
-/** After any change to a day: prayer breaks first (they don't move stops), then travel legs. */
+/**
+ * Travel time counts: with the day's legs in (real Routes times where
+ * measured, else an estimate + 20 %), any stop that can't be reached in time
+ * from the one before (plus a buffer, around bookings and prayer times) moves
+ * later — just enough; gaps people chose are kept, and opening hours are left
+ * to the 🔴 warning / "Fix this day". Split pairs move together.
+ * Returns whether anything moved.
+ */
+export async function retimeDay(tripId: string, day: string, data: TripData): Promise<boolean> {
+  const items = await dayItems(tripId, day);
+  const chain = items.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTimeAndPriority);
+  const movable = chain.filter((i) => !i.locked);
+  if (!movable.length) return false;
+  const ends = itemEnds(data, items);
+  const units: Unit[] = movable.flatMap((it) => {
+    const loc = ends.get(it.id)?.in;
+    if (!loc) return [];
+    // Travel only — not opening hours: a time someone typed on purpose stays (the timeline flags it instead).
+    return [{ id: it.id, loc, duration: Math.max(5, toMin(it.end) - toMin(it.start)), notBefore: toMin(it.start) }];
+  });
+  // Measured legs by (from, to) stop; locked spans (same-day journeys) are blocks.
+  const legs = new Map(items.flatMap((i) => (i.transitFromPrev?.fromId ? [[`${i.transitFromPrev.fromId}>${i.id}`, i.transitFromPrev.minutes] as const] : [])));
+  const idAt = new Map(units.map((u) => [`${u.loc.lat},${u.loc.lng}`, u.id]));
+  const travel = (a: GeoPoint, b: GeoPoint) => {
+    const from = idAt.get(`${a.lat},${a.lng}`);
+    const to = idAt.get(`${b.lat},${b.lng}`);
+    if (from && from === to) return 0;
+    const known = from && to ? legs.get(`${from}>${to}`) : undefined;
+    return known ?? Math.round(estimateTravelMin(a, b) * 1.2);
+  };
+  const base = frameAt(data, day, units[0]?.loc);
+  const locked = items.filter((i) => i.locked && toMin(i.end) > toMin(i.start)).map((l) => ({ start: toMin(l.start), end: toMin(l.end) }));
+  const moved = pushForward({ ...base, blocks: [...base.blocks, ...locked] }, units, travel);
+  if (!moved.size) return false;
+  const batch = adminDb().batch();
+  for (const [id, start] of moved) {
+    const it = movable.find((m) => m.id === id)!;
+    const shift = start - toMin(it.start);
+    for (const g of pairIds(it, items)) batch.update(itemRef(tripId, g.id), { start: toClock(toMin(g.start) + shift), end: toClock(toMin(g.end) + shift), updatedAt: Date.now() });
+  }
+  await batch.commit();
+  return true;
+}
+
+/**
+ * After any change to a day: prayer breaks (they don't move stops), travel
+ * legs, then stops that can't be reached in time move later (and the prayer
+ * places / legs follow once more).
+ */
 export async function refreshDay(tripId: string, day: string, data?: TripData) {
   const d = data ?? (await loadTripData(tripId));
   await refreshPrayers(tripId, day, d);
   await refreshLegs(tripId, day, d);
+  if (await retimeDay(tripId, day, d)) {
+    await refreshPrayers(tripId, day, d);
+    await refreshLegs(tripId, day, d);
+  }
+}
+
+/** Refreshes several days one after another (they share Routes API budgets); never throws. */
+export async function refreshDaysQuietly(tripId: string, days: Iterable<string>) {
+  try {
+    const d = await loadTripData(tripId);
+    for (const day of new Set(days)) if (day >= d.trip.startDate && day <= d.trip.endDate) await refreshDay(tripId, day, d);
+  } catch (err) {
+    console.warn('[schedule] refresh after booking change failed', err);
+  }
 }
 
 // ─── Checking a day ─────────────────────────────────────────────────────────

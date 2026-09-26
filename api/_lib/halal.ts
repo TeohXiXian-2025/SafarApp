@@ -181,7 +181,11 @@ const SYSTEM = `You help Muslim travellers judge places. You get a place's detai
      Only points that actually support the verdict. Do NOT repeat the halal listings, the place's name, beer/wine from the listing or nearby facts — we already show them.
      No filler and no "absence" points like "no pork is advertised" / "no certification is listed". A non-food place with no concerns needs at most 1 point.
    - confidence: 0..1.
-2) reviews: from the reviews and rating, is it worth visiting? verdict "highly_recommended", "mixed" or "skip"; score 0..1; up to 3 pros and 3 cons, each under 12 words, specific (food, queues, price, staff, cleanliness, crowding, views…).
+2) visitMinutes: how long a small group typically spends here (incl. a usual queue), exactly one of 30, 60, 90, 120, 180, 300:
+   30 café / dessert / snack / quick photo spot; 60 a normal restaurant meal, small shrine or temple, a single shop;
+   90 a popular restaurant with queues or a set course, a small museum or viewpoint; 120 a museum, market street, garden, castle;
+   180 a big park, zoo, aquarium, shopping district; 300 a theme park, day hike, large resort. Use the reviews (e.g. "we spent the whole afternoon", "2-hour wait").
+3) reviews: from the reviews and rating, is it worth visiting? verdict "highly_recommended", "mixed" or "skip"; score 0..1; up to 3 pros and 3 cons, each under 12 words, specific (food, queues, price, staff, cleanliness, crowding, views…).
 websiteSnippets are lines from the place's OWN website: strong evidence (source "website") — e.g. a named certifier → certified; "no pork no lard" → servesPork "no"; pork dishes on the menu → servesPork "yes".
 Never invent facts. "unknown" is fine.`;
 
@@ -211,6 +215,7 @@ const responseSchema = {
       },
       required: ['tier', 'verdict', 'evidence', 'confidence'],
     },
+    visitMinutes: { type: Type.STRING, enum: ['30', '60', '90', '120', '180', '300'] },
     reviews: {
       type: Type.OBJECT,
       properties: {
@@ -237,6 +242,7 @@ const AiResult = z.object({
     prayerSpaceOnSite: TriState,
     confidence: z.number().min(0).max(1),
   }),
+  visitMinutes: z.coerce.number().refine((n) => [30, 60, 90, 120, 180, 300].includes(n)).optional().catch(undefined),
   reviews: z.object({
     verdict: z.enum(['highly_recommended', 'mixed', 'skip']),
     score: z.number().min(0).max(1),
@@ -258,7 +264,7 @@ const flag = (v?: 'yes' | 'no' | 'unknown') => (v === 'yes' ? true : v === 'no' 
 const clip = (xs: string[], n: number, len: number) => xs.map((x) => x.trim().slice(0, len)).filter(Boolean).slice(0, n);
 const SIGNAL_SOURCE: Record<Signal['source'], EvidenceSource> = { google: 'google', foursquare: 'foursquare', osm: 'openstreetmap' };
 
-export async function analyzePlace(d: PlaceDetails): Promise<{ halal: HalalAssessment; sentiment?: Sentiment }> {
+export async function analyzePlace(d: PlaceDetails): Promise<{ halal: HalalAssessment; sentiment?: Sentiment; visitMin?: number }> {
   const isFood = d.place.category === 'food';
   const [nearby, fsq, site, directory] = await Promise.all([
     nearbySpots(d, isFood),
@@ -396,5 +402,5 @@ export async function analyzePlace(d: PlaceDetails): Promise<{ halal: HalalAsses
       }
     : undefined;
 
-  return { halal, ...(sentiment ? { sentiment } : {}) };
+  return { halal, ...(sentiment ? { sentiment } : {}), ...(ai.visitMinutes ? { visitMin: ai.visitMinutes } : {}) };
 }

@@ -8,7 +8,7 @@
 import { Clock, ExternalLink, Loader2, LocateFixed, MapPin, Phone, Plus, ShieldCheck, Star, UtensilsCrossed } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { FOOD_TABS, fmtClock, foodVerdict, Idea, nearestDestination, paths, planningDate, ScheduleItem, toMin, type FoodGuess, type FoodVerdict, type GeoPoint } from '../../domain';
+import { FOOD_TABS, fmtClock, foodVerdict, placeRule, Idea, nearestDestination, paths, planningDate, ScheduleItem, toMin, type FoodGuess, type FoodVerdict, type GeoPoint } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Badge, Button, Card, Chip, cx, ErrorBanner, Select, Spinner } from '../../ui';
@@ -50,6 +50,7 @@ const TONE: Record<FoodVerdict['bucket'], string> = {
   certified: 'bg-[#E3F4EC] text-[#0B6B45] border-[#B7E1CB]',
   halal: 'bg-[#EAF4F3] text-[#00685F] border-[#C4E0DD]',
   likely: 'bg-[#F1F7F6] text-[#2F6E66] border-dashed border-[#9CC9C2]',
+  friendly: 'bg-[#EEF4FB] text-[#1D4E89] border-[#C9DDF2]',
   pork_free: 'bg-[#FDF3E1] text-[#96590B] border-[#F0C987]',
   not_halal: 'bg-[#FDECEA] text-[#B3261E] border-[#F2B8B5]',
   unknown: 'bg-[#F3EFE9] text-[#6D7A77] border-[#E7DFD5]',
@@ -103,6 +104,9 @@ export function FoodPage() {
   const [checkNote, setCheckNote] = useState('');
   const country = (at: GeoPoint) => nearestDestination(trip.destinations, at).countryCode;
 
+  /** A checked place the radar found nothing for still gets the free rule (type / name / country). */
+  const settle = (x: FoodItem, v: FoodVerdict): FoodVerdict => (v.bucket === 'unknown' ? (placeRule(x, country(x.location)) ?? v) : v);
+
   /** Full Halal Radar on some places (shared daily allowance); cards update as results come back. */
   const autocheck = async (list: FoodItem[]) => {
     if (!list.length) return;
@@ -115,7 +119,7 @@ export function FoodPage() {
         q,
       );
       const by = new Map(r.results.map((x) => [x.placeId, x]));
-      setItems((xs) => xs?.map((x) => (by.has(x.placeId) ? { ...x, verdict: by.get(x.placeId)!.verdict, checked: true, pork: by.get(x.placeId)!.pork, alcohol: by.get(x.placeId)!.alcohol } : x)) ?? null);
+      setItems((xs) => xs?.map((x) => (by.has(x.placeId) ? { ...x, verdict: settle(x, by.get(x.placeId)!.verdict), checked: true, pork: by.get(x.placeId)!.pork, alcohol: by.get(x.placeId)!.alcohol } : x)) ?? null);
       if (r.limitReached) setCheckNote("Today's automatic checks for the app are used up — tap “Check halal” on a place, or report it after eating there.");
     } catch {
       /* the list still works */
@@ -131,7 +135,7 @@ export function FoodPage() {
       const found = (await api.post<{ items: FoodItem[] }>('food/nearby', at, q)).items;
       setItems(found);
       setLoading(false);
-      // 1) AI pre-screen of everything nobody has checked (one request, cached for everyone).
+      // 1) AI pre-screen of what the free rules couldn't settle (one request, cached for everyone).
       const unknown = found.filter((i) => i.verdict.bucket === 'unknown' && !i.checked);
       const toGuess = unknown.filter((i) => !i.guessed);
       if (toGuess.length) {
@@ -139,13 +143,15 @@ export function FoodPage() {
           .post<{ guesses: Record<string, FoodGuess> }>('food/prescreen', { country: country(at), items: toGuess.map((i) => ({ placeKey: i.placeKey, name: i.name, ...(i.typeLabel ? { typeLabel: i.typeLabel } : {}), types: i.types ?? [] })) }, q)
           .then((r) =>
             setItems((xs) =>
-              xs?.map((x) => (!x.checked && x.verdict.bucket === 'unknown' && r.guesses[x.placeKey] ? { ...x, guessed: true, verdict: foodVerdict({ guess: r.guesses[x.placeKey] }) } : x)) ?? null,
+              xs?.map((x) => (!x.checked && x.verdict.bucket === 'unknown' && r.guesses[x.placeKey] ? { ...x, guessed: true, verdict: foodVerdict({ guess: r.guesses[x.placeKey], place: x, country: country(at) }) } : x)) ?? null,
             ),
           )
           .catch(() => {});
       }
-      // 2) The nearest few unchecked get the full Halal Radar straight away.
-      void autocheck(unknown.sort((a, b) => a.distanceM - b.distanceM).slice(0, AUTO_NEAREST));
+      // 2) Full Halal Radar (the scarce, paid-for check) where it can change the answer: "often halal"
+      // cuisines first (it may confirm halal), then what's still unclear — nearest first.
+      const worth = found.filter((i) => !i.checked && (i.verdict.bucket === 'likely' || i.verdict.bucket === 'unknown'));
+      void autocheck(worth.sort((a, b) => Number(b.verdict.bucket === 'likely') - Number(a.verdict.bucket === 'likely') || a.distanceM - b.distanceM).slice(0, AUTO_NEAREST));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not search right now.');
     } finally {
@@ -175,7 +181,8 @@ export function FoodPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center?.lat, center?.lng]);
 
-  const update = (placeId: string, patch: Partial<FoodItem>) => setItems((xs) => xs?.map((x) => (x.placeId === placeId ? { ...x, ...patch } : x)) ?? null);
+  const update = (placeId: string, patch: Partial<FoodItem>) =>
+    setItems((xs) => xs?.map((x) => (x.placeId === placeId ? { ...x, ...patch, ...(patch.verdict ? { verdict: settle(x, patch.verdict) } : {}) } : x)) ?? null);
   const active = FOOD_TABS.find((t) => t.key === tab)!;
   const shown = (items ?? []).filter((i) => active.buckets.includes(i.verdict.bucket) && (!openOnly || i.openNow !== false));
   // Certified first within the Halal tab, then nearest.
@@ -249,7 +256,7 @@ export function FoodPage() {
       })()}
       {!loading && items && !shown.length && (
         <Card className="p-5 text-sm text-[#6D7A77]">
-          {tab === 'halal' ? 'No halal-listed places within ~2 km. Try “Not checked” and tap Check, or search near another stop.' : 'Nothing here.'}
+          {tab === 'halal' ? 'No halal-listed places within ~2 km. Try “Likely halal” or “Muslim-friendly”, or search near another stop.' : 'Nothing here.'}
         </Card>
       )}
 
@@ -330,7 +337,7 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
       </div>
 
       {/* Been there? One tap adds a community report (shared by every Safar trip). */}
-      {['unknown', 'likely', 'pork_free'].includes(i.verdict.bucket) && (
+      {['unknown', 'likely', 'friendly', 'pork_free'].includes(i.verdict.bucket) && (
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-[#6D7A77]">Eaten here? It was</span>
           {(

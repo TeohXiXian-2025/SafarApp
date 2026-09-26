@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { FieldValue } from 'firebase-admin/firestore';
 import {
+  DURATION_MINUTES,
   HalalReport,
   HalalTrust,
   trustWeight,
@@ -359,6 +360,17 @@ export const ideaRoutes: RouteTable = {
     { perMinute: 4 },
   ),
 
+  /** Pick how long a place takes (one of the DURATION_RANGES); overrides the AI's pick from now on. */
+  'POST ideas/duration': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ ideaId: Id, minutes: z.number().int().refine((n) => DURATION_MINUTES.includes(n as (typeof DURATION_MINUTES)[number]), 'Pick one of the lengths') }));
+      const idea = await loadIdea(tripId, body.ideaId);
+      await ideaRef(tripId, body.ideaId).update({ estDurationMin: body.minutes, durationSetBy: member.uid, updatedAt: Date.now() });
+      return json({ ok: true, was: idea.estDurationMin });
+    },
+    { perMinute: 30 },
+  ),
+
   /** Halal Radar + review analysis for an idea (cached per place for 14 days). */
   'POST ideas/analyze': withTrip(
     async (req, { tripId, user }) => {
@@ -380,6 +392,8 @@ export const ideaRoutes: RouteTable = {
         halal: result.halal,
         ...(result.sentiment ? { sentiment: result.sentiment } : {}),
         ...(result.phone && !idea.place.phone ? { 'place.phone': result.phone } : {}),
+        // The AI's length for this place, unless someone already picked one.
+        ...(result.visitMin && !idea.durationSetBy ? { estDurationMin: result.visitMin } : {}),
         analysis: { status: 'done', at: Date.now() },
         updatedAt: Date.now(),
       });

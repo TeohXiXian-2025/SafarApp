@@ -640,6 +640,29 @@ export const scheduleRoutes: RouteTable = {
     { perMinute: 20 },
   ),
 
+  /**
+   * "There's a prayer room here": a traveller at a venue (theme park, mall,
+   * station, park…) says where to pray inside it. Shared with every trip that
+   * visits the same place; this trip's prayer breaks there use it at once.
+   */
+  'POST prayer/spot': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ ideaId: Id, note: z.string().trim().max(120).optional(), day: LocalDate.optional() }));
+      const data = await loadTripData(tripId);
+      const idea = data.ideas.get(body.ideaId);
+      if (!idea) throw new HttpError(404, 'Place not found');
+      const ref = adminDb().doc(paths.prayerSpot(idea.placeKey));
+      await adminDb().runTransaction(async (tx) => {
+        const cur = (await tx.get(ref)).data() ?? {};
+        const by = { ...(cur.by ?? {}), [member.uid]: Date.now() };
+        tx.set(ref, { name: idea.place.name, count: Object.keys(by).length, by, ...(body.note ? { note: body.note } : cur.note ? { note: cur.note } : {}), updatedAt: Date.now() });
+      });
+      if (body.day) await refreshDay(tripId, body.day, data);
+      return json({ ok: true });
+    },
+    { perMinute: 10 },
+  ),
+
   /** Close a preview without applying it. */
   'POST schedule/discard': withTrip(
     async (req, { tripId }) => {

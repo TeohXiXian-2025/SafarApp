@@ -17,6 +17,7 @@
 import type { GeoPoint } from './common.js';
 import type { BookingDraft } from './plan.js';
 import { openingRanges, PRAY_MIN, prayerTimesOn, type DayPrayers, type PrayerKey } from './prayer.js';
+import { journeyPrayerSpan } from './journeyPrayer.js';
 import { BUFFER_MIN, ceil5, DEFAULT_GAP, estimateTravelMin, LONG_VISIT_MIN, metersBetween, toMin } from './timeline.js';
 import type { Destination, MemberPrefs } from './trip.js';
 
@@ -39,6 +40,8 @@ export interface Unit {
   /** A meal slot with no place yet: eaten near the stop before it (no travel), a restaurant is found after. */
   floating?: boolean;
   meal?: MealKey;
+  /** Re-timing a hand-made day: don't start before the time it has now (keeps the gaps people chose). */
+  notBefore?: number;
 }
 
 export type MealKey = 'lunch' | 'dinner';
@@ -248,7 +251,7 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
       return null;
     };
 
-    const ready = arriveAfter(prayers, cursor, move + (fromPrev && !u.floating ? buffer : 0));
+    const ready = Math.max(arriveAfter(prayers, cursor, move + (fromPrev && !u.floating ? buffer : 0)), u.notBefore ?? 0);
     let start = fit(ready);
     if (start === null) {
       if (opts.strict) {
@@ -596,7 +599,9 @@ export function prayerBreaks(
   const out: PrayerSlot[] = [];
   for (const p of lockedPrayers(prayers)) {
     if (inTrip ? p.start < first || p.start >= last : p.end <= first || p.start >= last) continue; // not there yet / already gone (or prayed before leaving / after getting back)
-    if (journeys.some((j) => p.start < j.end && p.end > j.start)) continue; // at the airport / on board
+    // Starts during a journey (can't be finished before boarding, not yet out at the other end):
+    // the journey's prayer card says what to do. Earlier / later ones stay here as blocks.
+    if (journeys.some((j) => prayers.times[p.key] >= j.start && prayers.times[p.key] < j.end)) continue;
     const isLong = (x: GapStop) => x.end - x.start >= LONG_VISIT_MIN;
     const inside = sorted.find((x) => x.start <= p.start && x.end > p.start && isLong(x));
     for (const x of sorted) {
@@ -620,8 +625,9 @@ export function prayerBreaks(
  */
 export function journeySpans(items: { start: number; end: number; event: string; bookingId: string; flight: boolean }[]): Block[] {
   const out: Block[] = [];
-  const pre = (f: boolean) => (f ? 150 : 45);
-  const post = (f: boolean) => (f ? 60 : 30);
+  // Same span as the journey's prayer card: prayers starting in it are on the card, not the timeline.
+  const pre = (f: boolean) => journeyPrayerSpan(f).before;
+  const post = (f: boolean) => journeyPrayerSpan(f).after;
   for (const it of items) {
     if (it.event === 'span') out.push({ start: it.start - pre(it.flight), end: it.end + post(it.flight) });
     else if (it.event === 'depart') {
@@ -817,4 +823,23 @@ export function prayerPlaceOnRoute<P extends { location: GeoPoint }>(candidates:
   const walkable = candidates.filter((c) => reach(c) <= PRAYER_REACH_M);
   if (!walkable.length) return [...candidates].sort((a, b) => reach(a) - reach(b))[0];
   return walkable.sort((a, b) => d(from, a.location) + d(to, a.location) - (d(from, b.location) + d(to, b.location)) || d(from, a.location) - d(from, b.location))[0];
+}
+
+/**
+ * A hand-made day with real travel in: stops keep their order and their
+ * times, except any that can't be reached in time (travel + buffer from the
+ * stop before, around bookings and prayer times) move later — just enough.
+ * Returns the new start for each stop that moves.
+ */
+export function pushForward(frame: DayFrame, units: Unit[], travel: Travel, buffer = BUFFER_MIN): Map<string, number> {
+  if (!units.length) return new Map();
+  const first = Math.min(...units.map((u) => u.notBefore ?? frame.start));
+  // Start at the first stop as it is (no travel charged from the hotel — people choose that time).
+  const t = timeSequence({ ...frame, start: Math.min(frame.start, first), baseKnown: false }, units, { strict: false, travel, buffer });
+  const out = new Map<string, number>();
+  for (const p of t.placed) {
+    const u = units.find((x) => x.id === p.id);
+    if (u?.notBefore !== undefined && p.start > u.notBefore) out.set(p.id, p.start);
+  }
+  return out;
 }

@@ -8,6 +8,7 @@ import { handle, HttpError, json } from '../_lib/http.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { socialUsage } from '../_lib/socialProviders.js';
 import { autoCheckUsage } from './food.js';
+import { checksLeftToday } from '../_lib/analysis.js';
 
 export const systemRoutes: RouteTable = {
   // Public liveness check. Reports which integrations are configured
@@ -31,13 +32,14 @@ export const systemRoutes: RouteTable = {
       if (owners.length && !owners.includes((user.email ?? '').toLowerCase())) throw new HttpError(403, 'Only the app owner can see usage');
       const month = new Date().toISOString().slice(0, 7);
       const models = geminiModels();
-      const [serp, social, aviation, ai, down, auto] = await Promise.all([
+      const [serp, social, aviation, ai, down, auto, checks] = await Promise.all([
         serpUsage(),
         socialUsage(),
         adminDb().doc(`apiUsage/aviationstack_${month}`).get(),
         aiCounts(7),
         downModels(models),
         autoCheckUsage(),
+        checksLeftToday(),
       ]);
       const cap = (used: number, max: number) => ({ used, cap: max, left: Math.max(0, max - used), pct: max ? Math.round((used / max) * 100) : 0 });
       return json({
@@ -45,7 +47,11 @@ export const systemRoutes: RouteTable = {
         hotels: { ...cap(serp.used, serp.cap), note: 'Google Hotels (SerpApi). At the cap, hotels switch to LiteAPI sample prices.' },
         instagramTiktok: { ...cap(social.scrapecreators.used, social.scrapecreators.cap), note: 'ScrapeCreators. At the cap, pasted links fall back to the caption only.' },
         xiaohongshu: { ...cap(social.apify.used, social.apify.cap), note: 'Apify. At the cap, pasted links fall back to the caption only.' },
-        halalAutoChecks: { ...cap(auto.used, auto.cap), note: 'Automatic Halal Radar checks in the Food tab today (app-wide). At the cap, people tap Check themselves.' },
+        halalAutoChecks: { ...cap(auto.used, auto.cap), note: "Automatic Halal Radar checks in the Food tab today (app-wide) — this month's remaining budget spread over the days left." },
+        halalChecksMonth: {
+          ...cap(checks.used, checks.budget),
+          note: `Full halal checks (Google reviews) this month, all trips. Budget = HALAL_CHECKS_PER_MONTH (now ${checks.budget}); Google's free tier is ~1,000/month, above that about US$20–40 per 1,000. Raise it in Vercel → Settings → Environment Variables if billing is on. At the cap, labels come from free signals (listings, restaurant type, country, traveller reports).`,
+        },
         flightStatus: { ...cap(Number(aviation.get('count') ?? 0), Number(process.env.FLIGHT_STATUS_MONTHLY_CAP) || 90), note: 'AviationStack. At the cap, travellers report delays themselves.' },
         ai: {
           last7Days: ai,

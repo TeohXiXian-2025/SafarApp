@@ -10,7 +10,7 @@ import { searchFoodText, searchNearbyFood, type NearbyFood } from './places.js';
 
 const CACHE_MS = 7 * 86_400_000;
 const RADIUS_M = 1500;
-const BUCKET_RANK: Record<FoodVerdict['bucket'], number> = { certified: 0, halal: 1, likely: 2, pork_free: 3, unknown: 4, not_halal: 9 };
+const BUCKET_RANK: Record<FoodVerdict['bucket'], number> = { certified: 0, halal: 1, likely: 2, friendly: 3, pork_free: 4, unknown: 5, not_halal: 9 };
 
 export interface MealPlace {
   placeId: string;

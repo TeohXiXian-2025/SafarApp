@@ -18,6 +18,7 @@ const SERVER_KEYS = [
   'VAPID_PUBLIC_KEY',
   'VAPID_PRIVATE_KEY',
   'CRON_SECRET',
+  'HALAL_CHECKS_PER_MONTH',
 ] as const;
 
 export type ServerKey = (typeof SERVER_KEYS)[number];

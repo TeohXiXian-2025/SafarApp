@@ -2,23 +2,41 @@
 // remove) and add a backlog idea to a day — the "Move to…" sheet on phones.
 import { ExternalLink } from 'lucide-react';
 import { useState } from 'react';
-import { fmtClock, openingRanges, toClock, toMin, type DayWarning, type Idea, type ScheduleItem } from '../../domain';
+import { DURATION_RANGES, durationRange, fmtClock, openingRanges, toClock, toMin, type DayWarning, type Idea, type ScheduleItem } from '../../domain';
 import { Button, cx, ErrorBanner, Field, Input, Select, Sheet } from '../../ui';
 import { formatDay } from '../bookings/format';
 
-const DURATIONS = [15, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300, 360, 480];
 const durLabel = (m: number) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`);
 
-function DurationSelect({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const options = DURATIONS.includes(value) ? DURATIONS : [...DURATIONS, value].sort((a, b) => a - b);
+/**
+ * How long: a few ranges to tap instead of typing minutes. `suggested` = the
+ * AI's pick for this place (from its type and reviews).
+ */
+function DurationChips({ value, onChange, suggested }: { value: number; onChange: (v: number) => void; suggested?: number }) {
+  const current = durationRange(value).min;
   return (
-    <Select value={value} onChange={(e) => onChange(Number(e.target.value))}>
-      {options.map((m) => (
-        <option key={m} value={m}>
-          {durLabel(m)}
-        </option>
+    <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="How long">
+      {DURATION_RANGES.map((r) => (
+        <button
+          key={r.min}
+          type="button"
+          role="radio"
+          aria-checked={current === r.min}
+          title={r.hint}
+          onClick={() => onChange(r.min)}
+          className={cx(
+            'rounded-xl border px-2 py-1.5 text-left leading-tight',
+            current === r.min ? 'border-[#00685F] bg-[#00685F] text-white' : 'border-[#E7DFD5] bg-white text-[#161C23] hover:border-[#00685F]/50',
+          )}
+        >
+          <span className="block text-xs font-bold">
+            {r.label}
+            {suggested === r.min && <span className={cx('ml-1 text-[10px] font-semibold', current === r.min ? 'text-white/80' : 'text-[#00685F]')}>✦ AI</span>}
+          </span>
+          <span className={cx('block text-[10px]', current === r.min ? 'text-white/80' : 'text-[#6D7A77]')}>{r.range}</span>
+        </button>
       ))}
-    </Select>
+    </div>
   );
 }
 
@@ -172,12 +190,12 @@ function EditStopForm({
         <Field label="Start">
           <Input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} required />
         </Field>
-        {!fixedLength && (
-          <Field label="How long">
-            <DurationSelect value={duration} onChange={setDuration} />
-          </Field>
-        )}
       </div>
+      {!fixedLength && (
+        <Field label="How long" group>
+          <DurationChips value={duration} onChange={setDuration} suggested={idea ? durationRange(idea.estDurationMin).min : undefined} />
+        </Field>
+      )}
       {fixedLength && <p className="text-xs text-[#6D7A77]">Both groups move together; the split takes {durLabel(duration)} including the walk.</p>}
       {start && <p className="text-xs text-[#6D7A77]">Ends at {fmtClock(Math.min(toMin(start) + duration, 24 * 60 - 1))}</p>}
       <HoursHint idea={idea} day={day} />
@@ -245,10 +263,10 @@ function AddStopForm({
   onAdd: (day: string, start: string | undefined, durationMin: number) => Promise<void>;
 }) {
   // Pre-filled with a time that clashes with nothing (in the place's city); you can change any of it.
-  const [initial] = useState(() => pickDefault?.(idea.estDurationMin) ?? { day: defaultDay, start: '', fits: false });
+  const [initial] = useState(() => pickDefault?.(durationRange(idea.estDurationMin).min) ?? { day: defaultDay, start: '', fits: false });
   const [day, setDay] = useState(initial.day);
   const [start, setStart] = useState(initial.start);
-  const [duration, setDuration] = useState(idea.estDurationMin);
+  const [duration, setDuration] = useState<number>(durationRange(idea.estDurationMin).min);
   const [hint, setHint] = useState<'fits' | 'fallback' | 'manual'>(initial.start ? (initial.fits ? 'fits' : 'fallback') : 'manual');
   const validStart = /^\d{2}:\d{2}$/.test(start);
   const end = validStart ? toClock(Math.min(toMin(start) + duration, 24 * 60 - 1)) : '';
@@ -282,35 +300,21 @@ function AddStopForm({
       <Field label="Day">
         <DaySelect days={days} value={day} onChange={changeDay} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Start">
-          <Input
-            type="time"
-            step={300}
-            value={start}
-            onChange={(e) => {
-              setStart(e.target.value);
-              setHint('manual');
-            }}
-          />
-        </Field>
-        <Field label="End">
-          <Input
-            type="time"
-            step={300}
-            value={end}
-            disabled={!validStart}
-            onChange={(e) => {
-              if (!/^\d{2}:\d{2}$/.test(e.target.value) || !validStart) return;
-              const d = toMin(e.target.value) - toMin(start);
-              if (d >= 5) setDuration(d);
-            }}
-          />
-        </Field>
-      </div>
-      <Field label="Or how long">
-        <DurationSelect value={duration} onChange={setDuration} />
+      <Field label="How long" hint={idea.durationSetBy ? 'Picked by your group — tap another to change it.' : '✦ AI = its pick from the place type and reviews. Tap another to change it.'} group>
+        <DurationChips value={duration} onChange={setDuration} suggested={idea.durationSetBy ? undefined : durationRange(idea.estDurationMin).min} />
       </Field>
+      <Field label="Start">
+        <Input
+          type="time"
+          step={300}
+          value={start}
+          onChange={(e) => {
+            setStart(e.target.value);
+            setHint('manual');
+          }}
+        />
+      </Field>
+      {validStart && <p className="-mt-2 text-xs text-[#6D7A77]">Ends at {fmtClock(toMin(end))}</p>}
       <p className="text-xs text-[#6D7A77]">
         {hint === 'fits'
           ? `Suggested: the first time on ${formatDay(day)} that clashes with nothing — opening hours, travel, prayer times.`

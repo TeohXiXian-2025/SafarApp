@@ -6,8 +6,81 @@
 // A traveller (musafir) may combine Zuhur + Asar and Maghrib + Isyak — both in
 // the earlier time (jamak taqdim) or both in the later time (jamak ta'khir) —
 // and shorten the four-rakaat prayers to two (qasar). Subuh can't be combined.
+import { CalculationMethod, Coordinates, PrayerTimes, Qibla } from 'adhan';
 import type { GeoPoint } from './common.js';
 import { prayerTimesOn, type PrayerKey } from './prayer.js';
+
+// ─── In the air: prayer times where the plane actually is ───────────────────
+
+const rad = (d: number) => (d * Math.PI) / 180;
+const deg = (r: number) => (r * 180) / Math.PI;
+
+/** A point `f` (0–1) of the way along the great circle from a to b. */
+export function alongRoute(a: GeoPoint, b: GeoPoint, f: number): GeoPoint {
+  const [φ1, λ1, φ2, λ2] = [rad(a.lat), rad(a.lng), rad(b.lat), rad(b.lng)];
+  const d = 2 * Math.asin(Math.sqrt(Math.sin((φ2 - φ1) / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2));
+  if (d < 1e-9) return a;
+  const A = Math.sin((1 - f) * d) / Math.sin(d);
+  const B = Math.sin(f * d) / Math.sin(d);
+  const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+  const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+  const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+  return { lat: deg(Math.atan2(z, Math.sqrt(x * x + y * y))), lng: deg(Math.atan2(y, x)) };
+}
+
+/** Compass bearing (0 = north) from a towards b. */
+export function bearing(a: GeoPoint, b: GeoPoint): number {
+  const [φ1, φ2, Δλ] = [rad(a.lat), rad(b.lat), rad(b.lng - a.lng)];
+  return (deg(Math.atan2(Math.sin(Δλ) * Math.cos(φ2), Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ))) + 360) % 360;
+}
+
+/** Where the qibla is from a seat facing forward: "ahead", "to your right", "behind you, on the left"… */
+export function qiblaFromSeat(heading: number, qibla: number): string {
+  const rel = (qibla - heading + 360) % 360;
+  const sides = ['ahead', 'ahead, on the right', 'to your right', 'behind you, on the right', 'behind you', 'behind you, on the left', 'to your left', 'ahead, on the left'];
+  return sides[Math.round(rel / 45) % 8];
+}
+
+export interface AirPrayer {
+  prayer: PrayerKey;
+  /** When its time begins where the plane is (UTC ms). */
+  at: number;
+  where: GeoPoint;
+  /** Degrees from north, and from the seat. */
+  qibla: number;
+  fromSeat: string;
+}
+
+/**
+ * The prayer times that begin while flying, worked out at the plane's
+ * position (great-circle route, even speed) — the way in-flight prayer
+ * calculators do it: the sun is where the plane is, not where it took off.
+ */
+export function inFlightPrayers(from: GeoPoint, to: GeoPoint, depMs: number, arrMs: number, stepMin = 5): AirPrayer[] {
+  const out: AirPrayer[] = [];
+  const total = arrMs - depMs;
+  if (total <= 0) return out;
+  const keys: PrayerKey[] = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
+  const heading = (f: number) => bearing(alongRoute(from, to, f), alongRoute(from, to, Math.min(1, f + 0.01)));
+  for (let t = depMs; t < arrMs; t += stepMin * 60_000) {
+    const f = (t - depMs) / total;
+    const p = alongRoute(from, to, f);
+    // The local calendar date at the plane (sun time: 1 h per 15°).
+    const local = new Date(t + (p.lng / 15) * 3_600_000);
+    for (const dayShift of [-1, 0]) {
+      const d = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + dayShift));
+      const pt = new PrayerTimes(new Coordinates(p.lat, p.lng), new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()), CalculationMethod.MuslimWorldLeague());
+      for (const k of keys) {
+        const at = pt[k].getTime();
+        if (at >= t && at < t + stepMin * 60_000 && !out.some((o) => o.prayer === k && Math.abs(o.at - at) < 6 * 3_600_000)) {
+          const q = Qibla(new Coordinates(p.lat, p.lng));
+          out.push({ prayer: k, at, where: p, qibla: Math.round(q), fromSeat: qiblaFromSeat(heading(f), q) });
+        }
+      }
+    }
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
 
 export interface JourneyPrayer {
   prayer: PrayerKey;
@@ -21,6 +94,15 @@ const BEFORE_MIN = { flight: 45, other: 15 };
 const AFTER_MIN = { flight: 45, other: 15 };
 /** Time a prayer needs, incl. wudu. */
 const PRAYER_NEED_MIN = 15;
+
+/**
+ * Which prayers belong to a journey (shown on its card with what to do) and
+ * which stay on the timeline as normal locked prayer blocks: a prayer whose
+ * time starts too late to finish before boarding closes, or before you're out
+ * at the other end, is the journey's; one you can pray at the airport first,
+ * or after arriving, is the timeline's. Minutes around departure / arrival.
+ */
+export const journeyPrayerSpan = (flight: boolean) => ({ before: (flight ? BEFORE_MIN.flight : BEFORE_MIN.other) + PRAYER_NEED_MIN, after: flight ? AFTER_MIN.flight : AFTER_MIN.other });
 const PAIR: Partial<Record<PrayerKey, PrayerKey>> = { dhuhr: 'asr', asr: 'dhuhr', maghrib: 'isha', isha: 'maghrib' };
 const EARLIER: PrayerKey[] = ['dhuhr', 'maghrib'];
 
@@ -83,20 +165,25 @@ export function journeyPrayers(j: {
   const outAt = arr + (flight ? AFTER_MIN.flight : AFTER_MIN.other) * 60_000;
   const depDate = j.startAt.slice(0, 10);
   const arrDate = j.endAt.slice(0, 10);
+  const need = PRAYER_NEED_MIN * 60_000;
   const atOrigin = windows(j.from.location, j.from.timezone, oOff, [dayShift(depDate, -1), depDate]);
   const atDest = windows(j.to.location, j.to.timezone, dOff, [dayShift(arrDate, -1), arrDate, dayShift(arrDate, 1)]);
-  const need = PRAYER_NEED_MIN * 60_000;
   const here = (w: Window[], k: PrayerKey, t: number) => w.find((x) => x.key === k && x.start <= t && t < x.end);
 
-  // Prayers whose time is (partly) spent between boarding and getting out at the other end.
-  const affected = atOrigin
-    .filter((w) => w.end > boardBy && w.start < dep)
-    .concat(atDest.filter((w) => w.start < outAt && w.end > arr - 12 * 3_600_000 && w.start >= dep - 12 * 3_600_000))
-    .filter((w, i, all) => all.findIndex((x) => x.key === w.key && Math.abs(x.start - w.start) < 12 * 3_600_000) === i)
-    .filter((w) => w.start < outAt && w.end > boardBy)
-    .sort((a, b) => a.start - b.start);
+  // Only prayers whose time starts during the journey (too late to finish before boarding, and
+  // before you're out at the other end). One that starts earlier is prayed at the airport, one
+  // that starts later after arriving — those are locked prayer blocks on the timeline instead.
+  const from0 = boardBy - need;
+  const inSpan = (w: Window) => w.start >= from0 && w.start < outAt;
+  // The same prayer already under way at the origin before boarding is the timeline's.
+  const prayedBefore = (w: Window) => atOrigin.some((x) => x.key === w.key && x.start < from0 && x.end > from0 && Math.abs(x.start - w.start) < 12 * 3_600_000);
+  const affected = [...atOrigin.filter(inSpan), ...atDest.filter(inSpan)]
+    .filter((w) => !prayedBefore(w))
+    .sort((a, b) => a.start - b.start)
+    .filter((w, i, all) => all.findIndex((x) => x.key === w.key && Math.abs(x.start - w.start) < 12 * 3_600_000) === i);
 
   const out: JourneyPrayer[] = [];
+  const airTimes = flight ? inFlightPrayers(j.from.location, j.to.location, dep, arr) : [];
   const from = flight ? 'the airport prayer room' : `the station (${j.from.name})`;
   const handled = new Set<PrayerKey>();
   for (const w of affected) {
@@ -136,10 +223,14 @@ export function journeyPrayers(j: {
         continue;
       }
     }
+    // Where the plane is when its time begins: the time on the departure clock and the qibla from your seat.
+    const air = flight ? airTimes.find((a) => a.prayer === w.key) : undefined;
     out.push({
       prayer: w.key,
       where: 'on_board',
-      text: `${L} falls during the ${flight ? 'flight' : 'journey'} — pray on board: seated if you can't stand, facing the qiblat as best you can, with tayammum if you can't take wudu.`,
+      text: air
+        ? `${L} begins in the air at about ${clock(air.at, oOff)} (${j.from.name} time) — pray on board: seated if you can't stand; the qiblat is ${air.fromSeat} (${air.qibla}° from north); tayammum if you can't take wudu.`
+        : `${L} falls during the ${flight ? 'flight' : 'journey'} — pray on board: seated if you can't stand, facing the qiblat as best you can, with tayammum if you can't take wudu.`,
     });
   }
   // "Pray Zuhur before boarding" is already part of "jamak taqdim: Zuhur and Asar together".

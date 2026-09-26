@@ -8,6 +8,7 @@ import {
   Id,
   paths,
   ScheduleItem,
+  tripDays,
   type BookingPlace,
   type Member,
 } from '../../src/domain/index.js';
@@ -19,6 +20,7 @@ import { findPlace, localToInstant } from '../_lib/google.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { logActivity } from '../_lib/trip.js';
+import { refreshDaysQuietly } from '../_lib/schedule.js';
 import { useDailyQuota } from '../_lib/quota.js';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -181,8 +183,20 @@ function assertTravellers(draft: BookingDraft, members: Member[]) {
   if (!draft.travellerUids.every((u) => ids.has(u))) throw new HttpError(400, 'Travellers must be members of this trip');
 }
 
-/** Writes the booking and replaces its locked timeline anchors, atomically. */
-async function saveBooking(tripId: string, booking: Booking, actorUid: string, activity: string) {
+/**
+ * The trip days a booking touches: its timeline moments, plus every night of a
+ * hotel (the day's base and prayer place follow it) and the day either side
+ * of a journey (arriving late / leaving early changes when the group is there).
+ */
+function daysOf(b: Pick<Booking, 'kind' | 'startLocal' | 'endLocal'>): string[] {
+  const [s, e] = [b.startLocal.slice(0, 10), b.endLocal.slice(0, 10)];
+  const shift = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+  if (b.kind === 'hotel') return tripDays(s, e).slice(0, 31);
+  return [...new Set([shift(s, -1), s, e, shift(e, 1)])];
+}
+
+/** Writes the booking and replaces its locked timeline anchors, atomically; then the affected days are re-planned. */
+async function saveBooking(tripId: string, booking: Booking, actorUid: string, activity: string, before?: Booking | null) {
   const db = adminDb();
   const schedule = db.collection(paths.schedule(tripId));
   const old = await schedule.where('ref.bookingId', '==', booking.id).get();
@@ -211,6 +225,8 @@ async function saveBooking(tripId: string, booking: Booking, actorUid: string, a
   });
   logActivity(batch, tripId, actorUid, activity);
   await batch.commit();
+  // Prayer blocks, travel legs and anything the new times make unreachable — on the old days and the new ones.
+  await refreshDaysQuietly(tripId, [...daysOf(booking), ...(before ? daysOf(before) : []), ...old.docs.map((d) => String(d.get('day')))]);
 }
 
 /** A hotel whose check-in / check-out clashes with its guests' flights, trains, … → 409 with why. */
@@ -254,7 +270,7 @@ export async function addBooking(
 export async function updateBooking(tripId: string, current: Booking, draft: BookingDraft, actor: { uid: string; displayName: string }) {
   const booking: Booking = { ...current, ...draft, ...(await withTimezones(draft)), updatedAt: Date.now() };
   await assertHotelFits(tripId, booking);
-  await saveBooking(tripId, booking, actor.uid, `${actor.displayName} updated the ${describe(booking)}`);
+  await saveBooking(tripId, booking, actor.uid, `${actor.displayName} updated the ${describe(booking)}`, current);
   return booking;
 }
 
@@ -262,7 +278,7 @@ export async function updateBooking(tripId: string, current: Booking, draft: Boo
 export async function rescheduleBooking(tripId: string, booking: Booking, startLocal: string, endLocal: string, actor: { uid: string; displayName: string }, activity: string) {
   const draft = { ...booking, startLocal, endLocal } as BookingDraft;
   const next: Booking = { ...booking, startLocal, endLocal, ...(await withTimezones(draft)), updatedAt: Date.now() };
-  await saveBooking(tripId, next, actor.uid, `${actor.displayName} ${activity}`);
+  await saveBooking(tripId, next, actor.uid, `${actor.displayName} ${activity}`, booking);
   return next;
 }
 
@@ -280,6 +296,7 @@ export async function removeBooking(tripId: string, booking: Booking, actor: { u
   }
   logActivity(batch, tripId, actor.uid, `${actor.displayName} ${activity}`);
   await batch.commit();
+  await refreshDaysQuietly(tripId, [...daysOf(booking), ...anchors.docs.map((d) => String(d.get('day')))]);
 }
 
 export const describeBooking = (b: Pick<Booking, 'kind' | 'carrier' | 'number' | 'from' | 'to'>) => describe(b);

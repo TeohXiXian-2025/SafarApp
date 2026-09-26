@@ -192,7 +192,11 @@ try {
   assert.equal(mv.status, 200, JSON.stringify(mv.body));
   items = await schedule(tripId);
   assert.equal(items.find((i) => i.id === a.id).day, items.find((i) => i.id === b.id).day);
-  assert.equal(toMin(items.find((i) => i.id === a.id).start), 10 * 60 - trackB.walkMin); // B arrives at 10:00
+  // B asked for 10:00; on a busy day the pair may move later (it can't overlap the stop before it) — never earlier.
+  const [a3, b3] = [items.find((i) => i.id === a.id), items.find((i) => i.id === b.id)];
+  assert.equal(toMin(b3.start) - toMin(a3.start), trackB.walkMin);
+  assert.ok(toMin(b3.start) >= 10 * 60, b3.start);
+  noOverlap(items.filter((i) => i.day === a3.day && !i.locked));
   ok(`moving track B moves the pair (A now ${items.find((i) => i.id === a.id).day} ${items.find((i) => i.id === a.id).start})`);
 
   // ── Undo ──────────────────────────────────────────────────────────────────
