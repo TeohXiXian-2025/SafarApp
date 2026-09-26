@@ -19,6 +19,7 @@ import { adminDb } from './firebaseAdmin.js';
 import { HttpError } from './http.js';
 import { DEFAULT_DURATION, ideaPlaceFrom } from './places.js';
 import { dayItems, ideaDocRef, itemRef, loadTripData, pairIds, refreshDay, splitRef, writeStops, type TripData } from './schedule.js';
+import { refreshLater } from './background.js';
 
 export const freeItemId = (splitId: string) => `free_${splitId}`;
 
@@ -170,5 +171,5 @@ export async function restage(tripId: string, mainId: string) {
   const ids = writeStops(batch, tripId, { data, idea: main, day: item.day, start: toMin(item.start), orderIndex: item.orderIndex, actor: 'system' });
   ids.forEach((id) => batch.update(ideaDocRef(tripId, id), { status: 'scheduled', updatedAt: Date.now() }));
   await batch.commit();
-  await refreshDay(tripId, item.day, data);
+  refreshLater(tripId, [item.day]);
 }

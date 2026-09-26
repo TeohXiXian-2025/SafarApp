@@ -30,6 +30,7 @@ import type { RouteTable } from '../_lib/routes.js';
 import { dayItems, loadTripData, planFixDay, refreshDay, writeFixPlan, type TripData } from '../_lib/schedule.js';
 import { logActivity } from '../_lib/trip.js';
 import { describeBooking, removeBooking, rescheduleBooking } from './bookings.js';
+import { refreshLater } from '../_lib/background.js';
 
 const Change = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delay'), startLocal: LocalDateTime, endLocal: LocalDateTime }),
@@ -181,7 +182,7 @@ export const resyncRoutes: RouteTable = {
           writeFixPlan(batch, tripId, data, items, plan, member.uid);
           await batch.commit();
         }
-        await refreshDay(tripId, d.day, data);
+        refreshLater(tripId, [d.day]);
       }
 
       const now = Date.now();

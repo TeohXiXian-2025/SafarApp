@@ -12,3 +12,5 @@ coverage/
 docs/BUILD_PLAN.md
 docs/SYSTEM_AND_TEST_GUIDE.md
 docs/FIX_PLAN.md
+docs/TEST_GUIDE.md
+docs/test-kit/

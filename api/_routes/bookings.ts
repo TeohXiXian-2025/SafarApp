@@ -20,7 +20,7 @@ import { airportByCode, findPlace, localToInstant } from '../_lib/google.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { logActivity } from '../_lib/trip.js';
-import { refreshDaysQuietly } from '../_lib/schedule.js';
+import { refreshLater } from '../_lib/background.js';
 import { useDailyQuota } from '../_lib/quota.js';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -231,7 +231,8 @@ async function saveBooking(tripId: string, booking: Booking, actorUid: string, a
   logActivity(batch, tripId, actorUid, activity);
   await batch.commit();
   // Prayer blocks, travel legs and anything the new times make unreachable — on the old days and the new ones.
-  await refreshDaysQuietly(tripId, [...daysOf(booking), ...(before ? daysOf(before) : []), ...old.docs.map((d) => String(d.get('day')))]);
+  // After the reply (the booking shows at once): its days re-planned in the background.
+  refreshLater(tripId, [...daysOf(booking), ...(before ? daysOf(before) : []), ...old.docs.map((d) => String(d.get('day')))]);
 }
 
 /** A hotel whose check-in / check-out clashes with its guests' flights, trains, … → 409 with why. */
@@ -301,7 +302,7 @@ export async function removeBooking(tripId: string, booking: Booking, actor: { u
   }
   logActivity(batch, tripId, actor.uid, `${actor.displayName} ${activity}`);
   await batch.commit();
-  await refreshDaysQuietly(tripId, [...daysOf(booking), ...anchors.docs.map((d) => String(d.get('day')))]);
+  refreshLater(tripId, [...daysOf(booking), ...anchors.docs.map((d) => String(d.get('day')))]);
 }
 
 export const describeBooking = (b: Pick<Booking, 'kind' | 'carrier' | 'number' | 'from' | 'to'>) => describe(b);

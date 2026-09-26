@@ -446,9 +446,9 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
     journeysOf(data, stops),
     frame.inTrip,
   );
-  const batch = adminDb().batch();
+  const writes = new Map<string, ScheduleItem>();
   const keep = new Set(prayers.map((p) => prayerItemId(day, p.key)));
-  previous.filter((p) => !keep.has(p.id)).forEach((p) => batch.delete(itemRef(tripId, p.id)));
+  const deletes = previous.filter((p) => !keep.has(p.id)).map((p) => p.id);
   const lookups = { n: 0 };
   const praying = prayingUids(data.members);
   const used = new Set<string>();
@@ -471,8 +471,8 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
     const filler = fillerFor(data, facility?.location ?? slot.at, used, onDay, slot, day);
     if (filler) used.add(filler.id);
     const why = chosen ? { basis: 'chosen' as const, basisName: chosen.name } : prayerBasis(data, slot, stops, frame.baseKnown);
-    batch.set(
-      itemRef(tripId, id),
+    writes.set(
+      id,
       ScheduleItem.parse({
         id,
         day,
@@ -498,7 +498,18 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
       }),
     );
   }
-  await batch.commit();
+  // Written in a transaction: what someone chose for a break while this ran (a pick, a place) is kept.
+  const db = adminDb();
+  await db.runTransaction(async (tx) => {
+    const ids = [...writes.keys()];
+    const now = ids.length ? await tx.getAll(...ids.map((id) => itemRef(tripId, id))) : [];
+    ids.forEach((id, k) => {
+      const item = writes.get(id)!;
+      const cur = now[k].exists ? (now[k].get('prayer') as ScheduleItem['prayer'] | undefined) : undefined;
+      tx.set(itemRef(tripId, id), cur?.fillerPicks ? { ...item, prayer: { ...item.prayer!, fillerPicks: cur.fillerPicks } } : item);
+    });
+    deletes.forEach((id) => tx.delete(itemRef(tripId, id)));
+  });
   await rememberPlaces(['mosque'], remember.map((f) => ({ placeId: f.placeId ?? `mem_${f.name}`, name: f.name, location: f.location, types: ['mosque'], source: 'google' as const })), 'google');
 }
 
@@ -614,24 +625,26 @@ export function dayChain(data: TripData, items: ScheduleItem[]): { rows: ChainRo
  * Returns whether anything moved.
  */
 export async function retimeDay(tripId: string, day: string, data: TripData): Promise<boolean> {
-  const items = await dayItems(tripId, day);
-  const main = items.filter((i) => !isTrackB(i));
-  if (!main.some((i) => !i.locked && !isPrayerItem(i))) return false;
-  const { rows, travel } = dayChain(data, items);
-  // Tight: each stop starts when the one before ends + the trip there (pinned ones keep their time).
-  const plan = planChain(rows, travel, undefined, { tight: true });
-  const batch = adminDb().batch();
-  let moved = 0;
-  for (const [id, start] of plan.starts) {
-    const it = main.find((m) => m.id === id)!;
-    const shift = start - toMin(it.start);
-    // Never past midnight: the end would be cut at 23:59 and the stop lose its length (the day shows 🔴 instead).
-    if (!shift || toMin(it.end) + shift > 24 * 60 - 1) continue;
-    moved++;
-    for (const g of pairIds(it, items)) batch.update(itemRef(tripId, g.id), { start: toClock(toMin(g.start) + shift), end: toClock(toMin(g.end) + shift), updatedAt: Date.now() });
-  }
-  if (moved) await batch.commit();
-  return moved > 0;
+  const db = adminDb();
+  // Read and written in one transaction: if someone moves a stop meanwhile, Firestore re-runs this on the new times.
+  return db.runTransaction(async (tx) => {
+    const items = parseAll<ScheduleItem>((await tx.get(db.collection(paths.schedule(tripId)).where('day', '==', day))).docs, ScheduleItem);
+    const main = items.filter((i) => !isTrackB(i));
+    if (!main.some((i) => !i.locked && !isPrayerItem(i))) return false;
+    const { rows, travel } = dayChain(data, items);
+    // Tight: each stop starts when the one before ends + the trip there (pinned ones keep their time).
+    const plan = planChain(rows, travel, undefined, { tight: true });
+    let moved = 0;
+    for (const [id, start] of plan.starts) {
+      const it = main.find((m) => m.id === id)!;
+      const shift = start - toMin(it.start);
+      // Never past midnight: the end would be cut at 23:59 and the stop lose its length (the day shows 🔴 instead).
+      if (!shift || toMin(it.end) + shift > 24 * 60 - 1) continue;
+      moved++;
+      for (const g of pairIds(it, items)) tx.update(itemRef(tripId, g.id), { start: toClock(toMin(g.start) + shift), end: toClock(toMin(g.end) + shift), updatedAt: Date.now() });
+    }
+    return moved > 0;
+  });
 }
 
 /**

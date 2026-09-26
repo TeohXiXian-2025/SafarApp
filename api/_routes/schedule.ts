@@ -52,6 +52,7 @@ import { DEFAULT_DURATION, ideaPlaceFrom, searchNearby, searchNearbyFood, type N
 import { mealPlaces } from '../_lib/meals.js';
 import { cachedLeg } from '../_lib/directions.js';
 import { rememberPlaces } from '../_lib/openPlaces.js';
+import { inBackground, refreshLater } from '../_lib/background.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { extractJson } from '../_lib/gemini.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
@@ -156,16 +157,7 @@ function assertCity(data: TripData, day: string, at: GeoPoint, name: string) {
   if (!cities.includes(c)) throw new HttpError(400, `${name} is in ${dests[c].name}, but on that day you're in ${cities.map((i) => dests[i].name).join(' / ')} — pick a day in ${dests[c].name}.`);
 }
 
-/** Where a stop ended up after the day was re-timed (travel measured, prayer places found). */
-async function landedAt(tripId: string, id: string): Promise<string | undefined> {
-  const snap = await itemRef(tripId, id).get();
-  return snap.exists ? (snap.data()?.start as string | undefined) : undefined;
-}
 
-/** Refresh several days one after another (they share Routes API budgets). */
-async function refreshDays(tripId: string, days: Iterable<string>, data: TripData) {
-  for (const d of new Set(days)) await refreshDay(tripId, d, data);
-}
 
 export const scheduleRoutes: RouteTable = {
   /** Put a backlog idea (or split pair) on a day — at `start`, or after the day's last stop. */
@@ -195,10 +187,9 @@ export const scheduleRoutes: RouteTable = {
       placed.forEach((id) => batch.update(ideaDocRef(tripId, id), { status: 'scheduled', updatedAt: Date.now() }));
       logActivity(batch, tripId, member.uid, `${member.displayName} added ${split ? `the split at ${lead.place.name}` : idea.place.name} to ${body.day}`);
       await batch.commit();
-      await refreshDay(tripId, body.day, data);
-      await alertAdmin(tripId, body.day, member, data);
-      const landed = await landedAt(tripId, ideaItemId(lead.id));
-      return json({ id: ideaItemId(lead.id), start: landed ?? toClock(start), moved: !!landed && landed !== toClock(start) }, { status: 201 });
+      // The day is re-planned after the reply (prayer places, travel, re-timing) — the app shows it live.
+      refreshLater(tripId, [body.day], (d) => alertAdmin(tripId, d, member, data));
+      return json({ id: ideaItemId(lead.id), start: toClock(start), moved: false }, { status: 201 });
     },
     { perMinute: 30 },
   ),
@@ -226,7 +217,7 @@ export const scheduleRoutes: RouteTable = {
         batch.delete(itemRef(tripId, item.id));
         batch.set(itemRef(tripId, item.id), ScheduleItem.parse({ ...item, day, start: toClock(start), end: toClock(start + duration), ...(body.pinned !== undefined ? { pinned: body.pinned } : {}), updatedBy: member.uid, updatedAt: Date.now() }));
         await batch.commit();
-        await refreshDays(tripId, moved ? [day, item.day] : [day], data);
+        refreshLater(tripId, moved ? [day, item.day] : [day]);
         return json({ ok: true });
       }
       const group = pairIds(item, current);
@@ -253,10 +244,8 @@ export const scheduleRoutes: RouteTable = {
       group.forEach((g) => batch.delete(itemRef(tripId, g.id)));
       writeStops(batch, tripId, { data, idea: leadIdea, day, start, durationMin: split ? undefined : duration, orderIndex, actor: member.uid, pinned: body.pinned ?? (moved ? false : lead.pinned) });
       await batch.commit();
-      await refreshDays(tripId, moved ? [day, item.day] : [day], data);
-      await alertAdmin(tripId, day, member, data);
-      const landed = await landedAt(tripId, lead.id);
-      return json({ ok: true, start: landed ?? toClock(start), moved: !!landed && landed !== toClock(start) });
+      refreshLater(tripId, moved ? [day, item.day] : [day], (d) => (d === day ? alertAdmin(tripId, d, member, data) : Promise.resolve()));
+      return json({ ok: true, start: toClock(start), moved: false });
     },
     { perMinute: 60 },
   ),
@@ -296,8 +285,7 @@ export const scheduleRoutes: RouteTable = {
       });
       logActivity(batch, tripId, member.uid, `${member.displayName} reordered ${body.day}`);
       await batch.commit();
-      await refreshDay(tripId, body.day, data);
-      await alertAdmin(tripId, body.day, member, data);
+      refreshLater(tripId, [body.day], (d) => alertAdmin(tripId, d, member, data));
       return json({ ok: true });
     },
     { perMinute: 60 },
@@ -316,7 +304,7 @@ export const scheduleRoutes: RouteTable = {
         const ideaId = mealToBacklog(batch, tripId, data, item, member.uid);
         logActivity(batch, tripId, member.uid, `${member.displayName} took ${item.ref.title} off ${item.day}`);
         await batch.commit();
-        await refreshDay(tripId, item.day, data);
+        refreshLater(tripId, [item.day]);
         return json({ ok: true, ...(ideaId ? { ideaId } : {}) });
       }
       const group = pairIds(item, await dayItems(tripId, item.day));
@@ -329,7 +317,7 @@ export const scheduleRoutes: RouteTable = {
       const lead = ideaOf(data, group.find((g) => !isTrackB(g)) ?? item);
       if (lead) logActivity(batch, tripId, member.uid, `${member.displayName} took ${lead.place.name} off ${item.day}`);
       await batch.commit();
-      await refreshDay(tripId, item.day, data);
+      refreshLater(tripId, [item.day]);
       return json({ ok: true });
     },
     { perMinute: 60 },
@@ -441,9 +429,14 @@ export const scheduleRoutes: RouteTable = {
       const meals = job.plan.days.reduce((n, d) => n + d.meals.filter((m) => m.place).length, 0);
       logActivity(batch, tripId, member.uid, `${member.displayName} applied AI Arrange (${scheduled.size} stops${meals ? ` + ${meals} meals` : ''} over ${job.plan.days.length} days)`);
       await batch.commit();
-      await refreshDays(tripId, [...job.plan.days.map((d) => d.day), ...before.map((i) => i.day)], data);
-      // With real travel times in, re-check each day; anything 🔴 is re-timed right away.
-      const fixed = await autoFix(tripId, job.plan.days.map((d) => d.day), member.uid);
+      // After the reply: each day re-planned with real travel times; anything 🔴 is then re-timed.
+      const planDays = job.plan.days.map((d) => d.day);
+      inBackground(`${tripId}:apply`, async () => {
+        const fresh = await loadTripData(tripId);
+        for (const d of new Set([...planDays, ...before.map((i) => i.day)])) if (d >= fresh.trip.startDate && d <= fresh.trip.endDate) await refreshDay(tripId, d, fresh);
+        await autoFix(tripId, planDays, member.uid);
+      });
+      const fixed: string[] = [];
       await notify(
         data.trip.memberIds,
         { kind: 'timeline', title: 'The timeline was re-planned', body: `${member.displayName} applied AI Arrange: ${scheduled.size} stops over ${job.plan.days.length} days.`, url: `/t/${tripId}/timeline`, tag: `timeline-${tripId}` },
@@ -477,7 +470,7 @@ export const scheduleRoutes: RouteTable = {
       batch.update(snap.ref, { status: 'undone' });
       logActivity(batch, tripId, member.uid, `${member.displayName} undid AI Arrange`);
       await batch.commit();
-      await refreshDays(tripId, [...current.map((i) => i.day), ...restore.map((i) => i.day)], data);
+      refreshLater(tripId, [...current.map((i) => i.day), ...restore.map((i) => i.day)]);
       return json({ ok: true });
     },
     { admin: true, perMinute: 6 },
@@ -501,7 +494,7 @@ export const scheduleRoutes: RouteTable = {
       writeFixPlan(batch, tripId, data, items, { stops, removed }, member.uid);
       logActivity(batch, tripId, member.uid, `${member.displayName} fixed ${body.day}${removed.length ? ` (${removed.length} stop${removed.length > 1 ? 's' : ''} back to the backlog)` : ''}`);
       await batch.commit();
-      await refreshDay(tripId, body.day, data);
+      refreshLater(tripId, [body.day]);
       return json({ stops, removed });
     },
     { perMinute: 20 },
@@ -707,7 +700,7 @@ export const scheduleRoutes: RouteTable = {
           ? { 'prayer.chosen': { ...body.place, by: member.uid, at: Date.now() }, updatedAt: Date.now() }
           : { 'prayer.chosen': FieldValue.delete(), updatedAt: Date.now() },
       );
-      await refreshDay(tripId, item.day, data);
+      refreshLater(tripId, [item.day]);
       return json({ ok: true });
     },
     { perMinute: 20 },
@@ -717,7 +710,7 @@ export const scheduleRoutes: RouteTable = {
   'POST schedule/refresh': withTrip(
     async (req, { tripId }) => {
       const { day } = await readJson(req, z.object({ day: LocalDate }));
-      await refreshDay(tripId, day);
+      refreshLater(tripId, [day]);
       return json({ ok: true });
     },
     { perMinute: 40 },
@@ -815,7 +808,7 @@ export const scheduleRoutes: RouteTable = {
       batch.set(itemRef(tripId, mealItemId(body.day, body.meal)), mealItem({ day: body.day, meal: body.meal, start: toClock(start), end: toClock(start + length), place: body.place, phone: body.phone, members: data.trip.memberIds, actor: member.uid }));
       logActivity(batch, tripId, member.uid, `${member.displayName} added ${body.meal} at ${body.place.name} on ${body.day}`);
       await batch.commit();
-      await refreshDay(tripId, body.day, data);
+      refreshLater(tripId, [body.day]);
       return json({ ok: true }, { status: 201 });
     },
     { perMinute: 20 },
@@ -917,7 +910,7 @@ export const scheduleRoutes: RouteTable = {
       });
       // Remembered for every trip as a real prayer place (found even when Google and OpenStreetMap are out).
       await rememberPlaces(['mosque'], [{ placeId: `mem_${idea.placeKey}`, name: `${idea.place.name} — prayer room`, location: idea.place.location, types: ['mosque'], source: 'traveller' }], 'traveller');
-      if (body.day) await refreshDay(tripId, body.day, data);
+      if (body.day) refreshLater(tripId, [body.day]);
       return json({ ok: true });
     },
     { perMinute: 10 },
@@ -1007,8 +1000,7 @@ async function swapInto(tripId: string, member: { uid: string; role: string; dis
   const was = ideaOf(data, item)?.place.name ?? 'a stop';
   logActivity(batch, tripId, member.uid, `${member.displayName} swapped ${was} for ${idea.place.name} on ${item.day} (weather)`);
   await batch.commit();
-  await refreshDay(tripId, item.day, data);
-  await alertAdmin(tripId, item.day, member, data);
+  refreshLater(tripId, [item.day], (d) => alertAdmin(tripId, d, member, data));
 }
 
 /**

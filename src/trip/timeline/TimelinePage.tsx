@@ -305,6 +305,28 @@ function tripEnd(b: Booking | undefined, event: 'span' | 'depart' | 'arrive' | '
 
 type Dest = { name: string; timezone: string; location: GeoPoint };
 
+/**
+ * The line under a departure: "Be at Rome Termini by 9:25 AM (Rome time)" —
+ * "the night before" when that's before midnight — or, when you arrive at the
+ * same airport / station shortly before (a connection), the layover instead.
+ */
+function departNote(b: Booking, item: ScheduleItem, bookings: Map<string, Booking>, destinations: Dest[]): string {
+  const from = b.from;
+  const dep = Date.parse(b.startAt);
+  if (from) {
+    const inbound = [...bookings.values()].find(
+      (x) => x.id !== b.id && x.kind !== 'hotel' && metersBetween(x.to.location, from.location) < 3000 && dep - Date.parse(x.endAt) > 0 && dep - Date.parse(x.endAt) <= 24 * 3_600_000,
+    );
+    if (inbound) {
+      const min = Math.round((dep - Date.parse(inbound.endAt)) / 60_000);
+      return `Connection — you're already at ${from.name} (${Math.floor(min / 60)} h ${min % 60} min layover)`;
+    }
+  }
+  const at = toMin(item.start) - leaveBeforeMin(b.kind);
+  const when = at < 0 ? `${fmtClock(at + 24 * 60)} the night before` : fmtClock(at);
+  return `Be at ${from?.name ?? 'the station'} by ${when} (${clockName(from?.timezone ?? b.to.timezone, from?.location, destinations)} time)`;
+}
+
 function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<string, Booking>, destinations: Dest[]): Row | null {
   const r = item.ref;
   if (r.kind === 'idea') {
@@ -322,10 +344,9 @@ function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<strin
     const [inAt, outAt] = where[r.event] ?? [b.to.location, b.to.location];
     const zone = r.event === 'depart' ? (b.from?.timezone ?? b.to.timezone) : b.to.timezone;
     const zoneAt = r.event === 'depart' ? (b.from?.location ?? b.to.location) : b.to.location;
-    // When to be at the airport / station, on that place's clock.
-    const leave = (r.event === 'depart' || r.event === 'span') && b.kind !== 'hotel'
-      ? `Be at ${b.from?.name ?? 'the station'} by ${fmtClock(toMin(item.start) - leaveBeforeMin(b.kind))} (${clockName(b.from?.timezone ?? zone, b.from?.location, destinations)} time)`
-      : '';
+    // When to be at the airport / station, on that place's clock — or, for a connection
+    // (you've just landed there), how long the layover is.
+    const leave = (r.event === 'depart' || r.event === 'span') && b.kind !== 'hotel' ? departNote(b, item, bookings, destinations) : '';
     return {
       item,
       title: [EVENT_LABEL[r.event], bookingTitle(b)].filter(Boolean).join(' · '),
@@ -1804,7 +1825,9 @@ function TravelRow({ minutes, real, to, buffer = 0, wait = 0, waitFor }: { minut
   const text =
     minutes === 0
       ? 'Same place'
-      : real
+      : !real && minutes > 180
+        ? `Another city — about ${Math.round(minutes / 60)} h away. Add the train, bus or flight`
+        : real
         ? `${real.source === 'ors' && real.mode === 'transit' ? '~' : ''}${real.minutes} min ${MODE[real.mode].label}${real.meters ? ` · ${real.meters < 1000 ? `${real.meters} m` : `${(real.meters / 1000).toFixed(1)} km`}` : ''}${real.source === 'ors' ? ' · via openrouteservice' : ''}`
         : `~${minutes} min ${MODE[mode].label}${to === 'prayer' ? ' to pray' : ''}`;
   return (
