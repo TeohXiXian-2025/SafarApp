@@ -247,7 +247,8 @@ export const foodRoutes: RouteTable = {
           const loc = osmPoint(e);
           return loc && metersBetween(loc, p.location) < 120 && similarName(e.tags!.name!, p.name);
         });
-        const listed = halalIds.has(p.placeId) || p.types.includes('halal_restaurant') ? 'google' : osmHit ? 'osm' : nameSaysHalal(p.name) ? 'name' : null;
+        const fromOpenData = !!p.source && p.source !== 'google';
+        const listed = (halalIds.has(p.placeId) || p.types.includes('halal_restaurant')) && !fromOpenData ? 'google' : osmHit || (fromOpenData && p.types.includes('halal_restaurant')) ? 'osm' : nameSaysHalal(p.name) ? 'name' : null;
         const summary = summaries[i].exists ? HalalSummary.safeParse(summaries[i].data()) : null;
         const w = waits[i].docs[0]?.data();
         return toItem(p, at, {

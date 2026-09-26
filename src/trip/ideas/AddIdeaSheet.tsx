@@ -33,7 +33,7 @@ const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
 const isVideo = (f: File) => f.type.startsWith('video/') || /\.(mov|mp4|m4v|webm)$/i.test(f.name);
 
 /** Adds ideas and kicks off the Halal Radar/review check (not awaited). */
-async function addIdeas(tripId: string, items: { placeId: string; source: IdeaSource }[]) {
+async function addIdeas(tripId: string, items: { placeId?: string; place?: { name: string; location: { lat: number; lng: number }; osmId?: string; address?: string }; source: IdeaSource }[]) {
   const ids: string[] = [];
   for (const it of items) {
     const res = await api.post<{ id: string; duplicate: boolean }>('ideas/add', it, { tripId });
@@ -169,10 +169,14 @@ export function AddIdeaSheet({ open, onClose, initialText }: { open: boolean; on
   };
 
   const addSearched = async () => {
-    if (!searchPick?.placeId) return;
+    if (!searchPick) return;
     setWorking('Adding to the Idea Board…');
     try {
-      const r = await addIdeas(trip.id, [{ placeId: searchPick.placeId, source: { type: 'manual' } }]);
+      // A Google place by its id; one found by the OpenStreetMap backup search by what it is and where.
+      const item = searchPick.placeId
+        ? { placeId: searchPick.placeId, source: { type: 'manual' as const } }
+        : { place: { name: searchPick.name, location: searchPick.location, ...(searchPick.osmId ? { osmId: searchPick.osmId } : {}), ...(searchPick.address ? { address: searchPick.address } : {}) }, source: { type: 'manual' as const } };
+      const r = await addIdeas(trip.id, [item]);
       reset();
       onClose();
       if (r.duplicates) alert('That place is already on the board.');
@@ -371,7 +375,7 @@ export function AddIdeaSheet({ open, onClose, initialText }: { open: boolean; on
           {tab === 'search' && (
             <div className="space-y-3">
               <PlacePicker value={searchPick} onChange={setSearchPick} placeholder="Restaurant, attraction, shop…" />
-              <Button className="w-full" disabled={!searchPick?.placeId} onClick={addSearched}>
+              <Button className="w-full" disabled={!searchPick} onClick={addSearched}>
                 Add to the board
               </Button>
             </div>

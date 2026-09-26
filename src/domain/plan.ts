@@ -112,6 +112,12 @@ export const TransitLeg = z.object({
   mode: z.enum(['walk', 'transit', 'drive']),
   minutes: z.number().int().nonnegative(),
   meters: z.number().int().nonnegative(),
+  /**
+   * Who measured it: Google Routes (absent = Google, older legs), or
+   * openrouteservice when Google was out (walking exact; a longer trip is its
+   * road time turned into a public-transport estimate).
+   */
+  source: z.enum(['google', 'ors']).optional(),
   /** The item this leg starts from — recomputed only when that changes (or after 30 days). */
   fromId: Id.optional(),
   at: Millis.optional(),
@@ -130,6 +136,8 @@ export const PrayerPairing = z.object({
     osmId: z.string().max(64).optional(),
     type: z.enum(['mosque', 'musalla', 'prayer_room', 'other']),
     walkMin: z.number().int().nonnegative(),
+    /** Found by a backup source when Google was out ("OpenStreetMap") — credited on the card. */
+    via: z.string().max(40).optional(),
   })
     .optional(),
   /**

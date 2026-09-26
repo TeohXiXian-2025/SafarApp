@@ -17,23 +17,21 @@ import {
 } from '../../src/domain/index.js';
 import { adminDb } from './firebaseAdmin.js';
 import { HttpError } from './http.js';
-import { DEFAULT_DURATION, photoUrl, placeDetails } from './places.js';
+import { DEFAULT_DURATION, ideaPlaceFrom } from './places.js';
 import { dayItems, ideaDocRef, itemRef, loadTripData, pairIds, refreshDay, splitRef, writeStops, type TripData } from './schedule.js';
 
 export const freeItemId = (splitId: string) => `free_${splitId}`;
 
 /** A new idea for an alternative place (its own Halal Radar check runs from the client). */
 async function altIdea(tripId: string, source: Idea, option: MiddleOption, splitId: string, actor: string, status: Idea['status']): Promise<Idea> {
-  const { place } = await placeDetails(option.place!.placeId);
-  if (place.photoName) {
-    const url = await photoUrl(place.photoName);
-    if (url) Object.assign(place, { photoUrl: url, photoUrlAt: Date.now() });
-  }
+  // Google's details for a Google place; a backup-source place (OpenStreetMap) is built from what it gave.
+  const o = option.place!;
+  const place = await ideaPlaceFrom({ placeId: o.placeId, name: o.name, location: o.location });
   const ref = adminDb().collection(paths.ideas(tripId)).doc();
   const now = Date.now();
   return Idea.parse({
     id: ref.id,
-    placeKey: paths.placeKey({ placeId: place.placeId }),
+    placeKey: paths.placeKey({ placeId: place.placeId, osmId: place.osmId, location: place.location }),
     place,
     source: { type: 'split' },
     notes: `Alternative to ${source.place.name}`,

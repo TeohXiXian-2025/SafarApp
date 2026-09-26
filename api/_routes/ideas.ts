@@ -22,6 +22,7 @@ import {
   windowText,
   Member as MemberSchema,
   type Member,
+  GeoPoint,
 } from '../../src/domain/index.js';
 import { Type } from '@google/genai';
 import { extractJson } from '../_lib/gemini.js';
@@ -30,7 +31,7 @@ import { adminBucket, adminDb } from '../_lib/firebaseAdmin.js';
 import { cachedAnalysis, runAnalysis } from '../_lib/analysis.js';
 import { similarName } from '../_lib/halal.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
-import { DEFAULT_DURATION, photoUrl, placeDetails } from '../_lib/places.js';
+import { anyPhoto, DEFAULT_DURATION, ideaPlaceFrom, placeDetails } from '../_lib/places.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { downloadMedia, extractCandidates, fetchPost, imagePart, parseShareInput } from '../_lib/social.js';
 import { fetchRichPost } from '../_lib/socialProviders.js';
@@ -286,19 +287,25 @@ export const ideaRoutes: RouteTable = {
     async (req, { tripId, member }) => {
       const body = await readJson(
         req,
-        z.object({ placeId: z.string().min(3).max(300), source: IdeaSource.default({ type: 'manual' }), notes: z.string().max(1000).optional() }),
+        z
+          .object({
+            placeId: z.string().min(3).max(300).optional(),
+            /** A place from a backup source (OpenStreetMap search) — no Google id. */
+            place: z.object({ name: z.string().min(1).max(200), location: GeoPoint, osmId: z.string().max(64).optional(), address: z.string().max(300).optional() }).optional(),
+            source: IdeaSource.default({ type: 'manual' }),
+            notes: z.string().max(1000).optional(),
+          })
+          .refine((b) => b.placeId || b.place, 'placeId or place is required'),
       );
-      const placeKey = paths.placeKey({ placeId: body.placeId });
+      const placeKey = body.placeId ? paths.placeKey({ placeId: body.placeId }) : paths.placeKey({ osmId: body.place!.osmId, location: body.place!.location });
       const trip = await loadTrip(tripId);
       await useDailyQuota(member.uid, 'addIdea');
       const existing = await adminDb().collection(paths.ideas(tripId)).where('placeKey', '==', placeKey).limit(1).get();
       if (!existing.empty) return json({ id: existing.docs[0].id, duplicate: true });
 
-      const { place } = await placeDetails(body.placeId);
-      if (place.photoName) {
-        const url = await photoUrl(place.photoName);
-        if (url) Object.assign(place, { photoUrl: url, photoUrlAt: Date.now() });
-      }
+      // Google's details when it's a Google place (and Google answers), else the backup source's; photo from the open chain if needed.
+      const place = await ideaPlaceFrom(body.placeId ? { placeId: body.placeId, name: body.place?.name ?? 'Place', location: body.place?.location ?? { lat: 0, lng: 0 } } : body.place!);
+      if (!place.location.lat && !place.location.lng) throw new HttpError(502, 'Could not load that place right now — try again in a moment.');
       const ref = adminDb().collection(paths.ideas(tripId)).doc();
       const now = Date.now();
       const idea = Idea.parse({
@@ -348,10 +355,8 @@ export const ideaRoutes: RouteTable = {
         const fresh = await placeDetails(idea.place.placeId!).catch(() => null);
         if (!fresh) continue;
         const place = { ...fresh.place, category: idea.place.category }; // keep the category people have been seeing
-        if (place.photoName) {
-          const url = await photoUrl(place.photoName);
-          if (url) Object.assign(place, { photoUrl: url, photoUrlAt: Date.now() });
-        }
+        const photo = await anyPhoto({ photoName: place.photoName, name: place.name, location: place.location });
+        if (photo) Object.assign(place, { photoUrl: photo.url, photoUrlAt: Date.now(), ...(photo.attribution !== 'Google' ? { photoAttribution: photo.attribution } : {}) });
         await ideaRef(tripId, idea.id).update({ place, updatedAt: Date.now() });
         refreshed++;
       }

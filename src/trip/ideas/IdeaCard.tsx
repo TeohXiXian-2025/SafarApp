@@ -40,7 +40,8 @@ import { api, ApiError } from '../../lib/api';
 import { useDoc } from '../../lib/firestore';
 import { Avatar, Badge, cx, ErrorBanner } from '../../ui';
 import { useTrip } from '../TripLayout';
-import { EVIDENCE_SOURCE, halalLabel, placePhotoUrl, type Tone } from './halalLabel';
+import { EVIDENCE_SOURCE, halalLabel, type Tone } from './halalLabel';
+import { PlaceThumb } from '../../components/live/PlaceThumb';
 import { ReportHalalSheet } from './ReportHalalSheet';
 import { Comments } from './Comments';
 import { DecisionBox, StepOutSheet } from './DecisionBox';
@@ -159,27 +160,8 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
 
   return (
     <article className="bg-white rounded-2xl border border-[#E7DFD5] shadow-xs overflow-hidden flex flex-col">
-      {idea.place.photoName && (
-        <div className="relative h-40 bg-[#F3EFE9]">
-          <img
-            // The stored direct URL is free to load (and cached); the media endpoint bills per view — fallback only.
-            src={idea.place.photoUrl ?? placePhotoUrl(idea.place.photoName)}
-            onError={(e) => {
-              const fallback = placePhotoUrl(idea.place.photoName!);
-              if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback;
-            }}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            className="w-full h-full object-cover"
-          />
-          {idea.place.photoAttribution && (
-            <span className="absolute bottom-1 right-1.5 text-[10px] text-white/90 bg-black/40 rounded px-1.5 py-0.5 max-w-[80%] truncate">
-              Photo: {idea.place.photoAttribution}
-            </span>
-          )}
-        </div>
-      )}
+      {/* Its photo (Google / Wikipedia / Mapillary, credited) or a map of the spot — never Google's per-view photo endpoint. */}
+      <PlaceThumb photoUrl={idea.place.photoUrl} attribution={idea.place.photoAttribution} at={idea.place.location} className="h-40" />
 
       <div className="p-4 space-y-3 flex-1 flex flex-col">
         <div className="flex items-start gap-2">

@@ -19,6 +19,9 @@ const SERVER_KEYS = [
   'VAPID_PRIVATE_KEY',
   'CRON_SECRET',
   'HALAL_CHECKS_PER_MONTH',
+  'GEOAPIFY_API_KEY',
+  'OPENROUTESERVICE_API_KEY',
+  'MAPILLARY_TOKEN',
 ] as const;
 
 export type ServerKey = (typeof SERVER_KEYS)[number];

@@ -22,6 +22,10 @@ interface Usage {
   flightStatus: Cap;
   halalAutoChecks: Cap;
   halalChecksMonth?: Cap;
+  placePhotos?: Cap;
+  googleNearby?: Cap;
+  googleText?: Cap;
+  googleRoutes?: Cap;
   ai: { last7Days: { day: string; gemini: number; groq: number; failed: number }[]; models: { model: string; resting: boolean }[]; note: string };
 }
 
@@ -31,6 +35,10 @@ const ROWS: [keyof Omit<Usage, 'month' | 'ai'>, string][] = [
   ['xiaohongshu', 'Xiaohongshu links'],
   ['flightStatus', 'Flight status checks'],
   ['halalChecksMonth', 'Halal full checks (this month)'],
+  ['placePhotos', 'Place photos (this month)'],
+  ['googleNearby', 'Google nearby searches (today)'],
+  ['googleText', 'Google text searches (today)'],
+  ['googleRoutes', 'Google travel times (today)'],
   ['halalAutoChecks', 'Auto halal checks (today)'],
 ];
 
@@ -62,6 +70,7 @@ export function UsageCard({ fallback = null }: { fallback?: ReactNode }) {
       <ul className="space-y-2.5">
         {ROWS.map(([k, label]) => {
           const c = u[k];
+          if (!c) return null;
           const tone = c.pct >= 90 ? 'bg-[#B3261E]' : c.pct >= 70 ? 'bg-[#E0A030]' : 'bg-[#00685F]';
           return (
             <li key={k} title={c.note}>

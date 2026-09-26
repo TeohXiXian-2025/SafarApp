@@ -13,6 +13,8 @@ import { optionalEnv } from './env.js';
 import { adminDb } from './firebaseAdmin.js';
 import { analyzePlace } from './halal.js';
 import { placeDetails } from './places.js';
+import { isGooglePlaceId } from './openPlaces.js';
+import { HttpError } from './http.js';
 
 export const ANALYSIS_TTL = 30 * 86_400_000;
 /** Bump when the analysis format changes so cached results are redone. 5: reads the place's own website too. */
@@ -69,6 +71,7 @@ export async function checksLeftToday(): Promise<{ today: number; month: number;
 
 /** Fetches details + reviews, runs the Halal Radar, and caches it. Counts against the monthly budget. */
 export async function runAnalysis(placeId: string, placeKey: string): Promise<Analysis> {
+  if (!isGooglePlaceId(placeId)) throw new HttpError(409, 'A full halal check reads Google reviews — this place is from OpenStreetMap, so its label comes from OpenStreetMap tags, its name and traveller reports.');
   await monthRef()
     .set({ count: FieldValue.increment(1), updatedAt: Date.now() }, { merge: true })
     .catch(() => {});

@@ -48,9 +48,10 @@ import {
 } from '../../src/domain/index.js';
 import { FieldValue, type WriteBatch } from 'firebase-admin/firestore';
 import { withTrip } from '../_lib/auth.js';
-import { DEFAULT_DURATION, placeDetails, searchNearby, searchNearbyFood, type NearbyFood } from '../_lib/places.js';
+import { DEFAULT_DURATION, ideaPlaceFrom, searchNearby, searchNearbyFood, type NearbyFood } from '../_lib/places.js';
 import { mealPlaces } from '../_lib/meals.js';
 import { cachedLeg } from '../_lib/directions.js';
+import { rememberPlaces } from '../_lib/openPlaces.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { extractJson } from '../_lib/gemini.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
@@ -564,7 +565,7 @@ export const scheduleRoutes: RouteTable = {
       }
       return json({
         ideas,
-        nearby: nearby.map((p) => ({ placeId: p.placeId, name: p.name, location: p.location, typeLabel: p.typeLabel, rating: p.rating, walkMin: estimateTravelMin(at, p.location) })),
+        nearby: nearby.map((p) => ({ placeId: p.placeId, name: p.name, location: p.location, typeLabel: p.typeLabel, rating: p.rating, walkMin: estimateTravelMin(at, p.location), ...(p.source && p.source !== 'google' ? { via: p.source === 'traveller' ? 'traveller reports' : 'OpenStreetMap' } : {}) })),
         meetDefault: { name: prayer.name, at: toClock(end) },
       });
     },
@@ -655,8 +656,8 @@ export const scheduleRoutes: RouteTable = {
         ...(after && ends.get(after.id) ? [{ label: `near ${stopName(data, after)}`, at: ends.get(after.id)!.in }] : []),
         { label: 'near the current place', at: ctx.at },
       ];
-      const found: { name: string; location: GeoPoint; placeId?: string; near: string; walkMin: number }[] = [];
-      const add = (p: { name: string; location: GeoPoint; placeId?: string }) => {
+      const found: { name: string; location: GeoPoint; placeId?: string; near: string; walkMin: number; via?: string }[] = [];
+      const add = (p: { name: string; location: GeoPoint; placeId?: string; via?: string }) => {
         if (found.some((f) => f.name === p.name && metersBetween(f.location, p.location) < 50)) return;
         const best = anchors.map((a) => ({ a, m: metersBetween(a.at, p.location) })).sort((x, y) => x.m - y.m)[0];
         found.push({ ...p, near: best.a.label, walkMin: estimateTravelMin(best.a.at, p.location) });
@@ -673,9 +674,9 @@ export const scheduleRoutes: RouteTable = {
         const cell = `${a.at.lat.toFixed(3)}_${a.at.lng.toFixed(3)}`;
         const cacheRef = adminDb().doc(`mosquesNearby/${cell}`);
         const cached = (await cacheRef.get()).data();
-        let near = cached && Date.now() - Number(cached.at) < 7 * 86_400_000 ? (cached.places as { name: string; location: GeoPoint; placeId: string }[]) : null;
+        let near = cached && Date.now() - Number(cached.at) < 7 * 86_400_000 ? (cached.places as { name: string; location: GeoPoint; placeId: string; via?: string }[]) : null;
         if (!near) {
-          near = ((await searchNearby(a.at, ['mosque'], 2500, 5).catch(() => null)) ?? []).map((p) => ({ name: p.name, location: p.location, placeId: p.placeId }));
+          near = ((await searchNearby(a.at, ['mosque'], 2500, 5).catch(() => null)) ?? []).map((p) => ({ name: p.name, location: p.location, placeId: p.placeId, ...(p.source && p.source !== 'google' ? { via: p.source === 'traveller' ? 'traveller reports' : 'OpenStreetMap' } : {}) }));
           await cacheRef.set({ at: Date.now(), places: near }).catch(() => {});
         }
         near.forEach(add);
@@ -689,6 +690,7 @@ export const scheduleRoutes: RouteTable = {
   'POST prayer/place': withTrip(
     async (req, { tripId, member }) => {
       const body = await readJson(req, z.object({ itemId: Id, place: z.object({ name: z.string().min(1).max(200), location: GeoPoint, placeId: z.string().max(256).optional() }).nullable() }));
+      // (A place from a backup source keeps its "osm_…" id; it's only stored, never sent to Google.)
       const ref = itemRef(tripId, body.itemId);
       const snap = await ref.get();
       const item = snap.exists ? ScheduleItem.parse(snap.data()) : null;
@@ -853,7 +855,7 @@ export const scheduleRoutes: RouteTable = {
       const cell = `${at.lat.toFixed(3)}_${at.lng.toFixed(3)}`;
       const cacheRef = adminDb().doc(`indoorNearby/${cell}`);
       const cached = (await cacheRef.get()).data();
-      let found = cached && Date.now() - Number(cached.at) < 7 * 86_400_000 ? (cached.places as { placeId: string; name: string; location: GeoPoint; types: string[] }[]) : null;
+      let found = cached && Date.now() - Number(cached.at) < 7 * 86_400_000 ? (cached.places as { placeId: string; name: string; location: GeoPoint; types: string[]; source?: string }[]) : null;
       if (!found) {
         found = (await searchNearby(at, INDOOR_TYPES, 3000, 8).catch(() => null)) ?? [];
         await cacheRef.set({ at: Date.now(), places: found }).catch(() => {});
@@ -862,7 +864,7 @@ export const scheduleRoutes: RouteTable = {
       const known = new Set([...data.ideas.values()].filter((i) => i.status === 'scheduled').map((i) => i.place.placeId));
       const places = found
         .filter((p) => !known.has(p.placeId) && (dests.length < 2 || cityOf(dests, p.location) === cityOf(dests, at)))
-        .map((p) => ({ placeId: p.placeId, name: p.name, location: p.location, typeLabel: INDOOR_LABEL[p.types.find((t) => t in INDOOR_LABEL) ?? ''] ?? 'Indoor', minutes: estimateTravelMin(at, p.location) }))
+        .map((p) => ({ placeId: p.placeId, name: p.name, location: p.location, typeLabel: INDOOR_LABEL[p.types.find((t) => t in INDOOR_LABEL) ?? ''] ?? 'Indoor', minutes: estimateTravelMin(at, p.location), ...(p.source && p.source !== 'google' ? { source: p.source } : {}) }))
         .sort((a, b) => a.minutes - b.minutes)
         .slice(0, 6);
       return json({ places });
@@ -873,14 +875,14 @@ export const scheduleRoutes: RouteTable = {
   /** Swap an outdoor stop for an indoor place found nearby: it joins the ideas (no vote — picked for the weather) and takes the stop's time. */
   'POST schedule/swap-place': withTrip(
     async (req, { tripId, member }) => {
-      const body = await readJson(req, z.object({ id: Id, placeId: z.string().min(3).max(300) }));
+      const body = await readJson(req, z.object({ id: Id, placeId: z.string().min(3).max(300), name: z.string().min(1).max(200), location: GeoPoint, typeLabel: z.string().max(80).optional() }));
       await useDailyQuota(member.uid, 'arrange');
       const [data, item] = await Promise.all([loadTripData(tripId), loadMovable(tripId, body.id)]);
-      const placeKey = paths.placeKey({ placeId: body.placeId });
+      const placeKey = paths.placeKey({ placeId: body.placeId, location: body.location });
       let idea = [...data.ideas.values()].find((i) => i.placeKey === placeKey);
       if (idea?.status === 'scheduled') throw new HttpError(409, `${idea.place.name} is already on the timeline`);
       if (!idea) {
-        const { place } = await placeDetails(body.placeId);
+        const place = await ideaPlaceFrom({ placeId: body.placeId, name: body.name, location: body.location, types: ['museum'], ...(body.typeLabel ? { typeLabel: body.typeLabel } : {}) });
         const ref = adminDb().collection(paths.ideas(tripId)).doc();
         const now = Date.now();
         idea = Idea.parse({ id: ref.id, placeKey, place, source: { type: 'ai' }, estDurationMin: DEFAULT_DURATION[place.category], status: 'backlog', votes: {}, choices: {}, decidedBy: member.uid, createdBy: member.uid, createdAt: now, updatedAt: now });
@@ -913,6 +915,8 @@ export const scheduleRoutes: RouteTable = {
         const by = { ...(cur.by ?? {}), [member.uid]: Date.now() };
         tx.set(ref, { name: idea.place.name, count: Object.keys(by).length, by, ...(body.note ? { note: body.note } : cur.note ? { note: cur.note } : {}), updatedAt: Date.now() });
       });
+      // Remembered for every trip as a real prayer place (found even when Google and OpenStreetMap are out).
+      await rememberPlaces(['mosque'], [{ placeId: `mem_${idea.placeKey}`, name: `${idea.place.name} — prayer room`, location: idea.place.location, types: ['mosque'], source: 'traveller' }], 'traveller');
       if (body.day) await refreshDay(tripId, body.day, data);
       return json({ ok: true });
     },

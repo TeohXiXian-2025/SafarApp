@@ -14,7 +14,7 @@ import { Badge, Button, ErrorBanner, Sheet, Spinner } from '../../ui';
 
 interface Options {
   ideas: { ideaId: string; name: string; typeLabel: string; walkMin: number; status: string; marked: number; liked: boolean; short: boolean; stayMin: number; split: boolean; meet: { kind: 'prayer' | 'next' | 'middle'; name: string; at: string } }[];
-  nearby: { placeId: string; name: string; location: GeoPoint; typeLabel?: string; rating?: number; walkMin: number }[];
+  nearby: { placeId: string; name: string; location: GeoPoint; typeLabel?: string; rating?: number; walkMin: number; via?: string }[];
 }
 
 type Meet = { kind: 'prayer' | 'next' | 'middle'; name: string; at: string };
@@ -101,7 +101,7 @@ export function PrayerPickSheet({ item, tripId, myPick, onClose }: { item: Sched
                   row(
                     `n${n.placeId}`,
                     n.name,
-                    `${n.typeLabel ?? 'Nearby'} · ${n.walkMin} min walk${n.rating ? ` · ★ ${n.rating}` : ''}`,
+                    `${n.typeLabel ?? 'Nearby'} · ${n.walkMin} min walk${n.rating ? ` · ★ ${n.rating}` : ''}${n.via ? ` · via ${n.via}` : ''}`,
                     () => void pick(`n${n.placeId}`, { kind: 'place', place: { name: n.name, location: n.location, placeId: n.placeId } }),
                     <Coffee className="w-3.5 h-3.5 text-[#1D4E89]" />,
                   ),

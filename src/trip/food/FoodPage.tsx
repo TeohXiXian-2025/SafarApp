@@ -14,12 +14,15 @@ import { useQuery } from '../../lib/firestore';
 import { Badge, Button, Card, Chip, cx, ErrorBanner, Select, Spinner } from '../../ui';
 import { formatDay } from '../bookings/format';
 import { useTrip } from '../TripLayout';
+import { PlaceThumb } from '../../components/live/PlaceThumb';
 
 interface FoodItem {
   placeId: string;
   placeKey: string;
   name: string;
   location: GeoPoint;
+  /** Where it came from when Google was out (credited on the card). */
+  source?: 'geoapify' | 'osm' | 'memory' | 'traveller';
   typeLabel?: string;
   rating?: number;
   ratingCount?: number;
@@ -287,14 +290,16 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
     }
   };
   const price = i.priceLevel ? '$'.repeat(i.priceLevel) : null;
-  const maps = `https://www.google.com/maps/dir/?api=1&destination=${i.location.lat},${i.location.lng}&destination_place_id=${i.placeId}&travelmode=walking`;
+  const google = !/^(osm|geo|mem)_/.test(i.placeId);
+  const maps = `https://www.google.com/maps/dir/?api=1&destination=${i.location.lat},${i.location.lng}${google ? `&destination_place_id=${i.placeId}` : ''}&travelmode=walking`;
 
   return (
     <Card className="p-4 space-y-2">
       <div className="flex items-start gap-3">
-        <FoodPhoto src={i.photo} />
+        <FoodPhoto src={i.photo} at={i.location} />
         <div className="flex-1 min-w-0">
           <p className="font-bold text-[#161C23] leading-snug">{i.name}</p>
+          {i.source && <p className="text-[10px] text-[#6D7A77]">via {i.source === 'traveller' ? 'traveller reports' : 'OpenStreetMap'}</p>}
           <p className="text-xs text-[#6D7A77] flex flex-wrap gap-x-2">
             {i.typeLabel && <span>{i.typeLabel}</span>}
             {i.rating !== undefined && (
@@ -436,15 +441,7 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
   );
 }
 
-/** The restaurant's photo (Google); a placeholder when there's none or it fails to load. */
-function FoodPhoto({ src }: { src?: string }) {
-  const [failed, setFailed] = useState(false);
-  if (!src || failed) {
-    return (
-      <span className="w-16 h-16 rounded-xl bg-[#F3EFE9] shrink-0 flex items-center justify-center text-[#9AA5A3]" aria-hidden>
-        <UtensilsCrossed className="w-5 h-5" />
-      </span>
-    );
-  }
-  return <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} className="w-16 h-16 rounded-xl object-cover shrink-0 bg-[#F3EFE9]" />;
+/** The restaurant's photo, or a map of where it is (when there's no photo or it fails to load). */
+function FoodPhoto({ src, at }: { src?: string; at: GeoPoint }) {
+  return <PlaceThumb photoUrl={src} at={at} className="w-16 h-16 rounded-xl shrink-0" small />;
 }

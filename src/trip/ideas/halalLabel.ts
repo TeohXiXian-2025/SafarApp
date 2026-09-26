@@ -122,5 +122,4 @@ function baseLabel(idea: Idea, community?: HalalSummary | null): HalalLabel | nu
   return { text: 'Halal not confirmed — ask the restaurant', tone: h.verdict === 'caution' ? 'warn' : 'muted', basis, evidence };
 }
 
-export const placePhotoUrl = (photoName: string, width = 640) =>
-  `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=${width}&key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}`;
+// (No browser-side Places photo URL: the media endpoint bills per view. Photos come from the stored photoUrl.)

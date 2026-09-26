@@ -97,7 +97,6 @@ import { api } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Badge, Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
 import { bookingTitle, clockName, formatDay, KIND, tzCity } from '../bookings/format';
-import { placePhotoUrl } from '../ideas/halalLabel';
 import { useTrip } from '../TripLayout';
 import { PRAYER_GROUP, PRAYER_PICK_COLORS, REST_GROUP, TRACK_COLOR, trackKeyOf } from '../trackColors';
 import { DayMap, type MapLink, type MapStop } from './DayMap';
@@ -108,6 +107,7 @@ import { useForecast } from './useForecast';
 import { PrayerPickSheet } from './PrayerPickSheet';
 import { PrayerPlaceSheet } from './PrayerPlaceSheet';
 import { JourneyPrayerList } from '../JourneyPrayerList';
+import { PlaceThumb } from '../../components/live/PlaceThumb';
 import { MealSheet } from './MealSheet';
 
 interface Row {
@@ -561,12 +561,12 @@ export function TimelinePage() {
   const [planB, setPlanB] = useState<{ day: string; text: string } | null>(null);
   const [askingPlanB, setAskingPlanB] = useState(false);
   // Indoor places found nearby (per stop) and a drier day in the same city (per stop).
-  const [indoor, setIndoor] = useState<Record<string, { placeId: string; name: string; typeLabel: string; minutes: number }[] | 'loading'>>({});
+  const [indoor, setIndoor] = useState<Record<string, { placeId: string; name: string; location: GeoPoint; typeLabel: string; minutes: number; source?: string }[] | 'loading'>>({});
   const [otherDay, setOtherDay] = useState<Record<string, { day: string; start: number } | 'none' | 'loading'>>({});
   const findIndoor = (id: string) => {
     setIndoor((m) => ({ ...m, [id]: 'loading' }));
     void api
-      .post<{ places: { placeId: string; name: string; typeLabel: string; minutes: number }[] }>('schedule/indoor-options', { id }, { tripId: trip.id })
+      .post<{ places: { placeId: string; name: string; location: GeoPoint; typeLabel: string; minutes: number; source?: string }[] }>('schedule/indoor-options', { id }, { tripId: trip.id })
       .then((r) => setIndoor((m) => ({ ...m, [id]: r.places })))
       .catch((e) => (setIndoor((m) => ({ ...m, [id]: [] })), setError((e as Error).message)));
   };
@@ -1148,8 +1148,8 @@ export function TimelinePage() {
                     {found === 'loading' && <span className="text-xs text-[#6D7A77] self-center">Looking for indoor places…</span>}
                     {Array.isArray(found) &&
                       found.map((p) => (
-                        <Button key={p.placeId} variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/swap-place', { id, placeId: p.placeId }, { tripId: trip.id }))}>
-                          🏛 {p.name} · {p.typeLabel} · {p.minutes} min
+                        <Button key={p.placeId} variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/swap-place', { id, placeId: p.placeId, name: p.name, location: p.location, typeLabel: p.typeLabel }, { tripId: trip.id }))}>
+                          🏛 {p.name} · {p.typeLabel} · {p.minutes} min{p.source ? ' · OpenStreetMap' : ''}
                         </Button>
                       ))}
                     {Array.isArray(found) && !found.length && <span className="text-xs text-[#6D7A77] self-center">No indoor places found nearby.</span>}
@@ -1765,7 +1765,7 @@ function TravelRow({ minutes, real, to, buffer = 0, wait = 0, waitFor }: { minut
     minutes === 0
       ? 'Same place'
       : real
-        ? `${real.minutes} min ${MODE[real.mode].label}${real.meters ? ` · ${real.meters < 1000 ? `${real.meters} m` : `${(real.meters / 1000).toFixed(1)} km`}` : ''}`
+        ? `${real.source === 'ors' && real.mode === 'transit' ? '~' : ''}${real.minutes} min ${MODE[real.mode].label}${real.meters ? ` · ${real.meters < 1000 ? `${real.meters} m` : `${(real.meters / 1000).toFixed(1)} km`}` : ''}${real.source === 'ors' ? ' · via openrouteservice' : ''}`
         : `~${minutes} min ${MODE[mode].label}${to === 'prayer' ? ' to pray' : ''}`;
   return (
     <p className="flex items-center gap-2 pl-8 py-1 text-xs text-[#6D7A77]">
@@ -1891,7 +1891,7 @@ function Backlog({
 
 function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Idea; pair?: string; hours: { text: string; closed: boolean } | null; onAdd: () => void; onPlace: () => void; placing: boolean }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `backlog:${idea.id}`, data: { title: idea.place.name } });
-  const photo = idea.place.photoUrl ?? (idea.place.photoName ? placePhotoUrl(idea.place.photoName, 160) : null);
+
   return (
     <li ref={setNodeRef} className={cx('flex items-center gap-1 rounded-2xl border border-[#E7DFD5] bg-white p-2', (isDragging || placing) && 'opacity-40')}>
       {/* Drag handle on larger screens; everywhere, "Place" picks a spot on the timeline and "Add" suggests one. */}
@@ -1905,7 +1905,7 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
         <GripVertical className="w-4 h-4" />
       </button>
       <button type="button" onClick={onAdd} className="flex items-center gap-2 flex-1 min-w-0 text-left">
-        {photo ? <img src={photo} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" loading="lazy" /> : <span className="w-10 h-10 rounded-xl bg-[#F3EFE9] shrink-0" />}
+        <PlaceThumb photoUrl={idea.place.photoUrl} at={idea.place.location} className="w-10 h-10 rounded-xl shrink-0" small />
         <span className="min-w-0">
           <span className="block text-sm font-semibold text-[#161C23] truncate">{idea.place.name}</span>
           <span className="block text-xs text-[#6D7A77] truncate">
@@ -2126,7 +2126,7 @@ function PrayerRow({
           {until !== undefined && <p className="text-[11px] text-[#8A6A1F]">Its time lasts until {fmtClock(until)} ({zoneName}) — pray any time before then if plans slip</p>}
           <p className="text-xs text-[#6B5A2E]">
             {f
-              ? `${f.name} · ${f.walkMin ? `${f.walkMin} min walk` : 'on site'}`
+              ? `${f.name} · ${f.walkMin ? `${f.walkMin} min walk` : 'on site'}${f.via ? ` (via ${f.via})` : ''}`
               : inside
                 ? 'No prayer room known here yet — ask staff (big venues often have one), or any clean, quiet spot'
                 : 'No mosque found nearby — any clean, quiet spot works'}

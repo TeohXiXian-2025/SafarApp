@@ -12,6 +12,7 @@ import { certifiedListing } from './certDirectory.js';
 import { optionalEnv } from './env.js';
 import { extractJson } from './gemini.js';
 import { distanceKm, searchNearby, type PlaceDetails } from './places.js';
+import { OVERPASS, OVERPASS_HEADERS } from './openPlaces.js';
 import { websiteSnippets } from './website.js';
 
 interface Signal {
@@ -74,15 +75,14 @@ nwr(around:${PRAYER_RADIUS_M},${lat},${lng})["amenity"="place_of_worship"]["reli
 nwr(around:${PRAYER_RADIUS_M},${lat},${lng})["amenity"="prayer_room"];
 nwr(around:${FOOD_RADIUS_M},${lat},${lng})["diet:halal"~"yes|only"]["name"]["amenity"!~"bar|pub|nightclub|biergarten"];
 );out center tags 60;`;
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    body: `data=${encodeURIComponent(q)}`,
-    headers: { 'content-type': 'application/x-www-form-urlencoded', 'User-Agent': 'Safar/1.0 (group travel planner)' },
-    signal: AbortSignal.timeout(9000),
-  }).catch(() => null);
-  if (!res?.ok) return null;
-  const body = (await res.json().catch(() => null)) as { elements?: OsmElement[] } | null;
-  return body?.elements ?? null;
+  // The main server, then a mirror when it's busy.
+  for (const endpoint of OVERPASS) {
+    const res = await fetch(endpoint, { method: 'POST', body: `data=${encodeURIComponent(q)}`, headers: OVERPASS_HEADERS, signal: AbortSignal.timeout(9000) }).catch(() => null);
+    if (!res?.ok) continue;
+    const body = (await res.json().catch(() => null)) as { elements?: OsmElement[] } | null;
+    if (body?.elements) return body.elements;
+  }
+  return null;
 }
 
 export const osmPoint = (e: OsmElement): GeoPoint | null => {

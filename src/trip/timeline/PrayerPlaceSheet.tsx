@@ -14,6 +14,7 @@ interface Place {
   placeId?: string;
   near: string;
   walkMin: number;
+  via?: string;
 }
 
 export function PrayerPlaceSheet({ item, tripId, onClose }: { item: ScheduleItem; tripId: string; onClose: () => void }) {
@@ -65,6 +66,7 @@ export function PrayerPlaceSheet({ item, tripId, onClose }: { item: ScheduleItem
                   <span className="block font-semibold text-sm text-[#161C23]">{busy === `p${k}` ? '…' : `🕌 ${pl.name}`}</span>
                   <span className="block text-xs text-[#6D7A77]">
                     {pl.walkMin} min {pl.walkMin <= 18 ? 'walk' : 'away'} · {pl.near}
+                    {pl.via ? ` · via ${pl.via}` : ''}
                     {p.facility?.name === pl.name ? ' · current' : ''}
                   </span>
                 </button>

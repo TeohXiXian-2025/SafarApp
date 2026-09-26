@@ -46,7 +46,7 @@ export async function mealPlaces(at: GeoPoint, max = 5): Promise<MealPlace[]> {
   return places
     .map((p, i) => {
       const s = summaries[i].exists ? HalalSummary.safeParse(summaries[i].data()) : null;
-      const listed = p.types.includes('halal_restaurant') ? 'google' : nameSaysHalal(p.name) ? 'name' : null;
+      const listed = p.types.includes('halal_restaurant') ? (p.source && p.source !== 'google' ? 'osm' : 'google') : nameSaysHalal(p.name) ? 'name' : null;
       const verdict = foodVerdict({ community: s?.success ? s.data : null, analysis: analyses.get(keys[i])?.halal ?? null, listed });
       return {
         placeId: p.placeId,

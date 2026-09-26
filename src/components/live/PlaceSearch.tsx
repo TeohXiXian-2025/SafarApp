@@ -1,5 +1,7 @@
 // Worldwide destination search using Google Places Autocomplete (New) via
 // the Maps JS API. Returns a DestinationInput (name, placeId, location, country).
+// When Google's search fails (quota, error, or the Maps script doesn't load),
+// it carries on with Photon — free OpenStreetMap search — credited in the list.
 import { APIProvider, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { MapPin, Search } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -7,6 +9,49 @@ import type { DestinationInput } from '../../domain';
 import { Input } from '../../ui';
 
 const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '';
+
+interface PhotonHit {
+  key: string;
+  place: DestinationInput;
+}
+
+/** Photon (OpenStreetMap) search — free, no key; cities / countries only for 'regions'. */
+async function photonSearch(q: string, scope: 'regions' | 'any', near?: { lat: number; lng: number }): Promise<PhotonHit[]> {
+  const url = new URL('https://photon.komoot.io/api/');
+  url.searchParams.set('q', q.trim());
+  url.searchParams.set('limit', '6');
+  url.searchParams.set('lang', 'en');
+  if (near) {
+    url.searchParams.set('lat', String(near.lat));
+    url.searchParams.set('lon', String(near.lng));
+  }
+  if (scope === 'regions') for (const l of ['city', 'state', 'country', 'county', 'district']) url.searchParams.append('layer', l);
+  const res = await fetch(url, { signal: AbortSignal.timeout(6000) }).catch(() => null);
+  if (!res?.ok) return [];
+  const body = (await res.json().catch(() => null)) as {
+    features?: { geometry?: { coordinates?: [number, number] }; properties?: { name?: string; street?: string; city?: string; state?: string; country?: string; countrycode?: string; osm_type?: string; osm_id?: number } }[];
+  } | null;
+  const TYPE: Record<string, string> = { N: 'node', W: 'way', R: 'relation' };
+  return (body?.features ?? []).flatMap((f) => {
+    const p = f.properties;
+    const c = f.geometry?.coordinates;
+    if (!p?.name || !c) return [];
+    const address = [p.street, p.city !== p.name ? p.city : undefined, p.state, p.country].filter(Boolean).join(', ');
+    const osmId = p.osm_type && p.osm_id ? `${TYPE[p.osm_type] ?? p.osm_type}/${p.osm_id}` : undefined;
+    return [
+      {
+        key: osmId ?? `${c[1]},${c[0]}`,
+        place: {
+          name: p.name.slice(0, 200),
+          ...(address ? { address: address.slice(0, 300) } : {}),
+          location: { lat: c[1], lng: c[0] },
+          ...(osmId ? { osmId } : {}),
+          ...(p.countrycode && p.countrycode.length === 2 ? { countryCode: p.countrycode.toUpperCase() } : {}),
+        } as DestinationInput,
+      },
+    ];
+  });
+}
 
 interface Props {
   onPick: (d: DestinationInput) => void;
@@ -34,11 +79,34 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…',
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
   const session = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
+  // Backup search (OpenStreetMap) when Google's fails or its script never loads.
+  const [backup, setBackup] = useState(false);
+  const [osm, setOsm] = useState<PhotonHit[]>([]);
+  useEffect(() => {
+    if (places) return;
+    const t = setTimeout(() => setBackup(true), 6000);
+    return () => clearTimeout(t);
+  }, [places]);
+  useEffect(() => {
+    if (!backup || text.trim().length < 2) return setOsm([]);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void photonSearch(text, scope, near).then((hits) => {
+        if (cancelled) return;
+        setOsm(hits);
+        setError(hits.length ? '' : 'Nothing found — try another spelling.');
+      });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [backup, text, scope, near?.lat, near?.lng]);
 
   // Debounced autocomplete. A session token groups keystrokes + the final
   // details fetch into one billable session.
   useEffect(() => {
-    if (!places || text.trim().length < 2) return setSuggestions([]);
+    if (!places || backup || text.trim().length < 2) return setSuggestions([]);
     session.current ??= new places.AutocompleteSessionToken();
     let cancelled = false;
     const t = setTimeout(async () => {
@@ -54,14 +122,22 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…',
           setError('');
         }
       } catch {
-        if (!cancelled) setError('Place search is unavailable right now.');
+        // Google's search is out: carry on with OpenStreetMap.
+        if (!cancelled) setBackup(true);
       }
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [places, text, scope, near?.lat, near?.lng]);
+  }, [places, backup, text, scope, near?.lat, near?.lng]);
+
+  const pickOsm = (h: PhotonHit) => {
+    onPick(h.place);
+    setText('');
+    setOsm([]);
+    setOpen(false);
+  };
 
   const pick = async (s: google.maps.places.AutocompleteSuggestion) => {
     const place = s.placePrediction!.toPlace();
@@ -92,13 +168,34 @@ function PlaceSearchInner({ onPick, placeholder = 'Search a city or country…',
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder={places ? placeholder : 'Loading place search…'}
-        disabled={!places}
+        placeholder={places || backup ? placeholder : 'Loading place search…'}
+        disabled={!places && !backup}
         autoFocus={autoFocus}
         className="pl-10"
         aria-label="Search destinations"
       />
       {error && <p className="mt-1 text-xs text-[#B3261E]">{error}</p>}
+      {open && backup && osm.length > 0 && (
+        <ul className="absolute z-20 mt-1 w-full bg-white rounded-xl border border-[#E7DFD5] shadow-lg overflow-hidden">
+          {osm.map((h) => (
+            <li key={h.key}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pickOsm(h)}
+                className="w-full flex items-start gap-2.5 px-3.5 py-2.5 text-left hover:bg-[#F3EFE9]"
+              >
+                <MapPin className="w-4 h-4 mt-0.5 text-[#00685F] shrink-0" />
+                <span>
+                  <span className="block text-sm font-semibold text-[#161C23]">{h.place.name}</span>
+                  {h.place.address && <span className="block text-xs text-[#6D7A77]">{h.place.address}</span>}
+                </span>
+              </button>
+            </li>
+          ))}
+          <li className="px-3.5 py-1 text-[10px] text-[#6D7A77] bg-[#FAF8F5]">Search by OpenStreetMap (Photon)</li>
+        </ul>
+      )}
       {open && suggestions.length > 0 && (
         <ul className="absolute z-20 mt-1 w-full bg-white rounded-xl border border-[#E7DFD5] shadow-lg overflow-hidden">
           {suggestions.map((s) => {

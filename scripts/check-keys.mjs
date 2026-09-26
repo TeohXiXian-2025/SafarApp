@@ -203,6 +203,30 @@ await check('Foursquare Places', async () => {
   }
 }, { optional: true });
 
+// ─── Backup sources when Google says no ──────────────────────────────────────
+await check('Geoapify Places (backup places, halal filter)', async () => {
+  need('GEOAPIFY_API_KEY');
+  const r = await getJson(`https://api.geoapify.com/v2/places?categories=religion.place_of_worship.islam&filter=circle:${KL.lng},${KL.lat},3000&limit=3&apiKey=${env.GEOAPIFY_API_KEY}`);
+  return `ok; ${r.features?.length ?? 0} mosque(s) near KLCC`;
+}, { optional: true });
+await check('openrouteservice (backup travel times)', async () => {
+  need('OPENROUTESERVICE_API_KEY');
+  const r = await getJson(`https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${env.OPENROUTESERVICE_API_KEY}&start=${KL.lng},${KL.lat}&end=${KL.lng + 0.005},${KL.lat}`);
+  const s = r.features?.[0]?.properties?.summary;
+  return `ok; ~${Math.round((s?.duration ?? 0) / 60)} min walk, ${Math.round(s?.distance ?? 0)} m`;
+}, { optional: true });
+await check('Mapillary (backup street photos)', async () => {
+  need('MAPILLARY_TOKEN');
+  const d = 0.001;
+  const r = await getJson(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(env.MAPILLARY_TOKEN)}&fields=id&bbox=${KL.lng - d},${KL.lat - d},${KL.lng + d},${KL.lat + d}&limit=1`);
+  return `ok; ${r.data?.length ?? 0} photo(s) at KLCC`;
+}, { optional: true });
+await check('OpenStreetMap Overpass (no key)', async () => {
+  const q = `[out:json][timeout:10];nwr["amenity"="place_of_worship"]["religion"="muslim"](around:2000,${KL.lat},${KL.lng});out center 3;`;
+  const r = await getJson('https://overpass-api.de/api/interpreter', { method: 'POST', body: `data=${encodeURIComponent(q)}`, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+  return `ok; ${r.elements?.length ?? 0} mosque(s)`;
+}, { optional: true });
+
 // ─── Social post readers (free credits) — checks spend no credits ───────────
 await check('Apify (Xiaohongshu reader)', async () => {
   need('APIFY_TOKEN');

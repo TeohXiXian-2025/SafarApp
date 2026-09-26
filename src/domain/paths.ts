@@ -35,8 +35,14 @@ export const paths = {
   inviteToken: (token: string) => `inviteTokens/${token}`,
 
   // Shared across all trips (worldwide halal knowledge)
-  placeKey: (p: { placeId?: string; osmId?: string }) =>
-    p.placeId ? `g_${p.placeId}` : `osm_${(p.osmId ?? '').replace('/', '_')}`,
+  placeKey: (p: { placeId?: string; osmId?: string; location?: { lat: number; lng: number } }) =>
+    p.placeId && !/^(osm|geo|mem)_/.test(p.placeId)
+      ? `g_${p.placeId}`
+      : p.osmId || p.placeId?.startsWith('osm_')
+        ? `osm_${(p.osmId ?? p.placeId!.slice(4)).replace('/', '_')}`
+        : p.location
+          ? `at_${p.location.lat.toFixed(5)}_${p.location.lng.toFixed(5)}`
+          : `x_${(p.placeId ?? 'unknown').replace(/[^\w-]/g, '_')}`,
   halalSummary: (placeKey: string) => `halalSummary/${placeKey}`,
   /** "There's a prayer room here" reports for a venue, shared by every trip. */
   prayerSpot: (placeKey: string) => `prayerSpots/${placeKey}`,

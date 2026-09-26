@@ -337,13 +337,13 @@ async function facilityFor(data: TripData, slot: PrayerSlot, stops: ScheduleItem
   const inReach = cands.some((c) => [from, to].some((p) => p && metersBetween(p, c.location) <= PRAYER_REACH_M));
   if (!inReach && lookups.n++ < MAX_MOSQUE_LOOKUPS) {
     const mid = to ? { lat: (from.lat + to.lat) / 2, lng: (from.lng + to.lng) / 2 } : from;
-    for (const p of (await searchNearby(mid, ['mosque'], 2000, 3).catch(() => null)) ?? []) add({ name: p.name, location: p.location, placeId: p.placeId, type: facilityType(p.name) });
+    for (const p of (await searchNearby(mid, ['mosque'], 2000, 3).catch(() => null)) ?? []) add({ name: p.name, location: p.location, placeId: p.placeId, type: facilityType(p.name), ...(p.source && p.source !== 'google' ? { via: p.source === 'traveller' ? 'traveller reports' : 'OpenStreetMap' } : {}) });
   }
   const reachOf = (c: Facility) => Math.min(metersBetween(from, c.location), to ? metersBetween(to, c.location) : Infinity);
   let best = prayerPlaceOnRoute(cands, from, to);
   // Still nothing within ~30 min on foot: look right where the group is (once more if allowed).
   if ((!best || reachOf(best) > MAX_PRAYER_WALK_M) && lookups.n++ < MAX_MOSQUE_LOOKUPS) {
-    for (const p of (await searchNearby(from, ['mosque'], 2000, 3).catch(() => null)) ?? []) add({ name: p.name, location: p.location, placeId: p.placeId, type: facilityType(p.name) });
+    for (const p of (await searchNearby(from, ['mosque'], 2000, 3).catch(() => null)) ?? []) add({ name: p.name, location: p.location, placeId: p.placeId, type: facilityType(p.name), ...(p.source && p.source !== 'google' ? { via: p.source === 'traveller' ? 'traveller reports' : 'OpenStreetMap' } : {}) });
     best = prayerPlaceOnRoute(cands, from, to);
   }
   // Better to say "any clean, quiet spot works" than send people on a long walk.
