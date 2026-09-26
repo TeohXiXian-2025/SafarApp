@@ -41,15 +41,7 @@ export function ExpensesPage() {
     for (const e of spending) byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + e.tripAmountMinor);
     const byDay = new Map<string, Expense[]>();
     for (const e of [...list].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)) byDay.set(e.date, [...(byDay.get(e.date) ?? []), e]);
-    const paid: Record<string, number> = {};
-    const share: Record<string, number> = {};
-    for (const e of spending) {
-      paid[e.paidBy] = (paid[e.paidBy] ?? 0) + e.tripAmountMinor;
-      for (const [u, v] of Object.entries(sharesOf(e))) share[u] = (share[u] ?? 0) + v;
-    }
     return {
-      paid,
-      share,
       net,
       owed: stillOwed(list),
       total: spending.reduce((s, e) => s + e.tripAmountMinor, 0),
@@ -96,29 +88,6 @@ export function ExpensesPage() {
 
           <SettleUp owed={view.owed} nameOf={nameOf} money={money} />
 
-          {members.length > 1 && (
-            <Card className="p-4 space-y-2">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-[#6D7A77]">Everyone</h2>
-              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1.5 text-sm">
-                <span />
-                <span className="text-[11px] font-bold text-[#6D7A77] text-right">Paid</span>
-                <span className="text-[11px] font-bold text-[#6D7A77] text-right">Share</span>
-                <span className="text-[11px] font-bold text-[#6D7A77] text-right">Balance</span>
-                {[...new Set([...trip.memberIds, ...Object.keys(view.net)])].map((u) => {
-                  const n = view.net[u] ?? 0;
-                  return (
-                    <div key={u} className="contents">
-                      <span className={cx('truncate', u === me.uid ? 'font-bold text-[#161C23]' : 'text-[#161C23]')}>{nameOf(u)}</span>
-                      <span className="text-right text-[#161C23]">{money(view.paid[u] ?? 0)}</span>
-                      <span className="text-right text-[#161C23]">{money(view.share[u] ?? 0)}</span>
-                      <span className={cx('text-right font-semibold', n > 0 ? 'text-[#00685F]' : n < 0 ? 'text-[#B3261E]' : 'text-[#6D7A77]')}>{n ? `${n > 0 ? '+' : '−'}${money(Math.abs(n))}` : '0'}</span>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="text-xs text-[#6D7A77]">+ is owed money, − owes. Shares ticked as paid back are left out.</p>
-            </Card>
-          )}
           <Budget daily={view.daily} money={money} />
 
           {view.byCategory.length > 1 && (
