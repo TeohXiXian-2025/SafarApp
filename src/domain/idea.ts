@@ -179,7 +179,7 @@ export const IdeaCategory = z.enum(['food', 'attraction', 'activity', 'shopping'
 export type IdeaCategory = z.infer<typeof IdeaCategory>;
 
 export const IdeaSource = z.object({
-  type: z.enum(['tiktok', 'instagram', 'xiaohongshu', 'youtube', 'link', 'screenshot', 'text', 'manual', 'radar', 'ai', 'split']),
+  type: z.enum(['tiktok', 'instagram', 'xiaohongshu', 'youtube', 'link', 'screenshot', 'text', 'manual', 'radar', 'ai', 'split', 'meal']),
   url: z.string().url().max(2000).optional(),
   caption: z.string().max(2000).optional(),
   author: z.string().max(120).optional(),

@@ -18,6 +18,7 @@ import type { GeoPoint } from './common.js';
 import type { BookingDraft } from './plan.js';
 import { openingRanges, PRAY_MIN, prayerTimesOn, type DayPrayers, type PrayerKey } from './prayer.js';
 import { journeyPrayerSpan } from './journeyPrayer.js';
+import { praysInside } from './placement.js';
 import { BUFFER_MIN, ceil5, DEFAULT_GAP, estimateTravelMin, LONG_VISIT_MIN, metersBetween, toMin } from './timeline.js';
 import type { Destination, MemberPrefs } from './trip.js';
 
@@ -134,11 +135,11 @@ const ORDER: PrayerKey[] = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
 
 const travelOr = (travel: Travel, a?: GeoPoint, b?: GeoPoint) => (a && b ? travel(a, b) : DEFAULT_GAP);
 
-/** First start ≥ from where [start, start+duration) avoids every block. */
-function avoidBlocks(from: number, duration: number, blocks: Block[]) {
+/** First start ≥ from where [start, start+duration) avoids every block (a prayer block already includes the walk back). */
+function avoidBlocks(from: number, duration: number, blocks: (Block & { prayer?: boolean })[]) {
   let start = ceil5(from);
   for (const b of [...blocks].sort((x, y) => x.start - y.start)) {
-    if (start < Math.max(b.end, b.start + 1) && start + duration > b.start) start = ceil5(b.end + DEFAULT_GAP);
+    if (start < Math.max(b.end, b.start + 1) && start + duration > b.start) start = ceil5(b.end + (b.prayer ? 0 : DEFAULT_GAP));
   }
   return start;
 }
@@ -166,11 +167,16 @@ export function lockedPrayers(p: DayPrayers | null): LockedPrayer[] {
   });
 }
 
-/** How long a visit lasts from `start`: long ones get PRAY_MIN for each prayer time inside them. */
-function lengthWith(prayers: LockedPrayer[], start: number, duration: number) {
-  if (duration < LONG_VISIT_MIN) return duration;
+/**
+ * How long a visit lasts from `start` with the prayers prayed during it: a
+ * long one gets PRAY_MIN for each (prayed on site), a shorter one you step
+ * out of to pray gets the whole prayer block (A → pray → back to A).
+ */
+function lengthWith(prayers: LockedPrayer[], start: number, duration: number, holds: boolean) {
+  if (!holds) return duration;
+  const add = duration >= LONG_VISIT_MIN ? PRAY_MIN : PRAYER_BLOCK_MIN;
   let d = duration;
-  for (const p of prayers) if (p.start >= start && p.start < start + d) d += PRAY_MIN;
+  for (const p of prayers) if (p.start >= start && p.start < start + d) d += add;
   return d;
 }
 
@@ -228,9 +234,10 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
       out.unfit.push({ id: u.id, reason: 'closed' });
       continue;
     }
-    // Short visits step around prayer times like around a booking; long ones pray there.
-    const blocks = u.duration >= LONG_VISIT_MIN ? frame.blocks : [...frame.blocks, ...prayers];
-    const len = (s: number) => lengthWith(prayers, s, u.duration);
+    // A visit you can pray at (or a long one) holds the prayer; others step around prayer times like around a booking.
+    const holds = u.duration >= LONG_VISIT_MIN || praysInside(u.prayerWalkMin);
+    const blocks = holds ? frame.blocks : [...frame.blocks, ...prayers.map((p) => ({ ...p, prayer: true }))];
+    const len = (s: number) => lengthWith(prayers, s, u.duration, holds);
     /**
      * Earliest start >= from that is inside opening hours AND clear of locked
      * bookings and prayer times — re-checked after every shift, so stepping
@@ -244,7 +251,10 @@ export function timeSequence(frame: DayFrame, units: Unit[], opts: { strict: boo
           if (!range) return null;
           s = ceil5(Math.max(s, range[0]));
         }
-        const moved = avoidBlocks(s, len(s), blocks);
+        let moved = avoidBlocks(s, len(s), blocks);
+        // A visit that holds a prayer still can't begin while the prayer is going on.
+        const midPrayer = holds && u.duration < LONG_VISIT_MIN ? prayers.find((p) => moved > p.start && moved < p.end) : undefined;
+        if (midPrayer) moved = ceil5(midPrayer.end);
         if (moved === s) return s;
         s = moved;
       }
@@ -602,16 +612,19 @@ export function prayerBreaks(
     // Starts during a journey (can't be finished before boarding, not yet out at the other end):
     // the journey's prayer card says what to do. Earlier / later ones stay here as blocks.
     if (journeys.some((j) => prayers.times[p.key] >= j.start && prayers.times[p.key] < j.end)) continue;
-    const isLong = (x: GapStop) => x.end - x.start >= LONG_VISIT_MIN;
+    // Long visits — and stops you can pray at (A → pray → back to A) — hold the prayer.
+    const isLong = (x: GapStop) => x.end - x.start >= LONG_VISIT_MIN || praysInside(x.prayerWalkMin);
     const inside = sorted.find((x) => x.start <= p.start && x.end > p.start && isLong(x));
     for (const x of sorted) {
       if (isLong(x)) continue;
       if (x.start < p.end && Math.max(x.end, x.start + 1) > p.start) clashes.push({ ...p, stopId: x.id });
     }
     const before = [...sorted].reverse().find((x) => x.end <= p.start);
+    const after = sorted.find((x) => x.start >= p.start);
     const near = inside ?? before ?? sorted[0];
-    // Before the day's first stop (whole-day mode) you're still at the hotel / where you arrived.
-    const at = !inside && !before && inTrip && base ? base : (near?.loc ?? base ?? { lat: 0, lng: 0 });
+    // Where to pray: at the visit it falls in, near the stop before it, else near the stop after it —
+    // and with no stops around it, near the hotel / station (the day's base).
+    const at = inside?.loc ?? before?.loc ?? after?.loc ?? base ?? near?.loc ?? { lat: 0, lng: 0 };
     out.push({ key: p.key, start: p.start, end: p.end, afterId: near && (inside || before) ? near.id : null, at });
   }
   return { prayers: out, clashes };

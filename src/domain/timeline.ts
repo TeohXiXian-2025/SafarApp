@@ -134,7 +134,7 @@ const warn = (itemId: string, kind: WarningKind, text: string): DayWarning => ({
  */
 export function dayWarnings(
   day: string,
-  items: (Pick<ScheduleItem, 'id' | 'start' | 'end' | 'orderIndex'> & { transitMin?: number; kind?: 'prayer' | 'side'; label?: string; locked?: boolean; checkin?: boolean })[],
+  items: (Pick<ScheduleItem, 'id' | 'start' | 'end' | 'orderIndex'> & { transitMin?: number; kind?: 'prayer' | 'side'; label?: string; locked?: boolean; checkin?: boolean; prayInside?: boolean })[],
   hours: (id: string) => string[] | undefined,
 ): DayWarning[] {
   const out: DayWarning[] = [];
@@ -163,7 +163,8 @@ export function dayWarnings(
     }
     // Prayer times are locked like bookings; long visits pray on the spot, journeys on board.
     if (it.kind !== 'side' && !it.locked && e - s < LONG_VISIT_MIN) {
-      const p = prayers.find((x) => s < toMin(x.end) && Math.max(e, s + 1) > toMin(x.start));
+      // At a stop you can pray at, a prayer time that begins during the visit is prayed there.
+      const p = prayers.find((x) => s < toMin(x.end) && Math.max(e, s + 1) > toMin(x.start) && !(it.prayInside && toMin(x.start) >= s && toMin(x.start) < e));
       if (p) out.push(warn(it.id, 'prayer', `Overlaps ${p.label ?? 'a prayer'} (${toClock(toMin(p.start))}–${toClock(toMin(p.end))}) — prayer times are fixed; move this stop or tap Fix this day.`));
     }
 
@@ -227,6 +228,12 @@ export interface ChainRow {
   prayer?: boolean;
   /** Shown with its travel, but doesn't pin the group down (hotel check-in / check-out: drop bags any time). */
   soft?: boolean;
+  /** A stop you can pray at (prayer room on site / a few minutes' walk): a prayer time during it is prayed there. */
+  prayInside?: boolean;
+  /** Opening hours that day (minutes); a tight chain never starts a stop before it opens. */
+  open?: [number, number][] | null;
+  /** Someone set its start by hand: it keeps it (moving only later if it can't be reached). */
+  pinned?: boolean;
 }
 
 export interface ChainPlan {
@@ -243,16 +250,19 @@ export interface ChainPlan {
  * (travel + buffer) starts later, just enough. It also moves after a prayer
  * time it would START inside, and after a journey it would overlap; a prayer
  * that falls in the middle of a visit stays there (you step out to pray — the
- * timeline hints it). Stops never move earlier, so gaps people chose stay.
+ * timeline hints it). Stops never move earlier, so gaps people chose stay —
+ * except with `tight`: then each stop starts right after the one before
+ * (travel + buffer, opening time), unless it's pinned to a time by hand.
  */
-export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) => number, buffer = BUFFER_MIN): ChainPlan {
+export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) => number, buffer = BUFFER_MIN, opts: { tight?: boolean } = {}): ChainPlan {
   const starts = new Map<string, number>();
   const legs = new Map<string, { fromId: string; minutes: number }>();
   const sorted = [...rows].sort((a, b) => a.start - b.start || Number(b.fixed) - Number(a.fixed));
   const fixed = sorted.filter((r) => r.fixed && !r.soft);
   const move = (a?: GeoPoint, b?: GeoPoint) => (a && b ? travel(a, b) : 0);
-  let cur: { id: string; end: number; loc?: GeoPoint; long: boolean; start: number; prayer?: boolean } | null = null;
-  const afterPrayer = (leg: number) => Math.max(0, leg - PRAYER_WALK_ALLOWANCE);
+  let cur: { id: string; end: number; loc?: GeoPoint; long: boolean; holds?: boolean; start: number; prayer?: boolean } | null = null;
+  // From the prayer place on to the next stop: the whole walk (so the times on screen add up), no buffer.
+  const afterPrayer = (leg: number) => leg;
   for (const r of sorted) {
     if (r.soft) {
       if (cur) legs.set(r.id, { fromId: cur.id, minutes: move(cur.loc, r.loc) });
@@ -260,7 +270,8 @@ export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) =
     }
     if (r.fixed) {
       // A prayer inside a long visit: prayed there — the visit carries on.
-      if (cur?.long && r.start >= cur.start && r.start < cur.end) continue;
+      // So does one at a stop you can pray at (A → pray → back to A).
+      if ((cur?.long || (cur?.holds && r.prayer)) && r.start >= cur.start && r.start < cur.end) continue;
       if (cur) legs.set(r.id, { fromId: cur.id, minutes: move(cur.loc, r.loc) });
       // It happens while the stop before is still going on (a check-out moment, a prayer mid-visit, or a
       // stop pushed past it): the group is busy until the later of the two — never earlier.
@@ -273,10 +284,17 @@ export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) =
     }
     const dur = Math.max(5, r.end - r.start);
     const long = dur >= LONG_VISIT_MIN;
+    const holds = long || !!r.prayInside;
     const leg = cur ? move(cur.loc, r.loc) : 0;
     // A prayer block already includes walking to and from the prayer place (PRAYER_WALK_ALLOWANCE).
     const need = cur?.prayer ? afterPrayer(leg) : leg + (leg > 0 ? buffer : 0);
-    let start = cur ? Math.max(r.start, ceil5(cur.end + need)) : r.start;
+    // Tight: a stop starts when the one before ends + the trip there (+ buffer) — no idle gaps —
+    // unless it was pinned to a time by hand, or isn't open yet.
+    let start = cur ? (opts.tight && !r.pinned ? ceil5(cur.end + need) : Math.max(r.start, ceil5(cur.end + need))) : r.start;
+    if (opts.tight && r.open?.length) {
+      const range = r.open.find(([o, c]) => Math.max(start, o) + dur <= c);
+      if (range && start < range[0]) start = ceil5(range[0]);
+    }
     // Can't start during a prayer time, or overlap a journey (a span with a length): it goes after it.
     for (let guard = 0; guard < 10; guard++) {
       const hit = fixed.find(
@@ -286,7 +304,7 @@ export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) =
           (f.prayer
             ? (start >= f.start && start < f.end) ||
               // Travel pushed it into a prayer it was clear of where it was put: after the prayer instead.
-              (start > r.start && !long && f.start < start + dur && f.end > start && !(f.start < r.start + dur && f.end > r.start))
+              (!holds && f.start < start + dur && f.end > start && (opts.tight ? true : start > r.start && !(f.start < r.start + dur && f.end > r.start)))
             : !long && f.start < start + dur && f.end > start),
       );
       if (!hit) break;
@@ -294,7 +312,7 @@ export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) =
     }
     starts.set(r.id, start);
     if (cur) legs.set(r.id, { fromId: cur.id, minutes: leg });
-    cur = { id: r.id, start, end: start + dur, loc: r.loc ?? cur?.loc, long };
+    cur = { id: r.id, start, end: start + dur, loc: r.loc ?? cur?.loc, long, holds };
   }
   return { starts, legs };
 }

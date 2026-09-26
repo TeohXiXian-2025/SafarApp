@@ -1,6 +1,7 @@
-// AI Arrange preview: the proposed plan per day, what moved compared with the
-// current timeline, prayer breaks, and anything that didn't fit (with why).
-// Nothing changes until the admin presses Apply.
+// AI plan preview (the whole trip or one day): the proposed plan per day, what
+// moved compared with the current timeline, prayer breaks, and anything that
+// didn't fit (with why). One shared preview — every member sees the same one;
+// nothing changes until the admin presses Apply.
 import { Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import { fmtClock, PRAYER_LABEL, toMin, UNFIT_TEXT, type ArrangeJob, type Idea, type ScheduleItem } from '../../domain';
@@ -15,19 +16,27 @@ export function ArrangeSheet({
   ideas,
   current,
   onApply,
+  onDiscard,
   onClose,
+  canApply,
+  author,
 }: {
   job: ArrangeJob | null;
   days: string[];
   ideas: Map<string, Idea>;
   current: ScheduleItem[];
   onApply: () => Promise<void>;
+  /** Throw the plan away (the admin, or whoever made it). */
+  onDiscard?: () => Promise<void>;
   onClose: () => void;
+  /** Only the admin applies. */
+  canApply: boolean;
+  author?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (!job) return null;
-  const was = new Map(current.flatMap((i) => (i.ref.kind === 'idea' && !i.track.endsWith(':B') ? [[i.ref.ideaId, i] as const] : [])));
+  const was = new Map(current.flatMap((i) => (i.ref.kind === 'idea' && !i.track.endsWith(':B') && (!job.day || i.day === job.day) ? [[i.ref.ideaId, i] as const] : [])));
   const change = (ideaId: string, day: string, start: string) => {
     const w = was.get(ideaId);
     if (!w) return { label: 'New', tone: 'brand' as const };
@@ -36,11 +45,11 @@ export function ArrangeSheet({
     return null;
   };
   const dropped = [...was.keys()].filter((id) => !job.plan.days.some((d) => d.stops.some((s) => s.ideaId === id)));
-  const apply = async () => {
+  const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError('');
     try {
-      await onApply();
+      await fn();
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -50,10 +59,14 @@ export function ArrangeSheet({
   };
 
   return (
-    <Sheet open onClose={onClose} title="AI Arrange — preview" wide>
+    <Sheet open onClose={onClose} title={job.day ? `AI plan — ${formatDay(job.day)}` : 'AI plan — whole trip'} wide>
       <div className="space-y-4 min-w-0">
+        <p className="text-xs text-[#6D7A77]">
+          Made by {author ?? 'a member'} {new Date(job.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} · everyone sees this same plan
+          {canApply ? '' : ' · only the admin can apply it'}.
+        </p>
         <p className="text-sm text-[#6D7A77]">
-          Each day only gets places in the city you're in that day. Stops are grouped by area, ordered to cut travel (with a 10-min buffer), fitted to opening
+          Each day only gets places in the city you're in that day. Stops are grouped by area, ordered to cut travel, timed with real routes (Google) plus a 10-min buffer, fitted to opening
           hours, and planned around bookings and the fixed prayer times (prayed near the stop before). Days with no food stop at lunch or dinner get a halal
           restaurant nearby. Nothing changes until you apply — and you can undo it.
         </p>
@@ -114,12 +127,22 @@ export function ArrangeSheet({
         )}
         {error && <ErrorBanner>{error}</ErrorBanner>}
         <div className="sticky bottom-0 -mx-5 px-5 pt-3 pb-1 bg-[#FAF8F5] border-t border-[#E7DFD5] flex gap-2">
-          <Button variant="secondary" className="flex-1" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button className="flex-1" loading={busy} onClick={apply}>
-            Apply to timeline
-          </Button>
+          {onDiscard ? (
+            <Button variant="secondary" className="flex-1" onClick={() => run(onDiscard)} disabled={busy}>
+              Discard plan
+            </Button>
+          ) : (
+            <Button variant="secondary" className="flex-1" onClick={onClose} disabled={busy}>
+              Close
+            </Button>
+          )}
+          {canApply ? (
+            <Button className="flex-1" loading={busy} onClick={() => run(onApply)}>
+              Apply to timeline
+            </Button>
+          ) : (
+            <p className="flex-1 self-center text-xs text-[#6D7A77]">Waiting for the admin to apply it.</p>
+          )}
         </div>
       </div>
     </Sheet>

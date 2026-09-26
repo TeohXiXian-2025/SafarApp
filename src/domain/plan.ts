@@ -132,6 +132,15 @@ export const PrayerPairing = z.object({
     walkMin: z.number().int().nonnegative(),
   })
     .optional(),
+  /**
+   * Why the place is where it is: at the visit the prayer falls in, near the
+   * stop before / after it, near the hotel or station (a day with no stops
+   * around it), or a member chose it. `basisName` = that stop / hotel.
+   */
+  basis: z.enum(['inside', 'before', 'after', 'hotel', 'station', 'area', 'chosen']).optional(),
+  basisName: z.string().max(200).optional(),
+  /** A place a member picked (the time stays locked); kept while the plan stays around there. */
+  chosen: z.object({ name: z.string().max(200), location: GeoPoint, placeId: z.string().max(256).optional(), by: Id, at: Millis }).optional(),
   /** Suggested activity for non-praying members during the prayer break. */
   fillerIdeaId: Id.optional(),
   fillerPlace: PlaceRef.optional(),
@@ -147,6 +156,11 @@ export const PrayerPairing = z.object({
         title: z.string().max(200),
         ideaId: Id.optional(),
         place: PlaceRef.optional(),
+        /**
+         * Where this group meets the others again: the prayer place (close by), the next
+         * stop (nearer to it), or a point in between; `at` = when.
+         */
+        meet: z.object({ kind: z.enum(['prayer', 'next', 'middle']), name: z.string().max(200), location: GeoPoint, at: LocalTime }).optional(),
         at: Millis,
       }),
     )
@@ -181,6 +195,8 @@ export const ScheduleItem = z.object({
   memberUids: z.array(Id).max(50),
   transitFromPrev: TransitLeg.optional(),
   prayer: PrayerPairing.optional(),
+  /** Its start was set by hand (📌): it keeps it instead of following the stop before. */
+  pinned: z.boolean().optional(),
   locked: z.boolean().default(false),
   orderIndex: z.number().int().nonnegative(),
   updatedBy: Id,
@@ -234,6 +250,8 @@ export const ArrangeJob = z.object({
   id: Id,
   kind: z.literal('arrange'),
   status: z.enum(['preview', 'applied', 'undone', 'discarded']),
+  /** Just this day (the rest of the trip stays as it is); absent = the whole trip. */
+  day: LocalDate.optional(),
   plan: z.object({
     days: z.array(
       z.object({

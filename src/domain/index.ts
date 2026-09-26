@@ -8,6 +8,8 @@ export * from './prefs.js';
 export * from './conflicts.js';
 export * from './prayer.js';
 export * from './timeline.js';
+export * from './placement.js';
+export * from './prayerSplit.js';
 export * from './arrange.js';
 export * from './split.js';
 export * from './voting.js';

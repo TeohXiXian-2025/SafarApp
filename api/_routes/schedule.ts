@@ -21,6 +21,11 @@ import {
   ScheduleItem,
   estimateTravelMin,
   findSlot,
+  firstFit,
+  fitsPrayerBreak,
+  byTimeAndPriority,
+  praysInside,
+  cityOf,
   GeoPoint,
   MEAL_WINDOW,
   goodForWhilePraying,
@@ -32,15 +37,20 @@ import {
   toClock,
   toMin,
   tripDays,
-  type Idea,
+  Idea,
   type Trip,
   type MealKey,
   type Unit,
+  type ArrangedDay,
+  type DayFrame,
+  type UnfitReason,
+  rebaseFrame,
 } from '../../src/domain/index.js';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, type WriteBatch } from 'firebase-admin/firestore';
 import { withTrip } from '../_lib/auth.js';
-import { searchNearbyFood, type NearbyFood } from '../_lib/places.js';
+import { DEFAULT_DURATION, placeDetails, searchNearby, searchNearbyFood, type NearbyFood } from '../_lib/places.js';
 import { mealPlaces } from '../_lib/meals.js';
+import { cachedLeg } from '../_lib/directions.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { extractJson } from '../_lib/gemini.js';
 import { HttpError, json, readJson } from '../_lib/http.js';
@@ -67,12 +77,34 @@ import {
   writeFixPlan,
   unitFor,
   writeStops,
+  dayChain,
+  prayerWalk,
+  stopName,
   type TripData,
 } from '../_lib/schedule.js';
 import { notify } from '../_lib/push.js';
 import { logActivity } from '../_lib/trip.js';
 
 const jobRef = (tripId: string, id: string) => adminDb().doc(paths.job(tripId, id));
+
+/** Activities for the ones not praying: within this of the prayer place (then checked for time). */
+const OPTION_M = 3000;
+
+/**
+ * A prayer break's surroundings: the prayer place, its locked time, and the
+ * next stop after it (where the others may meet the group again).
+ */
+function breakContext(data: TripData, item: ScheduleItem, dayList: ScheduleItem[]) {
+  const at = item.prayer?.facility?.location ?? (item.ref.kind === 'custom' ? item.ref.place?.location : undefined);
+  if (!at) return null;
+  const start = toMin(item.start);
+  const end = toMin(item.end);
+  const stops = dayList.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTimeAndPriority);
+  const ends = itemEnds(data, stops);
+  const nextItem = stops.find((i) => toMin(i.start) >= end && ends.get(i.id));
+  const next = nextItem ? { name: stopName(data, nextItem), location: ends.get(nextItem.id)!.in, start: toMin(nextItem.start) } : undefined;
+  return { at, start, end, next, prayer: { name: item.prayer?.facility?.name ?? 'the prayer place', location: at } };
+}
 
 /** "Right by the prayer place": ~5–7 min on foot. */
 const QUICK_M = 600;
@@ -100,6 +132,35 @@ function withPrayerTimes(data: TripData, day: string, items: ScheduleItem[], nea
   return [...items, ...prayers];
 }
 
+/**
+ * When no time was given: the first time the stop fits on the day — the same
+ * placement the Timeline previews (travel, prayer times, journeys, opening
+ * hours) — else after the day's last stop.
+ */
+function autoStart(data: TripData, dayList: ScheduleItem[], idea: Idea, duration: number, day: string, movingIds: string[] = []): number {
+  const { rows, travel, zones } = dayChain(data, dayList.filter((i) => !movingIds.includes(i.id)));
+  const fit = firstFit(day, rows, { id: '__new', duration, loc: idea.place.location, hours: idea.place.openingHours, prayInside: praysInside(prayerWalk(idea)) }, travel, zones);
+  if (fit) return fit.start;
+  const stops = dayList.filter((i) => !isPrayerItem(i) && !movingIds.includes(i.id));
+  return toMin(nextSlot(withPrayerTimes(data, day, stops, idea.place.location), duration).start);
+}
+
+/** A stop only goes on a day the group is in its city (days with no known city are open). */
+function assertCity(data: TripData, day: string, at: GeoPoint, name: string) {
+  const dests = data.trip.destinations;
+  if (dests.length < 2) return;
+  const cities = dayCitiesOf(data).get(day);
+  if (!cities?.length) return;
+  const c = cityOf(dests, at);
+  if (!cities.includes(c)) throw new HttpError(400, `${name} is in ${dests[c].name}, but on that day you're in ${cities.map((i) => dests[i].name).join(' / ')} — pick a day in ${dests[c].name}.`);
+}
+
+/** Where a stop ended up after the day was re-timed (travel measured, prayer places found). */
+async function landedAt(tripId: string, id: string): Promise<string | undefined> {
+  const snap = await itemRef(tripId, id).get();
+  return snap.exists ? (snap.data()?.start as string | undefined) : undefined;
+}
+
 /** Refresh several days one after another (they share Routes API budgets). */
 async function refreshDays(tripId: string, days: Iterable<string>, data: TripData) {
   for (const d of new Set(days)) await refreshDay(tripId, d, data);
@@ -109,7 +170,7 @@ export const scheduleRoutes: RouteTable = {
   /** Put a backlog idea (or split pair) on a day — at `start`, or after the day's last stop. */
   'POST schedule/add': withTrip(
     async (req, { tripId, member }) => {
-      const body = await readJson(req, z.object({ ideaId: Id, day: LocalDate, start: LocalTime.optional(), durationMin: z.number().int().min(5).max(24 * 60).optional() }));
+      const body = await readJson(req, z.object({ ideaId: Id, day: LocalDate, start: LocalTime.optional(), durationMin: z.number().int().min(5).max(24 * 60).optional(), pinned: z.boolean().optional() }));
       await useDailyQuota(member.uid, 'arrange');
       const data = await loadTripData(tripId);
       assertTripDay(data.trip, body.day);
@@ -120,20 +181,23 @@ export const scheduleRoutes: RouteTable = {
 
       const split = approvedSplit(data, idea);
       const lead = leadIdea(data, idea);
-      const day = (await dayItems(tripId, body.day)).filter((i) => !isPrayerItem(i));
+      assertCity(data, body.day, lead.place.location, lead.place.name);
+      const all = await dayItems(tripId, body.day);
+      const day = all.filter((i) => !isPrayerItem(i));
       // A split's length comes from its groups; a single stop can be given its own.
       const duration = split ? unitFor(lead, split).duration : (body.durationMin ?? unitFor(lead, split).duration);
-      const start = body.start ? toMin(body.start) : toMin(nextSlot(withPrayerTimes(data, body.day, day, lead.place.location), duration).start);
+      const start = body.start ? toMin(body.start) : autoStart(data, all, lead, duration, body.day);
 
       if (start + duration > 24 * 60 - 1) throw new HttpError(400, `${lead.place.name} would run past midnight there — pick an earlier time or another day`);
       const batch = adminDb().batch();
-      const placed = writeStops(batch, tripId, { data, idea: lead, day: body.day, start, durationMin: split ? undefined : duration, orderIndex: day.length, actor: member.uid });
+      const placed = writeStops(batch, tripId, { data, idea: lead, day: body.day, start, durationMin: split ? undefined : duration, orderIndex: day.length, actor: member.uid, pinned: body.pinned });
       placed.forEach((id) => batch.update(ideaDocRef(tripId, id), { status: 'scheduled', updatedAt: Date.now() }));
       logActivity(batch, tripId, member.uid, `${member.displayName} added ${split ? `the split at ${lead.place.name}` : idea.place.name} to ${body.day}`);
       await batch.commit();
       await refreshDay(tripId, body.day, data);
       await alertAdmin(tripId, body.day, member, data);
-      return json({ id: ideaItemId(lead.id) }, { status: 201 });
+      const landed = await landedAt(tripId, ideaItemId(lead.id));
+      return json({ id: ideaItemId(lead.id), start: landed ?? toClock(start), moved: !!landed && landed !== toClock(start) }, { status: 201 });
     },
     { perMinute: 30 },
   ),
@@ -143,7 +207,7 @@ export const scheduleRoutes: RouteTable = {
     async (req, { tripId, member }) => {
       const body = await readJson(
         req,
-        z.object({ id: Id, day: LocalDate.optional(), start: LocalTime.optional(), durationMin: z.number().int().min(5).max(24 * 60).optional() }),
+        z.object({ id: Id, day: LocalDate.optional(), start: LocalTime.optional(), durationMin: z.number().int().min(5).max(24 * 60).optional(), pinned: z.boolean().optional() }),
       );
       await useDailyQuota(member.uid, 'arrange');
       const [data, item] = await Promise.all([loadTripData(tripId), loadMovable(tripId, body.id)]);
@@ -155,10 +219,11 @@ export const scheduleRoutes: RouteTable = {
       if (item.ref.kind === 'custom') {
         const duration = body.durationMin ?? toMin(item.end) - toMin(item.start);
         let start = body.start ? toMin(body.start) : toMin(item.start);
+        if (moved && item.ref.place) assertCity(data, day, item.ref.place.location, item.ref.title);
         if (moved && !body.start) start = toMin(nextSlot(withPrayerTimes(data, day, (await dayItems(tripId, day)).filter((i) => !isPrayerItem(i)), item.ref.place?.location), duration).start);
         const batch = adminDb().batch();
         batch.delete(itemRef(tripId, item.id));
-        batch.set(itemRef(tripId, item.id), ScheduleItem.parse({ ...item, day, start: toClock(start), end: toClock(start + duration), updatedBy: member.uid, updatedAt: Date.now() }));
+        batch.set(itemRef(tripId, item.id), ScheduleItem.parse({ ...item, day, start: toClock(start), end: toClock(start + duration), ...(body.pinned !== undefined ? { pinned: body.pinned } : {}), updatedBy: member.uid, updatedAt: Date.now() }));
         await batch.commit();
         await refreshDays(tripId, moved ? [day, item.day] : [day], data);
         return json({ ok: true });
@@ -176,19 +241,21 @@ export const scheduleRoutes: RouteTable = {
       let start = body.start ? toMin(body.start) - (toMin(item.start) - toMin(lead.start)) : toMin(lead.start);
       let orderIndex = lead.orderIndex;
       if (moved) {
-        const target = (await dayItems(tripId, day)).filter((i) => !isPrayerItem(i));
-        orderIndex = target.length;
-        if (!body.start) start = toMin(nextSlot(withPrayerTimes(data, day, target, leadIdea.place.location), duration).start);
+        assertCity(data, day, leadIdea.place.location, leadIdea.place.name);
+        const all = await dayItems(tripId, day);
+        orderIndex = all.filter((i) => !isPrayerItem(i)).length;
+        if (!body.start) start = autoStart(data, all, leadIdea, duration, day);
       }
       // Never cut a stop short at midnight: say so instead.
       if (start < 0 || start + duration > 24 * 60 - 1) throw new HttpError(400, `${leadIdea.place.name} would run past midnight there — pick an earlier time or another day`);
       const batch = adminDb().batch();
       group.forEach((g) => batch.delete(itemRef(tripId, g.id)));
-      writeStops(batch, tripId, { data, idea: leadIdea, day, start, durationMin: split ? undefined : duration, orderIndex, actor: member.uid });
+      writeStops(batch, tripId, { data, idea: leadIdea, day, start, durationMin: split ? undefined : duration, orderIndex, actor: member.uid, pinned: body.pinned ?? (moved ? false : lead.pinned) });
       await batch.commit();
       await refreshDays(tripId, moved ? [day, item.day] : [day], data);
       await alertAdmin(tripId, day, member, data);
-      return json({ ok: true });
+      const landed = await landedAt(tripId, lead.id);
+      return json({ ok: true, start: landed ?? toClock(start), moved: !!landed && landed !== toClock(start) });
     },
     { perMinute: 60 },
   ),
@@ -240,6 +307,17 @@ export const scheduleRoutes: RouteTable = {
     async (req, { tripId, member }) => {
       const { id } = await readJson(req, z.object({ id: Id }));
       const [data, item] = await Promise.all([loadTripData(tripId), loadMovable(tripId, id)]);
+      // A lunch / dinner restaurant (picked by someone, or by AI Arrange): it goes to the backlog
+      // as a food idea — no vote, it was already chosen — so it can be put back later.
+      if (item.ref.kind === 'custom' && item.ref.meal && item.ref.place) {
+        const batch = adminDb().batch();
+        batch.delete(itemRef(tripId, item.id));
+        const ideaId = mealToBacklog(batch, tripId, data, item, member.uid);
+        logActivity(batch, tripId, member.uid, `${member.displayName} took ${item.ref.title} off ${item.day}`);
+        await batch.commit();
+        await refreshDay(tripId, item.day, data);
+        return json({ ok: true, ...(ideaId ? { ideaId } : {}) });
+      }
       const group = pairIds(item, await dayItems(tripId, item.day));
       const batch = adminDb().batch();
       for (const g of group) {
@@ -257,23 +335,37 @@ export const scheduleRoutes: RouteTable = {
   ),
 
   /**
-   * AI Arrange (admin): plans every backlog + scheduled idea across the trip
-   * around the bookings, opening hours, meal times, pace and prayer times.
-   * Nothing changes until the admin applies the preview.
+   * AI Arrange (any member): plans the backlog + scheduled ideas — across the
+   * trip, or for one day — around the bookings, the city you're in each day,
+   * opening hours, meal times, pace and prayer times, visiting each day's
+   * places in the shortest order. The plan is one shared preview (everyone
+   * sees the same one; a new one replaces it) and nothing changes until the
+   * admin applies it.
    */
   'POST schedule/arrange': withTrip(
-    async (_req, { tripId, user }) => {
+    async (req, { tripId, user }) => {
+      const body = await readJson(req, z.object({ day: LocalDate.optional() }).default({}));
       await useDailyQuota(user.uid, 'arrange');
       const data = await loadTripData(tripId);
-      const days = tripDays(data.trip.startDate, data.trip.endDate);
+      if (body.day) assertTripDay(data.trip, body.day);
+      const days = body.day ? [body.day] : tripDays(data.trip.startDate, data.trip.endDate);
       const frames = framesFor(data, days);
-      const ideas = [...data.ideas.values()].filter((i) => (i.status === 'backlog' || i.status === 'scheduled') && !isAltOfSplit(data, i));
-      if (!ideas.length) throw new HttpError(409, 'Nothing to arrange yet — approve some ideas on the Idea Board first');
+      // One day: what's on it now + the backlog (in that day's city); the other days stay as they are.
+      const onDay = body.day ? new Set((await dayItems(tripId, body.day)).flatMap((i) => (i.ref.kind === 'idea' ? [i.ref.ideaId] : []))) : null;
+      const dayCity = body.day ? dayCitiesOf(data).get(body.day) : undefined;
+      const inCity = (i: Idea) => !dayCity?.length || data.trip.destinations.length < 2 || dayCity.includes(cityOf(data.trip.destinations, i.place.location));
+      const ideas = [...data.ideas.values()].filter(
+        (i) => !isAltOfSplit(data, i) && (onDay ? onDay.has(i.id) || (i.status === 'backlog' && inCity(i)) : i.status === 'backlog' || i.status === 'scheduled'),
+      );
+      if (!ideas.length) throw new HttpError(409, body.day ? 'Nothing to plan for this day — add ideas to the backlog (in this city) first' : 'Nothing to arrange yet — approve some ideas on the Idea Board first');
       const units = ideas.map((i) => unitFor(i, approvedSplit(data, i), data.trip.destinations));
       const pace = mergePrefs(data.members).pace ?? 'moderate';
       // Straight-line estimates run short of real routes (checked after Apply) — plan with a margin.
       const travel = (a: GeoPoint, b: GeoPoint) => Math.round(estimateTravelMin(a, b) * 1.25);
-      const result = arrangeTrip(frames, units, { maxStops: PACE[pace].maxStops, travel, destinations: data.trip.destinations, dayCities: dayCitiesOf(data), meals: true });
+      const draft = arrangeTrip(frames, units, { maxStops: PACE[pace].maxStops, travel, destinations: data.trip.destinations, dayCities: dayCitiesOf(data), meals: true });
+      // The order was chosen with estimates (many orders tried); the preview is timed with real routes.
+      const real = await withRealRoutes(draft.days, frames, travel, data.trip.destinations);
+      const result = { days: real.days, unplaced: [...draft.unplaced, ...real.dropped] };
 
       const plan: ArrangeJob['plan'] = {
         days: result.days
@@ -285,17 +377,30 @@ export const scheduleRoutes: RouteTable = {
             prayers: d.timing.prayers.map((p) => ({ key: p.key, start: toClock(p.start), end: toClock(p.end) })),
             meals: d.timing.placed.filter((p) => p.id.startsWith('meal:')).map((p) => ({ key: p.id.slice(5) as MealKey, start: toClock(p.start), end: toClock(p.end), ...(p.at ? { near: p.at } : {}) })),
           })),
-        unplaced: result.unplaced.map((u) => ({ ideaId: u.id, reason: u.reason })),
+        // For one day, the backlog ideas that didn't make it simply stay in the backlog.
+        unplaced: result.unplaced.filter((u) => !onDay || onDay.has(u.id)).map((u) => ({ ideaId: u.id, reason: u.reason })),
       };
       await pickRestaurants(plan);
       await addNotes(plan, data);
 
       const ref = adminDb().collection(paths.jobs(tripId)).doc();
-      const job = ArrangeJob.parse({ id: ref.id, kind: 'arrange', status: 'preview', plan, createdBy: user.uid, at: Date.now() });
-      await ref.set(job);
+      const job = ArrangeJob.parse({ id: ref.id, kind: 'arrange', status: 'preview', ...(body.day ? { day: body.day } : {}), plan, createdBy: user.uid, at: Date.now() });
+      // One shared preview: a new plan replaces any open one.
+      const open = await adminDb().collection(paths.jobs(tripId)).where('status', '==', 'preview').get();
+      const batch = adminDb().batch();
+      open.docs.forEach((d) => batch.update(d.ref, { status: 'discarded' }));
+      batch.set(ref, job);
+      await batch.commit();
+      if (user.uid !== data.trip.adminId) {
+        await notify(
+          [data.trip.adminId],
+          { kind: 'timeline', title: 'An AI plan is waiting for you', body: `A member made an AI plan for ${body.day ?? 'the whole trip'} — open the Timeline to check and apply it.`, url: `/t/${tripId}/timeline${body.day ? `?day=${body.day}` : ''}`, tag: `plan-${tripId}` },
+          { timeZone: data.trip.destinations[0].timezone },
+        ).catch(() => {});
+      }
       return json(job);
     },
-    { admin: true, perMinute: 6 },
+    { perMinute: 6 },
   ),
 
   /** Apply a previewed plan: replaces every movable stop (bookings stay). Undo restores the old ones. */
@@ -307,7 +412,8 @@ export const scheduleRoutes: RouteTable = {
       if (job?.status !== 'preview') throw new HttpError(409, 'That preview is no longer available — arrange again');
       const data = await loadTripData(tripId);
       const current = (await adminDb().collection(paths.schedule(tripId)).get()).docs.map((d) => ScheduleItem.parse(d.data()));
-      const before = current.filter((i) => !i.locked);
+      // A one-day plan only replaces that day's stops.
+      const before = current.filter((i) => !i.locked && (!job.day || i.day === job.day));
 
       const batch = adminDb().batch();
       before.forEach((i) => batch.delete(itemRef(tripId, i.id)));
@@ -355,7 +461,7 @@ export const scheduleRoutes: RouteTable = {
       const job = snap.exists ? ArrangeJob.parse(snap.data()) : null;
       if (job?.status !== 'applied' || !job.before) throw new HttpError(409, 'Nothing to undo');
       const data = await loadTripData(tripId);
-      const current = (await adminDb().collection(paths.schedule(tripId)).get()).docs.map((d) => ScheduleItem.parse(d.data())).filter((i) => !i.locked);
+      const current = (await adminDb().collection(paths.schedule(tripId)).get()).docs.map((d) => ScheduleItem.parse(d.data())).filter((i) => !i.locked && (!job.day || i.day === job.day));
 
       const batch = adminDb().batch();
       current.forEach((i) => batch.delete(itemRef(tripId, i.id)));
@@ -401,11 +507,12 @@ export const scheduleRoutes: RouteTable = {
   ),
 
   /**
-   * What the members who don't pray can do during one prayer break: ideas the
-   * group already has (backlog — unless you said no; backup — if you said
-   * yes), ones praying members marked "good while we pray" first, all within
-   * a few minutes' walk of the prayer place and open then; plus quick places
-   * right there (cafés, desserts, shops) so there's always something.
+   * What someone who isn't praying can do during a prayer break: ideas the ones
+   * praying marked "good while we pray" first, then accepted ideas and split
+   * alternatives none of them voted against, backups / split-vote ideas they
+   * liked (even if the ones praying turned them down) — all in the same city,
+   * open then, and with time to get there, stay a while and reach where
+   * everyone meets again; plus quick places right by the prayer place.
    */
   'POST prayer/options': withTrip(
     async (req, { tripId, member }) => {
@@ -414,29 +521,38 @@ export const scheduleRoutes: RouteTable = {
       const item = snap.exists ? ScheduleItem.parse(snap.data()) : null;
       if (!item?.prayer) throw new HttpError(404, 'That prayer break is no longer on the timeline');
       const data = await loadTripData(tripId);
-      const at = item.prayer.facility?.location ?? (item.ref.kind === 'custom' ? item.ref.place?.location : undefined);
-      if (!at) return json({ ideas: [], nearby: [] });
-      const start = toMin(item.start);
-      const end = toMin(item.end);
+      const ctx = breakContext(data, item, await dayItems(tripId, item.day));
+      if (!ctx) return json({ ideas: [], nearby: [] });
+      const { at, start, end, next, prayer } = ctx;
       const openThen = (hours?: string[]) => {
         const r = openingRanges(hours, item.day);
         return r === null || r.some(([o, c]) => o <= start && c >= end);
       };
+      const city = data.trip.destinations.length > 1 ? cityOf(data.trip.destinations, at) : null;
       const ideas = [...data.ideas.values()]
-        .filter((i) => goodForWhilePraying(i, [member.uid]) && !isAltOfSplit(data, i) && metersBetween(i.place.location, at) <= QUICK_M && openThen(i.place.openingHours))
-        .map((i) => ({
-          ideaId: i.id,
-          name: i.place.name,
-          typeLabel: i.place.typeLabel ?? i.place.category,
-          walkMin: estimateTravelMin(at, i.place.location),
-          status: i.status,
-          marked: i.goodWhilePraying.length,
-          liked: i.votes[member.uid]?.value === 1,
-          short: i.estDurationMin <= end - start + 10,
-          location: i.place.location,
-        }))
+        .filter((i) => goodForWhilePraying(i, [member.uid]) && (city === null || cityOf(data.trip.destinations, i.place.location) === city) && metersBetween(i.place.location, at) <= OPTION_M && openThen(i.place.openingHours))
+        .flatMap((i) => {
+          const fit = fitsPrayerBreak({ pick: i.place.location, prayer, start, end, next });
+          if (!fit.fits) return [];
+          return [
+            {
+              ideaId: i.id,
+              name: i.place.name,
+              typeLabel: i.place.typeLabel ?? i.place.category,
+              walkMin: estimateTravelMin(at, i.place.location),
+              status: i.status,
+              marked: i.goodWhilePraying.length,
+              liked: i.votes[member.uid]?.value === 1,
+              short: i.estDurationMin <= fit.stayMin + 10,
+              stayMin: fit.stayMin,
+              split: isAltOfSplit(data, i),
+              meet: { kind: fit.meet.kind, name: fit.meet.name || 'halfway', at: toClock(fit.meet.at) },
+              location: i.place.location,
+            },
+          ];
+        })
         .sort((a, b) => b.marked - a.marked || Number(b.liked) - Number(a.liked) || a.walkMin - b.walkMin)
-        .slice(0, 8);
+        .slice(0, 10);
       // Quick places right by the prayer place (cached per spot for a day).
       const cell = `${at.lat.toFixed(3)}_${at.lng.toFixed(3)}`;
       const cacheRef = adminDb().doc(`quickNearby/${cell}`);
@@ -449,6 +565,7 @@ export const scheduleRoutes: RouteTable = {
       return json({
         ideas,
         nearby: nearby.map((p) => ({ placeId: p.placeId, name: p.name, location: p.location, typeLabel: p.typeLabel, rating: p.rating, walkMin: estimateTravelMin(at, p.location) })),
+        meetDefault: { name: prayer.name, at: toClock(end) },
       });
     },
     { perMinute: 20 },
@@ -456,8 +573,8 @@ export const scheduleRoutes: RouteTable = {
 
   /**
    * A member who doesn't pray picks what they'll do during a prayer break (or
-   * clears it with null). No vote needed — it's their own 30 minutes and
-   * everyone meets back at the prayer place.
+   * clears it with null). No vote needed — it's their own time. Where they
+   * meet the others again is worked out from where it is (meetPoint).
    */
   'POST prayer/pick': withTrip(
     async (req, { tripId, member }) => {
@@ -484,22 +601,114 @@ export const scheduleRoutes: RouteTable = {
       const snap = await ref.get();
       const item = snap.exists ? ScheduleItem.parse(snap.data()) : null;
       if (!item?.prayer) throw new HttpError(404, 'That prayer break is no longer on the timeline');
+      const ctx = breakContext(data, item, await dayItems(tripId, item.day));
       let pick: NonNullable<ScheduleItem['prayer']>['fillerPicks'][string] | null = null;
+      let place: { name: string; location: GeoPoint; placeId?: string } | undefined;
       if (body.pick?.kind === 'idea') {
         const idea = data.ideas.get(body.pick.ideaId);
         if (!idea || !goodForWhilePraying(idea, [member.uid])) throw new HttpError(400, 'Pick one of the ideas you accepted (or a backup you liked)');
-        pick = { kind: 'idea', title: idea.place.name, ideaId: idea.id, place: { name: idea.place.name, location: idea.place.location, ...(idea.place.placeId ? { placeId: idea.place.placeId } : {}) }, at: Date.now() };
+        place = { name: idea.place.name, location: idea.place.location, ...(idea.place.placeId ? { placeId: idea.place.placeId } : {}) };
+        pick = { kind: 'idea', title: idea.place.name, ideaId: idea.id, place, at: Date.now() };
       } else if (body.pick?.kind === 'place') {
-        const loc = item.prayer.facility?.location;
-        if (loc && metersBetween(loc, body.pick.place.location) > 3000) throw new HttpError(400, 'Pick somewhere close to the prayer place — you meet back there after the break.');
+        place = body.pick.place;
         pick = { kind: 'place', title: body.pick.place.name, place: body.pick.place, at: Date.now() };
       } else if (body.pick?.kind === 'rest') {
-        pick = { kind: 'rest', title: 'Rest / wait nearby', at: Date.now() };
+        pick = { kind: 'rest', title: 'Free time nearby', at: Date.now() };
+      }
+      if (pick && place && ctx) {
+        const dests = data.trip.destinations;
+        if (dests.length > 1 && cityOf(dests, place.location) !== cityOf(dests, ctx.at)) throw new HttpError(400, `${place.name} is in another city — pick something in ${dests[cityOf(dests, ctx.at)].name}.`);
+        const fit = fitsPrayerBreak({ pick: place.location, prayer: ctx.prayer, start: ctx.start, end: ctx.end, next: ctx.next });
+        if (!fit.fits) throw new HttpError(400, `${place.name} is too far for this break — there'd be no time there before everyone meets again.`);
+        let name = fit.meet.name;
+        // A point halfway: name it after a station or landmark right there.
+        if (fit.meet.kind === 'middle') {
+          const spot = ((await searchNearby(fit.meet.location, ['train_station', 'subway_station', 'tourist_attraction', 'park'], 500, 1).catch(() => null)) ?? [])[0];
+          name = spot?.name ?? 'halfway';
+          if (spot) fit.meet.location = spot.location;
+        }
+        pick.meet = { kind: fit.meet.kind, name, location: fit.meet.location, at: toClock(fit.meet.at) };
       }
       await ref.update({ [`prayer.fillerPicks.${member.uid}`]: pick ?? FieldValue.delete(), updatedAt: Date.now() });
-      return json({ ok: true });
+      return json({ ok: true, ...(pick?.meet ? { meet: pick.meet } : {}) });
     },
     { perMinute: 30 },
+  ),
+
+  /** Mosques / prayer rooms to choose from for a prayer break (the time stays locked). */
+  'POST prayer/places': withTrip(
+    async (req, { tripId }) => {
+      const { itemId } = await readJson(req, z.object({ itemId: Id }));
+      const snap = await itemRef(tripId, itemId).get();
+      const item = snap.exists ? ScheduleItem.parse(snap.data()) : null;
+      if (!item?.prayer) throw new HttpError(404, 'That prayer break is no longer on the timeline');
+      const data = await loadTripData(tripId);
+      const list = await dayItems(tripId, item.day);
+      const ctx = breakContext(data, item, list);
+      if (!ctx) return json({ places: [] });
+      const stops = list.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTimeAndPriority);
+      const ends = itemEnds(data, stops);
+      const before = [...stops].reverse().find((i) => toMin(i.end) <= ctx.start || (toMin(i.start) <= ctx.start && toMin(i.end) > ctx.start));
+      const after = stops.find((i) => toMin(i.start) >= ctx.end);
+      const anchors = [
+        ...(before && ends.get(before.id) ? [{ label: `near ${stopName(data, before)}`, at: ends.get(before.id)!.out }] : []),
+        ...(after && ends.get(after.id) ? [{ label: `near ${stopName(data, after)}`, at: ends.get(after.id)!.in }] : []),
+        { label: 'near the current place', at: ctx.at },
+      ];
+      const found: { name: string; location: GeoPoint; placeId?: string; near: string; walkMin: number }[] = [];
+      const add = (p: { name: string; location: GeoPoint; placeId?: string }) => {
+        if (found.some((f) => f.name === p.name && metersBetween(f.location, p.location) < 50)) return;
+        const best = anchors.map((a) => ({ a, m: metersBetween(a.at, p.location) })).sort((x, y) => x.m - y.m)[0];
+        found.push({ ...p, near: best.a.label, walkMin: estimateTravelMin(best.a.at, p.location) });
+      };
+      for (const it of [before, after]) {
+        const idea = it?.ref.kind === 'idea' ? data.ideas.get(it.ref.ideaId) : undefined;
+        const pr = idea?.halal?.prayer;
+        if (!idea || !pr) continue;
+        if (pr.access === 'onsite') add({ name: `${idea.place.name} (prayer space on site)`, location: idea.place.location, ...(idea.place.placeId ? { placeId: idea.place.placeId } : {}) });
+        pr.places.slice(0, 3).forEach((p) => add({ name: p.name, location: p.location, ...(p.placeId ? { placeId: p.placeId } : {}) }));
+      }
+      // Mosques around each end (cached per spot for a week).
+      for (const a of anchors.slice(0, 2)) {
+        const cell = `${a.at.lat.toFixed(3)}_${a.at.lng.toFixed(3)}`;
+        const cacheRef = adminDb().doc(`mosquesNearby/${cell}`);
+        const cached = (await cacheRef.get()).data();
+        let near = cached && Date.now() - Number(cached.at) < 7 * 86_400_000 ? (cached.places as { name: string; location: GeoPoint; placeId: string }[]) : null;
+        if (!near) {
+          near = ((await searchNearby(a.at, ['mosque'], 2500, 5).catch(() => null)) ?? []).map((p) => ({ name: p.name, location: p.location, placeId: p.placeId }));
+          await cacheRef.set({ at: Date.now(), places: near }).catch(() => {});
+        }
+        near.forEach(add);
+      }
+      return json({ places: found.sort((x, y) => x.walkMin - y.walkMin).slice(0, 10), current: item.prayer.facility?.name ?? null });
+    },
+    { perMinute: 20 },
+  ),
+
+  /** Choose where to pray for a break (null = back to Safar's pick). The time stays locked. */
+  'POST prayer/place': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ itemId: Id, place: z.object({ name: z.string().min(1).max(200), location: GeoPoint, placeId: z.string().max(256).optional() }).nullable() }));
+      const ref = itemRef(tripId, body.itemId);
+      const snap = await ref.get();
+      const item = snap.exists ? ScheduleItem.parse(snap.data()) : null;
+      if (!item?.prayer) throw new HttpError(404, 'That prayer break is no longer on the timeline');
+      const data = await loadTripData(tripId);
+      if (body.place) {
+        const dests = data.trip.destinations;
+        const ctx = breakContext(data, item, await dayItems(tripId, item.day));
+        if (ctx && dests.length > 1 && cityOf(dests, body.place.location) !== cityOf(dests, ctx.at)) throw new HttpError(400, 'Pick a prayer place in the city you are in then.');
+        if (ctx && metersBetween(ctx.at, body.place.location) > 5000) throw new HttpError(400, "That's too far from where you'll be then — pick one closer.");
+      }
+      await ref.update(
+        body.place
+          ? { 'prayer.chosen': { ...body.place, by: member.uid, at: Date.now() }, updatedAt: Date.now() }
+          : { 'prayer.chosen': FieldValue.delete(), updatedAt: Date.now() },
+      );
+      await refreshDay(tripId, item.day, data);
+      return json({ ok: true });
+    },
+    { perMinute: 20 },
   ),
 
   /** Re-place a day's prayer breaks and travel legs (e.g. saved before prayer times were locked). */
@@ -586,18 +795,16 @@ export const scheduleRoutes: RouteTable = {
       await useDailyQuota(member.uid, 'arrange');
       const data = await loadTripData(tripId);
       assertTripDay(data.trip, body.day);
-      const items = (await dayItems(tripId, body.day)).filter((i) => !isPrayerItem(i) && !isTrackB(i) && i.id !== mealItemId(body.day, body.meal));
-      const prayers = lockedPrayers(frameAt(data, body.day, body.place.location).prayers);
-      const ends = itemEnds(data, items);
+      const all = (await dayItems(tripId, body.day)).filter((i) => i.id !== mealItemId(body.day, body.meal));
+      const { rows, travel, zones } = dayChain(data, all);
       const [a, b] = MEAL_WINDOW[body.meal];
-      const taken = [...items.map((i) => ({ start: toMin(i.start), end: Math.max(toMin(i.end), toMin(i.start)), loc: ends.get(i.id)?.out })), ...prayers.map((p) => ({ start: p.start, end: p.end }))];
-      // First time in the meal window that fits (travel from / to the stops around it), else the window's start.
+      // First time in the meal window that fits (same placement as the Timeline), else the window's start.
       let start = a;
       let length = 60;
       for (const d of [60, 45]) {
-        const s = findSlot({ day: body.day, items: taken, duration: d, loc: body.place.location, after: a });
-        if (s !== null && s + d <= b + 30) {
-          start = s;
+        const fit = firstFit(body.day, rows, { id: '__meal', duration: d, loc: body.place.location }, travel, zones, a, b + 30);
+        if (fit) {
+          start = fit.start;
           length = d;
           break;
         }
@@ -626,23 +833,67 @@ export const scheduleRoutes: RouteTable = {
       if (!idea) throw new HttpError(404, 'Idea not found');
       if (idea.status === 'backup' && member.role !== 'admin') throw new HttpError(403, 'Only the admin can bring a backup idea onto the plan');
       if (idea.status !== 'backlog' && idea.status !== 'backup') throw new HttpError(409, `${idea.place.name} isn't in the backlog`);
-      const group = pairIds(item, await dayItems(tripId, item.day));
-      const batch = adminDb().batch();
-      for (const g of group) {
-        batch.delete(itemRef(tripId, g.id));
-        const old = ideaOf(data, g);
-        if (old) batch.update(ideaDocRef(tripId, old.id), { status: 'backlog', updatedAt: Date.now() });
-      }
-      const placed = writeStops(batch, tripId, { data, idea, day: item.day, start: toMin(item.start), orderIndex: item.orderIndex, actor: member.uid });
-      placed.forEach((id) => batch.update(ideaDocRef(tripId, id), { status: 'scheduled', updatedAt: Date.now() }));
-      const was = ideaOf(data, item)?.place.name ?? 'a stop';
-      logActivity(batch, tripId, member.uid, `${member.displayName} swapped ${was} for ${idea.place.name} on ${item.day} (weather)`);
-      await batch.commit();
-      await refreshDay(tripId, item.day, data);
-      await alertAdmin(tripId, item.day, member, data);
+      await swapInto(tripId, member, data, item, idea);
       return json({ ok: true });
     },
     { perMinute: 20 },
+  ),
+
+  /**
+   * Bad weather and nothing indoor in the backlog: indoor places near an
+   * outdoor stop (museums, malls, aquariums…) in the same city.
+   */
+  'POST schedule/indoor-options': withTrip(
+    async (req, { tripId, member }) => {
+      const { id } = await readJson(req, z.object({ id: Id }));
+      await useDailyQuota(member.uid, 'food');
+      const [data, item] = await Promise.all([loadTripData(tripId), loadMovable(tripId, id)]);
+      const at = ideaOf(data, item)?.place.location ?? (item.ref.kind === 'custom' ? item.ref.place?.location : undefined);
+      if (!at) return json({ places: [] });
+      const cell = `${at.lat.toFixed(3)}_${at.lng.toFixed(3)}`;
+      const cacheRef = adminDb().doc(`indoorNearby/${cell}`);
+      const cached = (await cacheRef.get()).data();
+      let found = cached && Date.now() - Number(cached.at) < 7 * 86_400_000 ? (cached.places as { placeId: string; name: string; location: GeoPoint; types: string[] }[]) : null;
+      if (!found) {
+        found = (await searchNearby(at, INDOOR_TYPES, 3000, 8).catch(() => null)) ?? [];
+        await cacheRef.set({ at: Date.now(), places: found }).catch(() => {});
+      }
+      const dests = data.trip.destinations;
+      const known = new Set([...data.ideas.values()].filter((i) => i.status === 'scheduled').map((i) => i.place.placeId));
+      const places = found
+        .filter((p) => !known.has(p.placeId) && (dests.length < 2 || cityOf(dests, p.location) === cityOf(dests, at)))
+        .map((p) => ({ placeId: p.placeId, name: p.name, location: p.location, typeLabel: INDOOR_LABEL[p.types.find((t) => t in INDOOR_LABEL) ?? ''] ?? 'Indoor', minutes: estimateTravelMin(at, p.location) }))
+        .sort((a, b) => a.minutes - b.minutes)
+        .slice(0, 6);
+      return json({ places });
+    },
+    { perMinute: 10 },
+  ),
+
+  /** Swap an outdoor stop for an indoor place found nearby: it joins the ideas (no vote — picked for the weather) and takes the stop's time. */
+  'POST schedule/swap-place': withTrip(
+    async (req, { tripId, member }) => {
+      const body = await readJson(req, z.object({ id: Id, placeId: z.string().min(3).max(300) }));
+      await useDailyQuota(member.uid, 'arrange');
+      const [data, item] = await Promise.all([loadTripData(tripId), loadMovable(tripId, body.id)]);
+      const placeKey = paths.placeKey({ placeId: body.placeId });
+      let idea = [...data.ideas.values()].find((i) => i.placeKey === placeKey);
+      if (idea?.status === 'scheduled') throw new HttpError(409, `${idea.place.name} is already on the timeline`);
+      if (!idea) {
+        const { place } = await placeDetails(body.placeId);
+        const ref = adminDb().collection(paths.ideas(tripId)).doc();
+        const now = Date.now();
+        idea = Idea.parse({ id: ref.id, placeKey, place, source: { type: 'ai' }, estDurationMin: DEFAULT_DURATION[place.category], status: 'backlog', votes: {}, choices: {}, decidedBy: member.uid, createdBy: member.uid, createdAt: now, updatedAt: now });
+        await ref.set(idea);
+        data.ideas.set(idea.id, idea);
+      } else if (idea.status !== 'backlog') {
+        await ideaDocRef(tripId, idea.id).update({ status: 'backlog', updatedAt: Date.now() });
+        idea = { ...idea, status: 'backlog' };
+      }
+      await swapInto(tripId, member, data, item, idea);
+      return json({ ok: true, ideaId: idea.id });
+    },
+    { perMinute: 10 },
   ),
 
   /**
@@ -670,16 +921,91 @@ export const scheduleRoutes: RouteTable = {
 
   /** Close a preview without applying it. */
   'POST schedule/discard': withTrip(
-    async (req, { tripId }) => {
+    async (req, { tripId, member }) => {
       const { jobId } = await readJson(req, z.object({ jobId: Id }));
       const ref = jobRef(tripId, jobId);
       const snap = await ref.get();
-      if (snap.exists && snap.data()?.status === 'preview') await ref.update({ status: 'discarded' });
+      if (snap.exists && snap.data()?.status === 'preview') {
+        // The admin, or whoever made the plan, can close it.
+        if (member.role !== 'admin' && snap.data()?.createdBy !== member.uid) throw new HttpError(403, 'Only the admin or whoever made this plan can close it');
+        await ref.update({ status: 'discarded' });
+      }
       return json({ ok: true });
     },
-    { admin: true, perMinute: 30 },
+    { perMinute: 30 },
   ),
 };
+
+/** Routes API legs measured per AI plan (each is cached for 30 days, so re-plans are cheap). */
+const MAX_PLAN_LEGS = 60;
+
+/**
+ * Times an AI plan with real routes: measures each leg of each day's chosen
+ * order (hotel → first stop → … → last stop) with the Routes API and re-times
+ * the day with those minutes. A stop that no longer fits comes back as
+ * unplaced ('time'); legs over the budget keep the estimate.
+ */
+async function withRealRoutes(days: ArrangedDay[], frames: DayFrame[], estimate: (a: GeoPoint, b: GeoPoint) => number, destinations: Trip['destinations']) {
+  const key = (a: GeoPoint, b: GeoPoint) => `${a.lat.toFixed(5)},${a.lng.toFixed(5)}>${b.lat.toFixed(5)},${b.lng.toFixed(5)}`;
+  const pairs = new Map<string, [GeoPoint, GeoPoint]>();
+  for (const d of days) {
+    const f = frames.find((x) => x.day === d.day);
+    const pts = [...(f?.baseKnown ? [f.base] : []), ...d.order.filter((u) => !u.floating).map((u) => u.loc)];
+    for (let i = 1; i < pts.length; i++) if (pairs.size < MAX_PLAN_LEGS) pairs.set(key(pts[i - 1], pts[i]), [pts[i - 1], pts[i]]);
+  }
+  const real = new Map<string, number>();
+  const list = [...pairs];
+  for (let i = 0; i < list.length; i += 6) {
+    await Promise.all(
+      list.slice(i, i + 6).map(async ([k, [a, b]]) => {
+        const leg = await cachedLeg(a, b).catch(() => null);
+        if (leg) real.set(k, leg.minutes);
+      }),
+    );
+  }
+  const travel = (a: GeoPoint, b: GeoPoint) => real.get(key(a, b)) ?? estimate(a, b);
+  const dropped: { id: string; reason: UnfitReason }[] = [];
+  const out = days.map((d) => {
+    const f = frames.find((x) => x.day === d.day);
+    if (!f || !d.order.length) return d;
+    const frame = rebaseFrame(f, d.order.find((u) => !u.floating)?.loc, destinations);
+    const timing = timeSequence(frame, d.order, { strict: true, travel });
+    dropped.push(...timing.unfit.filter((u) => !u.id.startsWith('meal:')));
+    const placed = new Set(timing.placed.map((p) => p.id));
+    return { day: d.day, order: d.order.filter((u) => placed.has(u.id)), timing: { ...timing, unfit: [] } };
+  });
+  return { days: out, dropped };
+}
+
+/** Indoor place types for a rainy / hot day, and how to name them. */
+const INDOOR_LABEL: Record<string, string> = {
+  museum: 'Museum',
+  art_gallery: 'Gallery',
+  aquarium: 'Aquarium',
+  shopping_mall: 'Shopping mall',
+  movie_theater: 'Cinema',
+  bowling_alley: 'Bowling',
+  library: 'Library',
+};
+const INDOOR_TYPES = Object.keys(INDOOR_LABEL);
+
+/** Puts `idea` in place of a stop (split pairs go together), at the stop's time; the old one goes back to the backlog. */
+async function swapInto(tripId: string, member: { uid: string; role: string; displayName: string }, data: TripData, item: ScheduleItem, idea: Idea) {
+  const group = pairIds(item, await dayItems(tripId, item.day));
+  const batch = adminDb().batch();
+  for (const g of group) {
+    batch.delete(itemRef(tripId, g.id));
+    const old = ideaOf(data, g);
+    if (old) batch.update(ideaDocRef(tripId, old.id), { status: 'backlog', updatedAt: Date.now() });
+  }
+  const placed = writeStops(batch, tripId, { data, idea, day: item.day, start: toMin(item.start), orderIndex: item.orderIndex, actor: member.uid });
+  placed.forEach((id) => batch.update(ideaDocRef(tripId, id), { status: 'scheduled', updatedAt: Date.now() }));
+  const was = ideaOf(data, item)?.place.name ?? 'a stop';
+  logActivity(batch, tripId, member.uid, `${member.displayName} swapped ${was} for ${idea.place.name} on ${item.day} (weather)`);
+  await batch.commit();
+  await refreshDay(tripId, item.day, data);
+  await alertAdmin(tripId, item.day, member, data);
+}
 
 /**
  * After a member (not the admin) changes a day by hand: if it now has a 🔴
@@ -765,6 +1091,42 @@ export function mealItem(o: { day: string; meal: MealKey; start: string; end: st
     updatedBy: o.actor,
     updatedAt: Date.now(),
   });
+}
+
+/**
+ * A lunch / dinner stop taken off the timeline becomes a backlog food idea
+ * (the same place already on the board is reused). Returns its id.
+ */
+function mealToBacklog(batch: WriteBatch, tripId: string, data: TripData, item: ScheduleItem, actor: string): string | undefined {
+  if (item.ref.kind !== 'custom' || !item.ref.place) return undefined;
+  const place = item.ref.place;
+  const placeKey = paths.placeKey(place);
+  const minutes = Math.max(30, toMin(item.end) - toMin(item.start));
+  const existing = place.placeId || place.osmId ? [...data.ideas.values()].find((i) => i.placeKey === placeKey) : undefined;
+  if (existing) {
+    if (existing.status !== 'scheduled') batch.update(ideaDocRef(tripId, existing.id), { status: 'backlog', updatedAt: Date.now() });
+    return existing.id;
+  }
+  const ref = adminDb().collection(paths.ideas(tripId)).doc();
+  const now = Date.now();
+  batch.set(
+    ref,
+    Idea.parse({
+      id: ref.id,
+      placeKey: place.placeId || place.osmId ? placeKey : `meal_${ref.id}`,
+      place: { ...place, category: 'food', typeLabel: 'Halal restaurant', types: ['restaurant'], ...(item.ref.phone ? { phone: item.ref.phone } : {}) },
+      source: { type: 'meal' },
+      estDurationMin: minutes,
+      status: 'backlog',
+      votes: {},
+      choices: {},
+      decidedBy: actor,
+      createdBy: actor,
+      createdAt: now,
+      updatedAt: now,
+    }),
+  );
+  return ref.id;
 }
 
 /** Restaurant lookups per AI Arrange (each is 1–2 Places calls, cached a week per spot). */

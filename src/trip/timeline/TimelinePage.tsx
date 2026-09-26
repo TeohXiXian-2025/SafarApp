@@ -1,12 +1,14 @@
-// Day-by-day timeline: bookings are fixed anchors, approved ideas are dragged
-// in from the backlog (or added with a tap on phones), reordered, re-timed —
-// or planned for the whole trip by AI Arrange (admin, preview → apply → undo).
+// Day-by-day timeline: bookings and prayer times are fixed anchors; approved
+// ideas come in from the backlog and move with one method on phone and
+// laptop — pick a stop up (tap Move, or drag its grip), then choose a gap
+// between blocks; every gap shows when it would start, the travel in and out
+// and what it pushes (placement.ts, the same maths the server saves with).
+// AI Arrange plans the whole trip (shared preview → admin applies → undo).
 // Prayer breaks are placed automatically for members who asked for them;
 // split pairs show both groups side by side. Travel time comes from the
 // Routes API (server-side). All times are local to where the group is that day.
 import {
   DndContext,
-  DragOverlay,
   KeyboardSensor,
   MouseSensor,
   TouchSensor,
@@ -18,12 +20,10 @@ import {
   useSensors,
   type CollisionDetection,
   type DragEndEvent,
-  type DragMoveEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Car, Footprints, GitFork, GripVertical, Lock, Map as MapIcon, MapPin, Pencil, Phone, Plus, Sparkles, TrainFront, Undo2, Utensils, X } from 'lucide-react';
+import { AlertTriangle, Car, Loader2, Footprints, GitFork, GripVertical, Lock, Map as MapIcon, MapPin, Move, Pencil, Phone, Plus, Sparkles, TrainFront, Undo2, Utensils, X } from 'lucide-react';
 import { collection, limit, orderBy, query } from 'firebase/firestore';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -34,6 +34,13 @@ import {
   planChain,
   BUFFER_MIN,
   type ChainRow,
+  type Candidate,
+  type GapOption,
+  firstFit,
+  gapOptions,
+  journeyZones,
+  placeAt,
+  praysInside,
   citiesByDay,
   cityLabel,
   durationRange,
@@ -51,6 +58,9 @@ import {
   daySummary,
   isOutdoor,
   weatherRisk,
+  forecastUrl,
+  FORECAST_DAYS,
+  type HourlyForecast,
   type WeatherRisk,
   leaveBeforeMin,
   mergePrefs,
@@ -63,7 +73,6 @@ import {
   Split,
   type Member,
   dayWarnings,
-  findSlot,
   toClock,
   openingRanges,
   estimateTravelMin,
@@ -77,6 +86,7 @@ import {
   toMin,
   tripDays,
   type DayWarning,
+  type DayFrame,
   type JourneyPrayer,
   journeyPrayers,
   type GeoPoint,
@@ -96,6 +106,7 @@ import { AddStopSheet, CANDIDATE, EditStopSheet, type Checker } from './StopShee
 import { FixDaySheet } from './FixDaySheet';
 import { useForecast } from './useForecast';
 import { PrayerPickSheet } from './PrayerPickSheet';
+import { PrayerPlaceSheet } from './PrayerPlaceSheet';
 import { JourneyPrayerList } from '../JourneyPrayerList';
 import { MealSheet } from './MealSheet';
 
@@ -123,6 +134,10 @@ interface Row {
   /** A lunch / dinner stop at a restaurant. */
   meal?: MealKey;
   phone?: string;
+  /** A prayer time during the visit is prayed there (room on site, a place a few minutes away, or ask staff). */
+  prayInside?: boolean;
+  /** A prayer room on site / a prayer place a few minutes away is actually known. */
+  prayerKnown?: boolean;
 }
 
 /** A split group other than the main one. */
@@ -147,6 +162,7 @@ function warningsFor(day: string, rows: Row[]): DayWarning[] {
     day,
     all.map((r) => ({
       ...r.item,
+      ...(r.prayInside ? { prayInside: true } : {}),
       ...(r.prayer ? { kind: 'prayer' as const, label: r.item.prayer ? `${r.item.prayer.prayer} prayer` : undefined } : isSide(r.item.track) ? { kind: 'side' as const } : { transitMin: travel(r) }),
       checkin: r.item.ref.kind === 'booking' && r.item.ref.event === 'checkin',
     })),
@@ -154,14 +170,92 @@ function warningsFor(day: string, rows: Row[]): DayWarning[] {
   );
 }
 
-/** Checks / suggests a time for one stop (new or moved) against the rest of that day. */
-function makeChecker(rowsByDay: Map<string, Row[]>, idea: Idea | undefined, movingIds: string[]): Checker | undefined {
+type Travel = (a: GeoPoint, b: GeoPoint) => number;
+
+/**
+ * A day as the placement engine sees it (placement.ts) — the same chain the
+ * server re-times with: blocks (stops move; prayer times and bookings don't),
+ * travel (the measured Routes leg where there is one, else an estimate + 20 %)
+ * and journeys as zones nothing can go in.
+ */
+function dayModel(list: Row[], bookings: Map<string, Booking>): { rows: ChainRow[]; travel: Travel; zones: ReturnType<typeof journeyZones> } {
+  const main = list.filter((r) => !isSide(r.item.track));
+  const rows: ChainRow[] = main.map((r) => ({
+    id: r.item.id,
+    start: toMin(r.item.start),
+    end: Math.max(toMin(r.item.end), toMin(r.item.start)),
+    fixed: r.item.locked || !!r.prayer,
+    ...(r.prayer ? { prayer: true } : {}),
+    ...(r.item.ref.kind === 'booking' && (r.item.ref.event === 'checkin' || r.item.ref.event === 'checkout') ? { soft: true } : {}),
+    ...((r.in ?? r.out) ? { loc: (r.in ?? r.out)! } : {}),
+    ...(r.prayInside ? { prayInside: true } : {}),
+    ...(r.idea?.place.openingHours ? { open: openingRanges(r.idea.place.openingHours, r.item.day) } : {}),
+    ...(r.item.pinned || r.meal ? { pinned: true } : {}),
+  }));
+  // Measured legs by the pair of places (several blocks can share a place — e.g. every prayer at one mosque).
+  const at = (p: GeoPoint) => `${p.lat},${p.lng}`;
+  const locOf = new Map(rows.flatMap((r) => (r.loc ? [[r.id, r.loc] as const] : [])));
+  const legs = new Map(
+    main.flatMap((r) => {
+      const leg = r.item.transitFromPrev;
+      const [a, b] = [leg?.fromId ? locOf.get(leg.fromId) : undefined, locOf.get(r.item.id)];
+      return leg && a && b ? [[`${at(a)}>${at(b)}`, leg.minutes] as const] : [];
+    }),
+  );
+  const travel: Travel = (a, b) => {
+    if (a.lat === b.lat && a.lng === b.lng) return 0;
+    return legs.get(`${at(a)}>${at(b)}`) ?? Math.round(estimateTravelMin(a, b) * 1.2);
+  };
+  const zones = journeyZones(
+    main.flatMap((r) => {
+      const ref = r.item.ref;
+      if (ref.kind !== 'booking') return [];
+      const b = bookings.get(ref.bookingId);
+      return b ? [{ start: toMin(r.item.start), end: toMin(r.item.end), event: ref.event, bookingId: b.id, kind: b.kind, label: `your ${b.kind}` }] : [];
+    }),
+  );
+  return { rows, travel, zones };
+}
+
+/** A day's rows at the times the tight chain gives them (what the timeline shows, and what the server saves). */
+function chained(list: Row[], bookings: Map<string, Booking>): Row[] {
+  const m = dayModel(list, bookings);
+  const starts = planChain(m.rows, m.travel, undefined, { tight: true }).starts;
+  return list.map((r) => {
+    const s = starts.get(r.item.id);
+    if (s === undefined || s === toMin(r.item.start)) return r;
+    const len = toMin(r.item.end) - toMin(r.item.start);
+    return { ...r, item: { ...r.item, start: toClock(s), end: toClock(s + len) } };
+  });
+}
+
+/** A prayer time held inside a stop (A → pray → back to A): its minutes are part of the stop's length. */
+function heldPrayerMin(list: Row[], r: Row): number {
+  if (!r.prayInside) return 0;
+  const [s, e] = [toMin(r.item.start), toMin(r.item.end)];
+  const p = list.find((x) => x.prayer && toMin(x.item.start) >= s && toMin(x.item.start) < e);
+  return p ? toMin(p.item.end) - toMin(p.item.start) : 0;
+}
+
+const candidateOf = (idea: Idea, id: string, duration: number): Candidate => ({
+  id,
+  duration,
+  loc: idea.place.location,
+  ...(idea.place.openingHours ? { hours: idea.place.openingHours } : {}),
+  ...(praysInside(prayerWalkOf(idea)) ? { prayInside: true } : {}),
+});
+
+/** Checks / suggests a time for one stop (new or moved) against the rest of that day — the placement engine. */
+function makeChecker(rowsByDay: Map<string, Row[]>, bookings: Map<string, Booking>, idea: Idea | undefined, movingIds: string[]): Checker | undefined {
   if (!idea) return undefined;
-  const others = (d: string) => (rowsByDay.get(d) ?? []).filter((r) => !movingIds.includes(r.item.id));
+  // The day as shown: chained tightly (the check and the suggestion must see the same times).
+  const others = (d: string) => chained((rowsByDay.get(d) ?? []).filter((r) => !movingIds.includes(r.item.id)), bookings);
   const keyOf = (w: DayWarning) => `${w.itemId}:${w.kind}`;
   return {
     check: (d, start, duration) => {
       const base = others(d);
+      const m = dayModel(base, bookings);
+      const place = placeAt(d, m.rows, candidateOf(idea, CANDIDATE, duration), start, m.travel, m.zones);
       const before = new Set(warningsFor(d, base).map(keyOf));
       const candidate: Row = {
         item: {
@@ -169,20 +263,17 @@ function makeChecker(rowsByDay: Map<string, Row[]>, idea: Idea | undefined, movi
           track: 'all', memberUids: [], locked: false, orderIndex: 999, updatedBy: 'me', updatedAt: 0,
         },
         title: idea.place.name, icon: null, idea, in: idea.place.location, out: idea.place.location,
+        ...(praysInside(prayerWalkOf(idea)) ? { prayInside: true } : {}),
       };
       // Only what this placement adds: its own problems + the ones it causes for the next stop.
-      return warningsFor(d, [...base, candidate]).filter((w) => w.itemId === CANDIDATE || !before.has(keyOf(w)));
+      const own = warningsFor(d, [...base, candidate]).filter((w) => w.itemId === CANDIDATE || !before.has(keyOf(w)));
+      const journey: DayWarning[] = place.problem === 'journey' ? [{ itemId: CANDIDATE, kind: 'overlap', severity: 'block', text: `${place.why}.` }] : [];
+      return [...journey, ...own];
     },
-    suggest: (d, duration) =>
-      findSlot({
-        day: d,
-        // Prayer breaks count as taken: prayer times are locked like bookings.
-        items: others(d).map((r) => ({ start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), ...(r.prayer ? {} : { loc: r.out ?? r.in }) })),
-        duration,
-        hours: idea.place.openingHours,
-        loc: idea.place.location,
-        after: 8 * 60,
-      }),
+    suggest: (d, duration) => {
+      const m = dayModel(others(d), bookings);
+      return firstFit(d, m.rows, candidateOf(idea, CANDIDATE, duration), m.travel, m.zones)?.start ?? null;
+    },
   };
 }
 
@@ -217,7 +308,7 @@ function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<strin
   if (r.kind === 'idea') {
     const idea = ideas.get(r.ideaId);
     if (!idea) return null; // idea was deleted
-    return { item, idea, title: idea.place.name, subtitle: idea.place.typeLabel, icon: <MapPin className="w-4 h-4" />, in: idea.place.location, out: idea.place.location };
+    return { item, idea, title: idea.place.name, subtitle: idea.place.typeLabel, icon: <MapPin className="w-4 h-4" />, in: idea.place.location, out: idea.place.location, ...(praysInside(prayerWalkOf(idea)) ? { prayInside: true } : {}), ...(prayerWalkOf(idea) !== undefined && praysInside(prayerWalkOf(idea)) ? { prayerKnown: true } : {}) };
   }
   if (r.kind === 'booking') {
     const b = bookings.get(r.bookingId);
@@ -254,6 +345,20 @@ function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<strin
 /** Rows that are a meal: a food idea or a lunch / dinner stop. */
 const isFood = (r: Row) => !!r.meal || r.idea?.place.category === 'food';
 
+/** The stop being moved (or a backlog idea being placed) until a gap is chosen. */
+interface MoveState {
+  /** Schedule item id, or "backlog:{ideaId}". */
+  id: string;
+  ideaId?: string;
+  title: string;
+  fromDay: string;
+  cand: Candidate;
+  /** A split pair: its length comes from the split. */
+  split: boolean;
+  /** Trip destination index of the place (null: single-city trip / unknown). */
+  city: number | null;
+}
+
 export function TimelinePage() {
   const { trip, members, me, isAdmin } = useTrip();
   const [params, setParams] = useSearchParams();
@@ -282,7 +387,8 @@ export function TimelinePage() {
       // Prayer guidance for journeys of anyone who prays (on the departure row).
       if (it.ref.kind === 'booking' && (it.ref.event === 'depart' || it.ref.event === 'span')) {
         const b = bookingMap.get(it.ref.bookingId);
-        if (b && b.travellerUids.some((u) => prayingUids.has(u))) row.journey = journeyPrayers(b);
+        if (b && b.travellerUids.some((u) => prayingUids.has(u)))
+          row.journey = journeyPrayers(b, { from: clockName(b.from?.timezone ?? b.to.timezone, b.from?.location, trip.destinations), to: clockName(b.to.timezone, b.to.location, trip.destinations) });
       }
       out.set(it.day, [...(out.get(it.day) ?? []), row]);
     }
@@ -334,46 +440,15 @@ export function TimelinePage() {
   }, [rowsByDay, day, pending]);
 
   // ── The day as one chain: travel between every pair of blocks (stops, prayer places, bookings) ──
-  const chainOf = (list: Row[]): ChainRow[] =>
-    list
-      .filter((r) => !isSide(r.item.track))
-      .map((r) => ({ id: r.item.id, start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), fixed: r.item.locked || !!r.prayer, ...(r.prayer ? { prayer: true } : {}), ...(r.item.ref.kind === 'booking' && (r.item.ref.event === 'checkin' || r.item.ref.event === 'checkout') ? { soft: true } : {}), ...((r.in ?? r.out) ? { loc: (r.in ?? r.out)! } : {}) }));
-  const travel = useMemo(() => {
-    // Real Routes times between stops where measured (same as the server), else an estimate + 20 %.
-    const legs = new Map(rows.flatMap((r) => (r.item.transitFromPrev?.fromId ? [[`${r.item.transitFromPrev.fromId}>${r.item.id}`, r.item.transitFromPrev.minutes] as const] : [])));
-    const idAt = new Map(rows.flatMap((r) => ((r.in ?? r.out) ? [[`${(r.in ?? r.out)!.lat},${(r.in ?? r.out)!.lng}`, r.item.id] as const] : [])));
-    return (a: GeoPoint, b: GeoPoint) => {
-      if (a.lat === b.lat && a.lng === b.lng) return 0;
-      const from = idAt.get(`${a.lat},${a.lng}`);
-      const to = idAt.get(`${b.lat},${b.lng}`);
-      return (from && to ? legs.get(`${from}>${to}`) : undefined) ?? Math.round(estimateTravelMin(a, b) * 1.2);
-    };
-  }, [rows]);
-  const chain = useMemo(() => planChain(chainOf(rows), travel), [rows, travel]);
+  const model = useMemo(() => dayModel(rows, bookingMap), [rows, bookingMap]);
+  // Chained tightly, like the server: each stop starts when the one before ends + the trip there.
+  const chain = useMemo(() => planChain(model.rows, model.travel, undefined, { tight: true }), [model]);
+  // Saved times that don't follow the chain yet (planned before it was tight) → re-time the day once.
+  const offChain = rows.filter((r) => !r.item.locked && !r.prayer && !isSide(r.item.track) && chain.starts.has(r.item.id) && chain.starts.get(r.item.id) !== toMin(r.item.start)).map((r) => r.item.id).join();
 
-  // ── Dragging into a gap between any two blocks: where it would go, and the whole day re-timed live ──
-  const [slot, setSlot] = useState<{ rowId: string; where: 'before' | 'after' } | null>(null);
-  const [moving, setMoving] = useState<{ id: string; duration: number; loc?: GeoPoint; ideaId?: string } | null>(null);
-  const [landed, setLanded] = useState<Map<string, number> | null>(null);
-  useEffect(() => setLanded(null), [schedule.data]);
-  const dropPlan = useMemo(() => {
-    if (!moving || !slot) return null;
-    const target = rows.find((r) => r.item.id === slot.rowId);
-    if (!target || target.item.id === moving.id) return null;
-    const tLoc = target.in ?? target.out;
-    const leg = moving.loc && tLoc ? travel(slot.where === 'after' ? tLoc : moving.loc, slot.where === 'after' ? moving.loc : tLoc) : 0;
-    const pad = leg > 0 ? BUFFER_MIN : 0;
-    const tStart = toMin(target.item.start);
-    const tEnd = Math.max(toMin(target.item.end), tStart);
-    const want = slot.where === 'after' ? Math.ceil((tEnd + leg + pad) / 5) * 5 : Math.floor((tStart - leg - pad - moving.duration) / 5) * 5;
-    const others = chainOf(rows).filter((c) => c.id !== moving.id);
-    const plan = planChain([...others, { id: moving.id, start: Math.max(0, want), end: Math.max(0, want) + moving.duration, fixed: false, ...(moving.loc ? { loc: moving.loc } : {}) }], travel);
-    const start = plan.starts.get(moving.id) ?? want;
-    return { start, starts: plan.starts, legs: plan.legs, fits: start >= 0 && start + moving.duration <= 24 * 60 - 1 };
-  }, [moving, slot, rows, travel]);
-  const shownStart = (id: string) => dropPlan?.starts.get(id) ?? landed?.get(id);
-
-  const dayList = useMemo(() => warningsFor(day, rows), [rows, day]);
+  // Checked at the times shown (the day chained: stops start when the one before ends + the trip there).
+  const timedRows = useMemo(() => chained(rows, bookingMap), [rows, bookingMap]);
+  const dayList = useMemo(() => warningsFor(day, timedRows), [timedRows, day]);
   const warnings = useMemo(() => {
     const byItem = new Map<string, DayWarning[]>();
     for (const w of dayList) byItem.set(w.itemId, [...(byItem.get(w.itemId) ?? []), w]);
@@ -431,38 +506,90 @@ export function TimelinePage() {
   const refreshed = useRef(new Set<string>());
   useEffect(() => {
     // Once per day per expected set (a changed flight or hotel changes what's expected → refresh again).
-    const key = `${day}|${expected}`;
-    if (loading || expected === actual || !navigator.onLine || refreshed.current.has(key)) return;
+    const key = `${day}|${expected}|${offChain}`;
+    if (loading || (expected === actual && !offChain) || !navigator.onLine || refreshed.current.has(key)) return;
     refreshed.current.add(key);
     void api.post('schedule/refresh', { day }, { tripId: trip.id }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expected, actual, day]);
+  }, [expected, actual, offChain, day]);
 
-  // Live weather: only for today and tomorrow (further out the forecast isn't worth acting on).
+  // Live weather for today and tomorrow (further out the forecast isn't worth acting on): the alert shows
+  // whichever day you're looking at — the day before and on the day.
   const todayThere = new Intl.DateTimeFormat('en-CA', { timeZone: trip.destinations[0].timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const tomorrowThere = new Date(Date.parse(`${todayThere}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
   const weatherDay = day === todayThere || day === tomorrowThere;
-  const forecast = useForecast(weatherDay ? day : '', firstStop ?? frame.base);
-  // Indoor ideas the admin could bring back from the backups for a rainy day.
+  /** Where the group is on a day: its first stop, else its city. */
+  const whereOn = (d: string): GeoPoint => {
+    const stop = (rowsByDay.get(d) ?? []).find((r) => !r.prayer && !r.item.locked && r.in)?.in;
+    const c = dayCities.get(d)?.at(-1);
+    return stop ?? (c !== undefined ? trip.destinations[c].location : trip.destinations[0].location);
+  };
+  const fToday = useForecast(days.includes(todayThere) ? todayThere : '', whereOn(todayThere));
+  const fTomorrow = useForecast(days.includes(tomorrowThere) ? tomorrowThere : '', whereOn(tomorrowThere));
+  const forecastOn = (d: string) => (d === todayThere ? fToday : d === tomorrowThere ? fTomorrow : null);
+  const forecast = forecastOn(day);
+  // Indoor backups the admin could bring back for a rainy day.
   const backups = useMemo(() => (isAdmin ? ideas.data.filter((i) => i.status === 'backup' && !isOutdoor(i.place)) : []), [ideas.data, isAdmin]);
   const outlook = forecast ? daySummary(forecast, day) : null;
+  /** Outdoor stops the weather may spoil on a day. */
+  const risksOn = (d: string) => {
+    const f = forecastOn(d);
+    if (!f) return [];
+    return (rowsByDay.get(d) ?? []).flatMap((r) => {
+      if (!r.idea || r.prayer || !isOutdoor(r.idea.place)) return [];
+      const risk = weatherRisk(f, d, toMin(r.item.start), toMin(r.item.end));
+      return risk ? [{ row: r, risk }] : [];
+    });
+  };
+  // The heads-up at the top (any day you're on): today's and tomorrow's affected stops.
+  const weatherHeads = [todayThere, tomorrowThere].filter((d) => days.includes(d)).map((d) => ({ day: d, risks: risksOn(d) })).filter((h) => h.risks.length);
   const weather = useMemo(() => {
-    const out = new Map<string, { risk: WeatherRisk; swap?: Idea }>();
-    if (!forecast) return out;
-    for (const r of rows) {
-      if (!weatherDay || !r.idea || r.prayer || !isOutdoor(r.idea.place)) continue;
-      const risk = weatherRisk(forecast, day, toMin(r.item.start), toMin(r.item.end));
-      if (!risk) continue;
-      // Plan B: an indoor backlog place nearby that's open that day.
-      const swap = [...backlog, ...backups]
-        .filter((i) => !isOutdoor(i.place) && metersBetween(i.place.location, r.idea!.place.location) < 3000 && openingRanges(i.place.openingHours, day)?.length !== 0)
-        .sort((a, b) => metersBetween(a.place.location, r.idea!.place.location) - metersBetween(b.place.location, r.idea!.place.location))[0];
-      out.set(r.item.id, { risk, ...(swap ? { swap } : {}) });
+    const out = new Map<string, { risk: WeatherRisk; swaps: Idea[] }>();
+    if (!forecast || !weatherDay) return out;
+    const city = (loc: GeoPoint) => (trip.destinations.length > 1 ? cityOf(trip.destinations, loc) : 0);
+    for (const { row: r, risk } of risksOn(day)) {
+      // Plan B from your own ideas: indoor backlog / backup places in the same city, nearby, open that day.
+      const swaps = [...backlog, ...backups]
+        .filter((i) => !isOutdoor(i.place) && city(i.place.location) === city(r.idea!.place.location) && metersBetween(i.place.location, r.idea!.place.location) < 5000 && openingRanges(i.place.openingHours, day)?.length !== 0)
+        .sort((a, b) => metersBetween(a.place.location, r.idea!.place.location) - metersBetween(b.place.location, r.idea!.place.location))
+        .slice(0, 3);
+      out.set(r.item.id, { risk, swaps });
     }
     return out;
-  }, [forecast, rows, day, backlog, backups, weatherDay]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forecast, rowsByDay, day, backlog, backups, weatherDay]);
   const [planB, setPlanB] = useState<{ day: string; text: string } | null>(null);
   const [askingPlanB, setAskingPlanB] = useState(false);
+  // Indoor places found nearby (per stop) and a drier day in the same city (per stop).
+  const [indoor, setIndoor] = useState<Record<string, { placeId: string; name: string; typeLabel: string; minutes: number }[] | 'loading'>>({});
+  const [otherDay, setOtherDay] = useState<Record<string, { day: string; start: number } | 'none' | 'loading'>>({});
+  const findIndoor = (id: string) => {
+    setIndoor((m) => ({ ...m, [id]: 'loading' }));
+    void api
+      .post<{ places: { placeId: string; name: string; typeLabel: string; minutes: number }[] }>('schedule/indoor-options', { id }, { tripId: trip.id })
+      .then((r) => setIndoor((m) => ({ ...m, [id]: r.places })))
+      .catch((e) => (setIndoor((m) => ({ ...m, [id]: [] })), setError((e as Error).message)));
+  };
+  /** Another day in the same city (within the forecast) where it fits and the weather is fine. */
+  const findDrierDay = async (r: Row) => {
+    const id = r.item.id;
+    setOtherDay((m) => ({ ...m, [id]: 'loading' }));
+    const idea = r.idea!;
+    const city = cityOfLoc(idea.place.location);
+    const dur = Math.max(5, toMin(r.item.end) - toMin(r.item.start) - heldPrayerMin(rows, r));
+    const ahead = (d: string) => (Date.parse(d) - Date.parse(todayThere)) / 86_400_000;
+    for (const d of days.filter((x) => x !== day && ahead(x) >= 0 && ahead(x) <= FORECAST_DAYS && !cityRule(city, x))) {
+      const m = dayModel(rowsByDay.get(d) ?? [], bookingMap);
+      const fit = firstFit(d, m.rows, candidateOf(idea, id, dur), m.travel, m.zones);
+      if (!fit) continue;
+      const f = await fetch(forecastUrl(idea.place.location, d), { signal: AbortSignal.timeout(8000) })
+        .then((x) => (x.ok ? x.json() : null))
+        .then((j: { hourly?: HourlyForecast } | null) => j?.hourly ?? null)
+        .catch(() => null);
+      if (f && !weatherRisk(f, d, fit.start, fit.end)) return setOtherDay((mm) => ({ ...mm, [id]: { day: d, start: fit.start } }));
+    }
+    setOtherDay((mm) => ({ ...mm, [id]: 'none' }));
+  };
 
   // 🍽 Lunch / dinner: a day out with no food stop at meal time gets a nudge (with halal places nearby).
   const mainStops = rows.filter((r) => !r.item.locked && !r.prayer && !isSide(r.item.track));
@@ -504,22 +631,27 @@ export function TimelinePage() {
     [frame, rows],
   );
 
-  const [preview, setPreview] = useState<ArrangeJob | null>(null);
-  const [arranging, setArranging] = useState(false);
-  const lastJob = jobs.data[0];
+  // AI plan: one shared preview for the trip (the newest open one) — every member sees the same; the admin applies.
+  const openPlan = jobs.data.find((j) => j.status === 'preview');
+  const [viewPlan, setViewPlan] = useState(false);
+  const [arranging, setArranging] = useState<'day' | 'trip' | null>(null);
+  const lastJob = jobs.data.find((j) => j.status !== 'discarded');
   const canUndo = isAdmin && lastJob?.status === 'applied';
 
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<Row | null>(null);
-  // Tapping a stop focuses it on the map (on phones the map view opens).
+  // Tapping a stop selects it: its actions (Move, ±15, Map) open, and it's focused on the map
+  // beside the list (on phones the map opens only from its Map button, so Move stays in view).
   const [selected, setSelected] = useState<string | null>(null);
   useEffect(() => setSelected(null), [day]);
-  const select = (id: string) => {
+  const select = (id: string) => setSelected((cur) => (cur === id ? null : id));
+  const showOnMap = (id: string) => {
     setSelected(id);
-    if (window.matchMedia('(max-width: 767px)').matches) setShowMap(true);
+    setShowMap(true);
   };
   const [adding, setAdding] = useState<Idea | null>(null);
   const [picking, setPicking] = useState<ScheduleItem | null>(null);
+  const [placing, setPlacing] = useState<ScheduleItem | null>(null);
   const [dragging, setDragging] = useState<{ title: string } | null>(null);
   const [showMap, setShowMap] = useState(false);
 
@@ -532,154 +664,194 @@ export function TimelinePage() {
       setPending(null);
     }
   };
-  const addIdea = (ideaId: string, toDay: string, start?: string) => api.post('schedule/add', { ideaId, day: toDay, start }, { tripId: trip.id });
 
   // Dragging starts from a grip handle (touch-action: none), so it can start on a small move —
   // no press-and-hold — while swiping anywhere else still scrolls the page.
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(TouchSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(TouchSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor),
   );
-  const movable = rows.filter((r) => !r.item.locked && !r.prayer).map((r) => r.item.id);
-  /**
-   * Rearrange mode: only the day's movable stops, as one compact list with big
-   * handles and ↑ / ↓ — nothing fixed in between to jump around — and the day
-   * chips to drop on. The new order is saved once, on Done.
-   */
-  const [rearranging, setRearranging] = useState<string[] | null>(null);
-  useEffect(() => setRearranging(null), [day]);
-  const sortIds = rearranging ?? movable;
-  // Entering Rearrange: bring the list (and the day chips just above it) into view.
+
+  // ── Moving a stop: one method on phone and laptop ──
+  // Pick it up (tap Move, or start dragging its grip), then choose a gap between the day's blocks.
+  // Every gap shows when it would start, the travel in and out, and what it pushes later —
+  // placement.ts, the same maths the server saves with, so the time shown is the time saved.
+  const [moving, setMoving] = useState<MoveState | null>(null);
+  const [hoverGap, setHoverGap] = useState<string | null>(null);
+  const [landed, setLanded] = useState<Map<string, number> | null>(null);
+  const [notice, setNotice] = useState('');
+  useEffect(() => setLanded(null), [schedule.data]);
+  useEffect(() => setHoverGap(null), [day, moving]);
+  /** Why a stop in `city` (trip destination index) can't go on day `d`, or null. */
+  const cityRule = (city: number | null, d: string): string | null => {
+    if (city === null || trip.destinations.length < 2) return null;
+    const there = dayCities.get(d);
+    return there?.length && !there.includes(city) ? `you're in ${cityLabel(trip.destinations, there)}` : null;
+  };
+  const cityOfLoc = (loc?: GeoPoint) => (loc && trip.destinations.length > 1 ? cityOf(trip.destinations, loc) : null);
+  const dayRuleFor = (loc?: GeoPoint) => (d: string) => cityRule(cityOfLoc(loc), d);
+  const blockedDay = moving ? cityRule(moving.city, day) : null;
+  const gaps: GapOption[] = useMemo(
+    () => (moving && !blockedDay ? gapOptions(day, model.rows, moving.cand, model.travel, model.zones) : []),
+    [moving, blockedDay, day, model],
+  );
+  const gapByKey = useMemo(() => new Map(gaps.map((g) => [g.key, g])), [gaps]);
+  const hovered = hoverGap ? gapByKey.get(hoverGap) : undefined;
+  // Hovering a gap (laptop) or dragging over one: the whole day re-timed live around it.
+  const shownStart = (id: string) => (hovered?.placement.ok ? hovered.placement.starts.get(id) : undefined) ?? landed?.get(id) ?? chain.starts.get(id);
+
+  const titleOf = (id?: string) => rows.find((r) => r.item.id === id)?.title;
+  const startMove = (r: Row) => {
+    setSelected(null);
+    setShowMap(false);
+    const split = !!r.sides?.length;
+    const base = Math.max(5, toMin(r.item.end) - toMin(r.item.start) - heldPrayerMin(rows, r));
+    const cand: Candidate = r.idea
+      ? candidateOf(r.idea, r.item.id, base)
+      : { id: r.item.id, duration: base, ...((r.in ?? r.out) ? { loc: (r.in ?? r.out)! } : {}) };
+    setMoving({ id: r.item.id, title: r.title, fromDay: day, cand, split, city: cityOfLoc(cand.loc) });
+  };
+  const startPlace = (idea: Idea, duration: number = durationRange(idea.estDurationMin).min) => {
+    setShowMap(false);
+    const split = approved.some((s) => s.tracks.some((t) => t.key === 'A' && t.ideaId === idea.id));
+    setMoving({ id: `backlog:${idea.id}`, ideaId: idea.id, title: idea.place.name, fromDay: day, cand: candidateOf(idea, `backlog:${idea.id}`, duration), split, city: cityOfLoc(idea.place.location) });
+    // Bring the day's list (with its gaps) into view.
+    setTimeout(() => document.getElementById('day-list')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+  };
+  /** Put the stop being moved into a gap. */
+  const place = (g: GapOption) => {
+    const m = moving;
+    if (!m || !g.placement.ok) return;
+    setMoving(null);
+    setLanded(g.placement.starts);
+    const start = toClock(g.placement.start);
+    const len = g.placement.end - g.placement.start;
+    void call(async () => {
+      const res = m.ideaId
+        ? await api.post<{ start?: string; moved?: boolean }>('schedule/add', { ideaId: m.ideaId, day, start, pinned: false, ...(m.split ? {} : { durationMin: len }) }, { tripId: trip.id })
+        : await api.post<{ start?: string; moved?: boolean }>('schedule/update', { id: m.id, day, start, pinned: false, ...(m.split ? {} : { durationMin: len }) }, { tripId: trip.id });
+      if (res?.moved && res.start) setNotice(`${m.title} was saved at ${fmtClock(toMin(res.start))} — the measured route there takes longer than the estimate.`);
+    });
+  };
+  /** Earlier / later by 15 minutes (checked like any move). */
+  const shift = (r: Row, by: number) => {
+    const others = dayModel(rows.filter((x) => x.item.id !== r.item.id), bookingMap);
+    const base = Math.max(5, toMin(r.item.end) - toMin(r.item.start) - heldPrayerMin(rows, r));
+    const cand: Candidate = r.idea ? candidateOf(r.idea, r.item.id, base) : { id: r.item.id, duration: base, ...((r.in ?? r.out) ? { loc: (r.in ?? r.out)! } : {}) };
+    const p = placeAt(day, others.rows, { ...cand, pinned: true }, toMin(r.item.start) + by, others.travel, others.zones);
+    if (!p.ok) return setError(`${r.title} can't start at ${fmtClock(toMin(r.item.start) + by)}: ${p.why?.toLowerCase()}.`);
+    setLanded(p.starts);
+    void call(() => api.post('schedule/update', { id: r.item.id, start: toClock(p.start), pinned: true, ...(r.sides?.length ? {} : { durationMin: p.end - p.start }) }, { tripId: trip.id }));
+  };
   useEffect(() => {
-    if (rearranging) document.getElementById('rearrange-list')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!rearranging]);
-  const saveOrder = () => {
-    const order = rearranging;
-    setRearranging(null);
-    if (!order || order.join() === movable.join()) return;
-    setPending({ day, order });
-    void call(() => api.post('schedule/reorder', { day, order }, { tripId: trip.id }));
-  };
-  /**
-   * A day chip under the pointer wins (move to that day); otherwise a stop
-   * being reordered goes to the nearest stop — never the whole list, which
-   * used to swallow the drop; a backlog idea lands on the day shown.
-   */
-  const collision: CollisionDetection = (args) => {
-    const under = pointerWithin(args);
-    const chip = under.find((c) => /^chip2?:/.test(String(c.id)));
-    if (chip) return [chip];
-    if (rearranging) return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((c) => sortIds.includes(String(c.id))) });
-    // The timeline: the block under the pointer (drop before / after it), else the nearest block.
-    const slotUnder = under.find((c) => String(c.id).startsWith('slot:'));
-    if (slotUnder) return [slotUnder];
-    const slots = args.droppableContainers.filter((c) => String(c.id).startsWith('slot:'));
-    return slots.length ? closestCenter({ ...args, droppableContainers: slots }) : under;
-  };
-  /** Which half of the block the dragged card's centre is over → before / after it. */
-  const onDragMove = (e: DragMoveEvent) => {
-    const over = e.over;
-    if (!over || !String(over.id).startsWith('slot:')) return setSlot((cur) => (cur ? null : cur));
-    const rect = e.active.rect.current.translated;
-    const y = rect ? rect.top + rect.height / 2 : 0;
-    const where = y < over.rect.top + over.rect.height / 2 ? 'before' : 'after';
-    const rowId = String(over.id).slice(5);
-    setSlot((cur) => (cur?.rowId === rowId && cur.where === where ? cur : { rowId, where }));
-  };
-  /** Earlier / later by one place (the same as dragging it). */
-  const nudge = (id: string, by: -1 | 1) => {
-    const from = movable.indexOf(id);
-    const to = from + by;
-    if (from < 0 || to < 0 || to >= movable.length) return;
-    const order = arrayMove(movable, from, to);
-    setPending({ day, order });
-    void call(() => api.post('schedule/reorder', { day, order }, { tripId: trip.id }));
-  };
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(''), 9000);
+    return () => clearTimeout(t);
+  }, [notice]);
+  // Esc cancels a move.
+  useEffect(() => {
+    if (!moving) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMoving(null);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [moving]);
+
   // "Back to backlog" with a short undo.
   const [removed, setRemoved] = useState<{ ideaId?: string; title: string; day: string; start: string; duration: number } | null>(null);
   const toBacklog = (r: Row) =>
     void call(async () => {
-      await api.post('schedule/remove', { id: r.item.id }, { tripId: trip.id });
-      setRemoved({ ...(r.item.ref.kind === 'idea' ? { ideaId: r.item.ref.ideaId } : {}), title: r.title, day: r.item.day, start: r.item.start, duration: toMin(r.item.end) - toMin(r.item.start) });
+      const res = await api.post<{ ideaId?: string }>('schedule/remove', { id: r.item.id }, { tripId: trip.id });
+      // A lunch / dinner restaurant comes back as a backlog idea (its id is in the reply).
+      const ideaId = r.item.ref.kind === 'idea' ? r.item.ref.ideaId : res?.ideaId;
+      setRemoved({ ...(ideaId ? { ideaId } : {}), title: r.title, day: r.item.day, start: r.item.start, duration: toMin(r.item.end) - toMin(r.item.start) });
     });
   useEffect(() => {
     if (!removed) return;
     const t = setTimeout(() => setRemoved(null), 8000);
     return () => clearTimeout(t);
   }, [removed]);
-  const arrange = async () => {
-    setArranging(true);
-    await call(async () => setPreview(await api.post<ArrangeJob>('schedule/arrange', {}, { tripId: trip.id })));
-    setArranging(false);
+  const arrange = async (scope: 'day' | 'trip') => {
+    setArranging(scope);
+    await call(async () => {
+      await api.post<ArrangeJob>('schedule/arrange', scope === 'day' ? { day } : {}, { tripId: trip.id });
+      setViewPlan(true);
+    });
+    setArranging(null);
   };
 
+  // Dragging is a shortcut into the same move: the gaps are the drop targets; hovering a day
+  // (in the bar at the bottom) for a moment switches to it.
+  const collision: CollisionDetection = (args) => {
+    const under = pointerWithin(args);
+    const chip = under.find((c) => String(c.id).startsWith('bar:'));
+    if (chip) return [chip];
+    const gap = under.find((c) => String(c.id).startsWith('gap:'));
+    if (gap) return [gap];
+    const all = args.droppableContainers.filter((c) => String(c.id).startsWith('gap:'));
+    return all.length ? closestCenter({ ...args, droppableContainers: all }) : under;
+  };
+  const dayHover = useRef<{ day: string; t: ReturnType<typeof setTimeout> } | null>(null);
+  const clearDayHover = () => {
+    if (dayHover.current) clearTimeout(dayHover.current.t);
+    dayHover.current = null;
+  };
   const onDragStart = (e: DragStartEvent) => {
     setDragging({ title: String(e.active.data.current?.title ?? '') });
     const id = String(e.active.id);
     if (id.startsWith('backlog:')) {
       const idea = ideaMap.get(id.slice(8));
-      if (idea) setMoving({ id, duration: durationRange(idea.estDurationMin).min, loc: idea.place.location, ideaId: idea.id });
+      if (idea) startPlace(idea);
     } else {
       const r = rows.find((x) => x.item.id === id);
-      if (r) setMoving({ id, duration: Math.max(5, toMin(r.item.end) - toMin(r.item.start)), ...((r.in ?? r.out) ? { loc: (r.in ?? r.out)! } : {}) });
+      if (r) startMove(r);
     }
+  };
+  const onDragOver = ({ over }: DragOverEvent) => {
+    const id = over ? String(over.id) : '';
+    if (id.startsWith('gap:')) setHoverGap(id.slice(4));
+    else setHoverGap(null);
+    if (id.startsWith('bar:')) {
+      const d = id.slice(4);
+      if (d !== day && dayHover.current?.day !== d) {
+        clearDayHover();
+        dayHover.current = { day: d, t: setTimeout(() => setDay(d), 600) };
+      }
+    } else clearDayHover();
   };
   // The browser's scroll anchoring would jump the page while auto-scrolling a drag.
   useEffect(() => {
     document.documentElement.style.overflowAnchor = dragging ? 'none' : '';
   }, [dragging]);
-  const endDrag = () => {
+  const onDragEnd = ({ over }: DragEndEvent) => {
     setDragging(null);
-    setMoving(null);
-    setSlot(null);
+    clearDayHover();
+    const id = over ? String(over.id) : '';
+    // Dropped in a gap → placed. Anywhere else the stop stays picked up: tap a gap (or Cancel).
+    if (id.startsWith('gap:')) {
+      const g = gapByKey.get(id.slice(4));
+      if (g?.placement.ok) place(g);
+      else if (g) setError(`Not there: ${g.placement.why?.toLowerCase()}. Pick another spot.`);
+    } else if (id.startsWith('bar:')) setDay(id.slice(4));
   };
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    const dropped = dropPlan;
-    const drag = moving;
-    endDrag();
-    if (!over) return;
-    const id = String(active.id);
-    const target = String(over.id);
-    // Into a gap on this day: it takes that time; everything after it is re-timed (travel included).
-    if (target.startsWith('slot:') && dropped && drag) {
-      if (!dropped.fits) return setError(`${drag.id.startsWith('backlog:') ? 'That' : 'It'} doesn't fit there — it would run past midnight. Drop it earlier or on another day.`);
-      setLanded(dropped.starts);
-      const start = toClock(dropped.start);
-      if (id.startsWith('backlog:')) void call(() => api.post('schedule/add', { ideaId: drag.ideaId, day, start, durationMin: drag.duration }, { tripId: trip.id }));
-      else void call(() => api.post('schedule/update', { id, start }, { tripId: trip.id }));
-      return;
-    }
-    if (id.startsWith('backlog:')) {
-      const toDay = /^chip2?:/.test(target) ? target.split(':')[1] : day;
-      void call(async () => {
-        await addIdea(id.slice(8), toDay);
-        if (toDay !== day) setDay(toDay);
-      });
-      return;
-    }
-    if (/^chip2?:/.test(target)) {
-      const toDay = target.split(':')[1];
-      if (toDay !== day)
-        void call(async () => {
-          setRearranging((o) => o?.filter((x) => x !== id) ?? null);
-          await api.post('schedule/update', { id, day: toDay }, { tripId: trip.id });
-          if (!rearranging) setDay(toDay);
-        });
-      return;
-    }
-    if (rearranging) {
-      const [from, to] = [rearranging.indexOf(id), rearranging.indexOf(target)];
-      if (from >= 0 && to >= 0 && from !== to) setRearranging(arrayMove(rearranging, from, to));
-      return;
-    }
-    const from = movable.indexOf(id);
-    const to = movable.indexOf(target);
-    if (from < 0 || to < 0 || from === to) return;
-    const order = arrayMove(movable, from, to);
-    setPending({ day, order });
-    void call(() => api.post('schedule/reorder', { day, order }, { tripId: trip.id }));
+  // A label that follows the pointer (the list re-flows when the gaps open, so a copy of the card would drift).
+  const [dragAt, setDragAt] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!dragging) return setDragAt(null);
+    const onMove = (e: PointerEvent | TouchEvent) => {
+      const p = 'touches' in e ? e.touches[0] : e;
+      if (p) setDragAt({ x: p.clientX, y: p.clientY });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('touchmove', onMove, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('touchmove', onMove);
+    };
+  }, [dragging]);
+  const onDragCancel = () => {
+    setDragging(null);
+    clearDayHover();
   };
 
   /**
@@ -688,12 +860,12 @@ export function TimelinePage() {
    * emptiest day in that city after its last stop.
    */
   const defaultSlot = (idea: Idea, duration: number): { day: string; start: string; fits: boolean } => {
-    const city = trip.destinations.length > 1 ? cityOf(trip.destinations, idea.place.location) : null;
+    const city = cityOfLoc(idea.place.location);
     const inCity = city === null ? days : days.filter((d) => dayCities.get(d)?.includes(city));
     const unknown = days.filter((d) => !dayCities.get(d)?.length);
     const pool = inCity.length ? inCity : unknown.length ? unknown : days;
     const ordered = [...pool].sort((a, b) => Number(b === day) - Number(a === day) || a.localeCompare(b));
-    const checker = makeChecker(rowsByDay, idea, []);
+    const checker = makeChecker(rowsByDay, bookingMap, idea, []);
     for (const d of ordered) {
       const s = checker?.suggest(d, duration);
       if (s !== null && s !== undefined) return { day: d, start: toClock(s), fits: true };
@@ -744,31 +916,50 @@ export function TimelinePage() {
   });
 
   return (
-    <DndContext sensors={sensors} collisionDetection={collision} autoScroll={{ acceleration: 30, threshold: { x: 0, y: 0.18 } }} onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd} onDragCancel={endDrag}>
+    <DndContext sensors={sensors} collisionDetection={collision} autoScroll={{ acceleration: 30, threshold: { x: 0, y: 0.18 } }} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>
       <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
             <h1 className="text-xl font-extrabold text-[#161C23]">Timeline</h1>
-            <p className="text-sm text-[#6D7A77]">Drag stops by their grip ⋮⋮ (or tap Rearrange). Bookings and prayer times stay fixed.</p>
+            <p className="text-sm text-[#6D7A77]">Tap a stop, then Move (or drag its grip ⋮⋮) and pick a spot. Bookings and prayer times stay fixed.</p>
           </div>
-          <div className="flex gap-2 shrink-0">
-            {isAdmin && (
-              <Button onClick={arrange} loading={arranging} className="shrink-0">
-                <Sparkles className="w-4 h-4" /> <span className="hidden sm:inline">AI </span>Arrange
-              </Button>
-            )}
-            {movable.length > 1 && !rearranging && (
-              <Button variant="secondary" className="shrink-0" aria-label="Rearrange stops" onClick={() => (setShowMap(false), setRearranging(movable))}>
-                <ArrowUpDown className="w-4 h-4" /> <span className="sm:hidden">Order</span>
-                <span className="hidden sm:inline">Rearrange</span>
-              </Button>
-            )}
+          {/* One control, two scopes: AI plans this day or the whole trip (a shared preview the admin applies). */}
+          <div className="flex items-stretch gap-2 sm:shrink-0">
+            <div role="group" aria-label="AI plan" className="flex flex-1 sm:flex-none min-h-11 rounded-xl border border-[#00685F] overflow-hidden text-sm font-bold">
+              <span className="flex items-center gap-1.5 pl-3 pr-2.5 bg-[#00685F] text-white">
+                <Sparkles className="w-4 h-4" /> <span className="whitespace-nowrap">AI plan</span>
+              </span>
+              {(['day', 'trip'] as const).map((scope) => (
+                <button
+                  key={scope}
+                  type="button"
+                  onClick={() => void arrange(scope)}
+                  disabled={!!arranging}
+                  className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 whitespace-nowrap text-[#00685F] bg-white hover:bg-[#00685F]/10 border-l border-[#00685F]/30 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {arranging === scope && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {scope === 'day' ? 'This day' : 'Whole trip'}
+                </button>
+              ))}
+            </div>
             <Button variant="secondary" className="md:hidden shrink-0" onClick={() => setShowMap((v) => !v)} aria-pressed={showMap}>
               <MapIcon className="w-4 h-4" /> {showMap ? 'List' : 'Map'}
             </Button>
           </div>
         </div>
-        {canUndo && (
+        {openPlan && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#00685F]/30 bg-[#00685F]/5 px-4 py-2.5 text-sm">
+            <span className="text-[#161C23] min-w-0">
+              <Sparkles className="inline w-4 h-4 text-[#00685F] -mt-0.5" /> An AI plan for <b>{openPlan.day ? formatDay(openPlan.day) : 'the whole trip'}</b> is ready
+              {openPlan.createdBy !== me.uid ? ` (by ${people.get(openPlan.createdBy)?.displayName ?? 'a member'})` : ''}
+              {isAdmin ? ' — review and apply it.' : ' — the admin can apply it.'}
+            </span>
+            <Button variant="secondary" className="shrink-0 !min-h-9" onClick={() => setViewPlan(true)}>
+              Review
+            </Button>
+          </div>
+        )}
+        {canUndo && lastJob && (
           <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#E7DFD5] bg-white px-4 py-2.5 text-sm">
             <span className="text-[#6D7A77]">
               AI Arrange was applied{lastJob.appliedAt ? ` ${new Date(lastJob.appliedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}` : ''}.
@@ -797,6 +988,7 @@ export function TimelinePage() {
         </div>
 
         {error && <ErrorBanner>{error}</ErrorBanner>}
+        {notice && <p className="rounded-2xl border border-[#C9DDF2] bg-[#F3F8FD] px-4 py-2 text-sm text-[#1D4E89]">{notice}</p>}
         {removed && (
           <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#E7DFD5] bg-white px-4 py-2 text-sm">
             <span className="text-[#161C23] min-w-0 truncate">
@@ -897,40 +1089,91 @@ export function TimelinePage() {
           </div>
         )}
 
+        {weatherHeads.filter((h) => h.day !== day).map((h) => (
+          <button
+            key={h.day}
+            type="button"
+            onClick={() => setDay(h.day)}
+            className="w-full text-left flex items-start gap-3 rounded-2xl border border-[#C9DDF2] bg-[#F3F8FD] px-4 py-2.5 text-sm text-[#1D4E89]"
+          >
+            <span className="text-base leading-none mt-0.5">🌦</span>
+            <span className="flex-1 min-w-0">
+              <b>{h.day === todayThere ? 'Today' : 'Tomorrow'} (Day {days.indexOf(h.day) + 1}{dayCities.get(h.day)?.length && trip.destinations.length > 1 ? `, ${cityLabel(trip.destinations, dayCities.get(h.day)!)}` : ''})</b>: the weather may spoil{' '}
+              {h.risks.map((x) => x.row.title).join(', ')} — {h.risks[0].risk.text.split(' — ')[0].toLowerCase()}.
+              <span className="block text-xs font-semibold underline underline-offset-2">See plan B</span>
+            </span>
+          </button>
+        ))}
+
         {weather.size > 0 && (
-          <div className="rounded-2xl border border-[#C9DDF2] bg-[#F3F8FD] px-4 py-3 space-y-2 text-sm">
+          <div className="rounded-2xl border border-[#C9DDF2] bg-[#F3F8FD] px-4 py-3 space-y-3 text-sm">
             <p className="font-bold text-[#1D4E89]">
-              🌦 {day === todayThere ? 'Today' : 'Tomorrow'}: weather may spoil {weather.size} outdoor stop{weather.size > 1 ? 's' : ''} — fix {weather.size > 1 ? 'them' : 'it'} yourself or let AI suggest
+              🌦 {day === todayThere ? 'Today' : 'Tomorrow'}: weather may spoil {weather.size} outdoor stop{weather.size > 1 ? 's' : ''} — pick a plan B
             </p>
             {[...weather].map(([id, w]) => {
               const r = rows.find((x) => x.item.id === id)!;
               const dur = toMin(r.item.end) - toMin(r.item.start);
               // A drier time today that still fits the plan.
-              const checker = makeChecker(rowsByDay, r.idea, [r.item.id]);
+              const checker = makeChecker(rowsByDay, bookingMap, r.idea, [r.item.id]);
               const drier = forecast
                 ? Array.from({ length: 53 }, (_, k) => 8 * 60 + k * 15)
                     .filter((s) => s + dur <= 22 * 60 && s !== toMin(r.item.start) && !weatherRisk(forecast, day, s, s + dur) && !checker?.check(day, s, dur).some((x) => x.severity === 'block'))
                     .sort((a, b) => Math.abs(a - toMin(r.item.start)) - Math.abs(b - toMin(r.item.start)))[0]
                 : undefined;
+              const found = indoor[id];
+              const moveTo = otherDay[id];
+              const btn = '!min-h-8 !px-3 text-xs';
               return (
-                <div key={id} className="space-y-1">
+                <div key={id} className="space-y-1.5 rounded-xl bg-white/70 border border-[#DCE8F5] p-2.5">
                   <p className="text-[#161C23]">
                     <b>{r.title}</b> ({fmtClock(toMin(r.item.start))}): {w.risk.text}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {drier !== undefined && (
-                      <Button variant="secondary" className="!min-h-8 !px-3 text-xs" onClick={() => void call(() => api.post('schedule/update', { id, start: toClock(drier) }, { tripId: trip.id }))}>
-                        Move to {fmtClock(drier)} (drier)
+                      <Button variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/update', { id, start: toClock(drier) }, { tripId: trip.id }))}>
+                        ⏰ Move to {fmtClock(drier)} (drier)
                       </Button>
                     )}
-                    {w.swap && (
-                      <Button variant="secondary" className="!min-h-8 !px-3 text-xs" onClick={() => void call(() => api.post('schedule/swap', { id, ideaId: w.swap!.id }, { tripId: trip.id }))}>
-                        Swap for {w.swap.place.name}{w.swap.status === 'backup' ? ' (backup)' : ''} — indoor
+                    {w.swaps.map((sw) => (
+                      <Button key={sw.id} variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/swap', { id, ideaId: sw.id }, { tripId: trip.id }))}>
+                        🏛 Swap for {sw.place.name}
+                        {sw.status === 'backup' ? ' (backup)' : ''}
+                      </Button>
+                    ))}
+                    {found === undefined && (
+                      <Button variant="ghost" className={btn} onClick={() => findIndoor(id)}>
+                        🔎 Indoor places nearby
                       </Button>
                     )}
-                    <Button variant="ghost" className="!min-h-8 !px-3 text-xs" onClick={() => setEditing(r)}>
-                      Move to another day
-                    </Button>
+                    {found === 'loading' && <span className="text-xs text-[#6D7A77] self-center">Looking for indoor places…</span>}
+                    {Array.isArray(found) &&
+                      found.map((p) => (
+                        <Button key={p.placeId} variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/swap-place', { id, placeId: p.placeId }, { tripId: trip.id }))}>
+                          🏛 {p.name} · {p.typeLabel} · {p.minutes} min
+                        </Button>
+                      ))}
+                    {Array.isArray(found) && !found.length && <span className="text-xs text-[#6D7A77] self-center">No indoor places found nearby.</span>}
+                    {moveTo === undefined && (
+                      <Button variant="ghost" className={btn} onClick={() => void findDrierDay(r)}>
+                        📅 A drier day in this city
+                      </Button>
+                    )}
+                    {moveTo === 'loading' && <span className="text-xs text-[#6D7A77] self-center">Checking the other days…</span>}
+                    {moveTo === 'none' && <span className="text-xs text-[#6D7A77] self-center">No drier day with room in this city (within the forecast).</span>}
+                    {moveTo && typeof moveTo === 'object' && (
+                      <Button
+                        variant="secondary"
+                        className={btn}
+                        onClick={() =>
+                          void call(async () => {
+                            await api.post('schedule/update', { id, day: moveTo.day, start: toClock(moveTo.start) }, { tripId: trip.id });
+                            setDay(moveTo.day);
+                          })
+                        }
+                      >
+                        📅 Move to {formatDay(moveTo.day)}, {fmtClock(moveTo.start)} (dry)
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
@@ -992,42 +1235,46 @@ export function TimelinePage() {
           <div className={cx('space-y-2', showMap && 'hidden md:block')}>
             {loading ? (
               <Spinner label="Loading timeline…" />
-            ) : rearranging ? (
-              <RearrangeList
-                ids={rearranging}
-                rows={rows}
-                days={days}
-                day={day}
-                onMove={(from, to) => setRearranging(arrayMove(rearranging, from, to))}
-                onDone={saveOrder}
-                onCancel={() => setRearranging(null)}
-              />
             ) : (
-              <DayList empty={!rows.length}>
+              <div id="day-list" className="scroll-mt-24">
+                {moving && blockedDay && (
+                  <Card className="p-4 mb-2 text-sm text-[#8A5A00] border-[#F2D8B0] bg-[#FFF8EC]">
+                    {moving.title} can't go on this day — {blockedDay}. Pick a day in its city in the bar below.
+                  </Card>
+                )}
+                {moving && !blockedDay && !rows.length && gaps[0] && <GapSlot gap={gaps[0]} titleOf={titleOf} hovered={hoverGap === gaps[0].key} onHover={setHoverGap} onPick={place} />}
+                <DayList empty={!rows.length && !moving}>
                   {rows.map((r, i) => {
                     // Travel into every block from the one before it — stops, prayer places, bookings.
-                    // While dragging only the times change (live) — the rows keep their place so nothing jumps.
                     const leg = chain.legs.get(r.item.id);
                     const prevRow = i > 0 ? rows[i - 1] : undefined;
-                    const line =
-                      slot?.rowId === r.item.id && dropPlan && moving
-                        ? { where: slot.where, text: dropPlan.fits ? `${dragging?.title ?? 'It'} would start at ${fmtClock(dropPlan.start)}` : "Doesn't fit before midnight" }
-                        : null;
                     const travelRow = prevRow && sameJourney(prevRow.item, r.item) ? (
                       <OnBoardRow booking={r.item.ref.kind === 'booking' ? bookingMap.get(r.item.ref.bookingId) : undefined} />
                     ) : leg ? (
-                      <TravelRow minutes={leg.minutes} real={r.item.transitFromPrev?.fromId === leg.fromId ? r.item.transitFromPrev : undefined} to={r.prayer ? 'prayer' : undefined} />
+                      <TravelRow
+                        minutes={leg.minutes}
+                        real={r.item.transitFromPrev?.fromId === leg.fromId ? r.item.transitFromPrev : undefined}
+                        to={r.prayer ? 'prayer' : undefined}
+                        {...gapBetween(rows.find((x) => x.item.id === leg.fromId), r, leg.minutes, shownStart)}
+                      />
                     ) : (
                       <div className="h-1.5" />
                     );
+                    // While moving: a ＋ spot before the first block and after each one (never inside a visit that holds a prayer).
+                    const before = moving && i === 0 ? gaps.find((g) => g.afterId === null) : undefined;
+                    const after = moving ? gaps.find((g) => g.afterId === r.item.id) : undefined;
+                    const isMoving = moving?.id === r.item.id;
+                    const holder = r.prayer ? longVisitAround(rows, r) : undefined;
                     return (
-                      <DropRow key={r.item.id} id={r.item.id} line={line}>
-                        {i > 0 && travelRow}
+                      <div key={r.item.id} data-block={r.item.id}>
+                        {before && <GapSlot gap={before} titleOf={titleOf} hovered={hoverGap === before.key} onHover={setHoverGap} onPick={place} />}
+                        {i > 0 && !moving && travelRow}
+                        {moving && i > 0 && !after && !gaps.some((g) => g.afterId === rows[i - 1].item.id) && <div className="h-1.5" />}
                         {r.prayer ? (
                           <PrayerRow
                             row={r}
                             tripId={trip.id}
-                            inside={longVisitAround(rows, r)}
+                            inside={holder}
                             pairInside={pairInLongVisit(rows, r)}
                             people={people}
                             members={members}
@@ -1038,39 +1285,38 @@ export function TimelinePage() {
                             onSelect={() => select(r.item.id)}
                             before={rows.slice(0, i).reverse().find((x) => !x.prayer)?.title}
                             after={rows.slice(i + 1).find((x) => !x.prayer)?.title}
+                            dayZone={tz}
+                            zoneName={dayDest.name}
+                            until={prayerUntil(frame.prayers, r.item.prayer?.prayer)}
+                            onPlace={() => setPlacing(r.item)}
                           />
                         ) : (
-                          <>
-                            <StopRow
-                              row={r}
-                              shownStart={shownStart(r.item.id)}
-                              index={movable.indexOf(r.item.id)}
-                              count={movable.length}
-                              days={days}
-                              day={day}
-                              onNudge={(by) => nudge(r.item.id, by)}
-                              onMoveDay={(d) =>
-                                void call(async () => {
-                                  await api.post('schedule/update', { id: r.item.id, day: d }, { tripId: trip.id });
-                                  setDay(d);
-                                })
-                              }
-                              onBacklog={() => toBacklog(r)}
-                              dayZone={tz}
-                              weather={weather.get(r.item.id)?.risk}
-                              warnings={[...(warnings.get(r.item.id) ?? []), ...(r.sides ?? []).flatMap((s) => warnings.get(s.item.id) ?? [])]}
-                              people={people}
-                              me={me.uid}
-                              selected={selected === r.item.id || !!r.sides?.some((s) => s.item.id === selected)}
-                              onSelect={() => select(r.item.id)}
-                              onEdit={() => setEditing(r)}
-                            />
-                          </>
+                          <StopRow
+                            row={r}
+                            shownStart={shownStart(r.item.id)}
+                            moving={isMoving}
+                            busy={!!moving}
+                            onMove={() => startMove(r)}
+                            onShift={(by) => shift(r, by)}
+                            onUnpin={() => void call(() => api.post('schedule/update', { id: r.item.id, pinned: false }, { tripId: trip.id }))}
+                            onBacklog={() => toBacklog(r)}
+                            dayZone={tz}
+                            weather={weather.get(r.item.id)?.risk}
+                            warnings={[...(warnings.get(r.item.id) ?? []), ...(r.sides ?? []).flatMap((s) => warnings.get(s.item.id) ?? [])]}
+                            people={people}
+                            me={me.uid}
+                            selected={selected === r.item.id || !!r.sides?.some((s) => s.item.id === selected)}
+                            onSelect={() => select(r.item.id)}
+                            onMap={() => showOnMap(r.item.id)}
+                            onEdit={() => setEditing(r)}
+                          />
                         )}
-                      </DropRow>
+                        {after && <GapSlot gap={after} titleOf={titleOf} hovered={hoverGap === after.key} onHover={setHoverGap} onPick={place} />}
+                      </div>
                     );
                   })}
-              </DayList>
+                </DayList>
+              </div>
             )}
           </div>
 
@@ -1084,6 +1330,8 @@ export function TimelinePage() {
               ideas={backlog}
               pairName={pairName}
               onAdd={setAdding}
+              onPlace={startPlace}
+              placing={moving?.ideaId}
               day={day}
               destinations={trip.destinations}
               dayCity={dayCities.get(day)?.length ? trip.destinations[dayCities.get(day)!.at(-1)!].name : nearestDestination(trip.destinations, firstStop ?? frame.base).name}
@@ -1092,9 +1340,21 @@ export function TimelinePage() {
         </div>
       </div>
 
-      <DragOverlay dropAnimation={null}>
-        {dragging && <div className="px-4 py-3 rounded-2xl bg-white shadow-xl border border-[#00685F]/40 font-semibold text-sm text-[#161C23] max-w-xs truncate">{dragging.title}</div>}
-      </DragOverlay>
+      {dragging && dragAt && (
+        <div className="pointer-events-none fixed z-50 max-w-[14rem] truncate rounded-xl bg-[#00685F] px-3 py-1.5 text-xs font-bold text-white shadow-lg" style={{ left: dragAt.x + 14, top: dragAt.y + 10 }}>
+          {dragging.title}
+        </div>
+      )}
+      {moving && (
+        <MoveBar
+          title={moving.title}
+          days={days}
+          day={day}
+          dayStatus={(d) => cityRule(moving.city, d)}
+          onDay={setDay}
+          onCancel={() => setMoving(null)}
+        />
+      )}
 
       <EditStopSheet
         item={editing?.item ?? null}
@@ -1102,10 +1362,15 @@ export function TimelinePage() {
         title={editing?.sides?.length ? `Split: ${[editing.title, ...editing.sides.map((s) => s.title)].join(' / ')}` : (editing?.title ?? '')}
         fixedLength={!!editing?.sides?.length}
         days={days}
-        checker={editing ? makeChecker(rowsByDay, editing.idea, [editing.item.id, ...(editing.sides ?? []).map((s) => s.item.id)]) : undefined}
+        dayRule={editing ? dayRuleFor(editing.in ?? editing.out) : undefined}
+        checker={editing ? makeChecker(rowsByDay, bookingMap, editing.idea, [editing.item.id, ...(editing.sides ?? []).map((s) => s.item.id)]) : undefined}
         onClose={() => setEditing(null)}
         onSave={async (patch) => {
-          await api.post('schedule/update', { id: editing!.item.id, ...patch }, { tripId: trip.id });
+          const title = editing!.title;
+          // A start typed by hand is kept (📌); otherwise the stop follows the one before.
+          const pinned = patch.start !== editing!.item.start || patch.day !== editing!.item.day ? true : editing!.item.pinned;
+          const res = await api.post<{ start?: string; moved?: boolean }>('schedule/update', { id: editing!.item.id, ...patch, ...(pinned !== undefined ? { pinned } : {}) }, { tripId: trip.id });
+          if (res?.moved && res.start) setNotice(`${title} was saved at ${fmtClock(toMin(res.start))} — the measured route there takes longer than the estimate.`);
           if (patch.day !== day) setDay(patch.day);
         }}
         onRemove={() => api.post('schedule/remove', { id: editing!.item.id }, { tripId: trip.id })}
@@ -1118,18 +1383,22 @@ export function TimelinePage() {
           onClose={() => setPicking(null)}
         />
       )}
+      {placing && <PrayerPlaceSheet item={schedule.data.find((i) => i.id === placing.id) ?? placing} tripId={trip.id} onClose={() => setPlacing(null)} />}
       {fixing && <FixDaySheet day={day} tripId={trip.id} rows={rows} onClose={() => setFixing(false)} />}
-      {preview && (
+      {viewPlan && openPlan && (
         <ArrangeSheet
-          job={preview}
+          job={openPlan}
           days={days}
           ideas={ideaMap}
           current={schedule.data}
-          onApply={() => api.post('schedule/apply', { jobId: preview.id }, { tripId: trip.id })}
-          onClose={() => {
-            if (jobs.data.find((j) => j.id === preview.id)?.status === 'preview') void api.post('schedule/discard', { jobId: preview.id }, { tripId: trip.id }).catch(() => {});
-            setPreview(null);
+          canApply={isAdmin}
+          author={openPlan.createdBy === me.uid ? 'you' : people.get(openPlan.createdBy)?.displayName}
+          onApply={async () => {
+            await api.post('schedule/apply', { jobId: openPlan.id }, { tripId: trip.id });
+            if (openPlan.day && openPlan.day !== day) setDay(openPlan.day);
           }}
+          onDiscard={isAdmin || openPlan.createdBy === me.uid ? () => api.post('schedule/discard', { jobId: openPlan.id }, { tripId: trip.id }) : undefined}
+          onClose={() => setViewPlan(false)}
         />
       )}
       <AddStopSheet
@@ -1137,12 +1406,16 @@ export function TimelinePage() {
         days={days}
         defaultDay={day}
         pickDefault={adding ? (duration) => defaultSlot(adding, duration) : undefined}
-        checker={adding ? makeChecker(rowsByDay, adding, []) : undefined}
+        dayRule={adding ? dayRuleFor(adding.place.location) : undefined}
+        checker={adding ? makeChecker(rowsByDay, bookingMap, adding, []) : undefined}
+        onPickSpot={adding ? (duration) => startPlace(adding, duration) : undefined}
         onClose={() => setAdding(null)}
-        onAdd={async (toDay, start, durationMin) => {
+        onAdd={async (toDay, start, durationMin, pinned) => {
           // A different length than the place's is remembered for it.
           if (durationMin !== durationRange(adding!.estDurationMin).min) void api.post('ideas/duration', { ideaId: adding!.id, minutes: durationMin }, { tripId: trip.id }).catch(() => {});
-          await api.post('schedule/add', { ideaId: adding!.id, day: toDay, start, durationMin }, { tripId: trip.id });
+          const title = adding!.place.name;
+          const res = await api.post<{ start?: string; moved?: boolean }>('schedule/add', { ideaId: adding!.id, day: toDay, start, durationMin, pinned }, { tripId: trip.id });
+          if (res?.moved && res.start) setNotice(`${title} was saved at ${fmtClock(toMin(res.start))} — the measured route there takes longer than the estimate.`);
           if (toDay !== day) setDay(toDay);
         }}
       />
@@ -1157,8 +1430,9 @@ export function TimelinePage() {
             const idea = ideaMap.get(ideaId);
             const [a, b] = MEAL_WINDOW[mealFor];
             const dur = idea?.estDurationMin ?? 60;
-            const s = idea ? findSlot({ day, items: (rowsByDay.get(day) ?? []).map((r) => ({ start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), ...(r.prayer ? {} : { loc: r.out ?? r.in }) })), duration: dur, hours: idea.place.openingHours, loc: idea.place.location, after: a }) : null;
-            await api.post('schedule/add', { ideaId, day, ...(s !== null && s + dur <= b + 30 ? { start: toClock(s) } : { start: toClock(a) }) }, { tripId: trip.id });
+            // The first time in the meal window that fits (the same placement the server saves with).
+            const fit = idea ? firstFit(day, model.rows, candidateOf(idea, 'meal', dur), model.travel, model.zones, a, b + 30) : null;
+            await api.post('schedule/add', { ideaId, day, start: toClock(fit?.start ?? a), pinned: true }, { tripId: trip.id });
           }}
         />
       )}
@@ -1166,82 +1440,119 @@ export function TimelinePage() {
   );
 }
 
-/** Rearrange mode: the day's movable stops as one plain list — grip, name, ↑ / ↓. */
-function RearrangeList({ ids, rows, days, day, onMove, onDone, onCancel }: { ids: string[]; rows: Row[]; days: string[]; day: string; onMove: (from: number, to: number) => void; onDone: () => void; onCancel: () => void }) {
-  const byId = new Map(rows.map((r) => [r.item.id, r]));
+/**
+ * While moving: the stop's name, Cancel, and every trip day to switch to —
+ * always on screen at the bottom (phone and laptop), and drop targets while
+ * dragging (hover a day for a moment to open it). Days in another city are
+ * greyed out.
+ */
+function MoveBar({ title, days, day, dayStatus, onDay, onCancel }: { title: string; days: string[]; day: string; dayStatus: (d: string) => string | null; onDay: (d: string) => void; onCancel: () => void }) {
   return (
-    <Card className="p-3 space-y-2 border-[#00685F]/40">
-      <div id="rearrange-list" className="flex items-center justify-between gap-2 scroll-mt-40">
-        <p className="text-sm text-[#161C23]">
-          <b>Rearrange</b> — drag by the grip or tap ↑ / ↓. To move a stop to another day, drop it on that day below.
-        </p>
+    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#00685F]/30 bg-white/95 backdrop-blur shadow-[0_-8px_24px_rgba(0,0,0,0.08)] pb-[env(safe-area-inset-bottom)]" role="region" aria-label="Moving a stop">
+      <div className="max-w-5xl mx-auto px-4 pt-2.5 pb-2 space-y-2">
+        <div className="flex items-center gap-3">
+          <Move className="w-4 h-4 shrink-0 text-[#00685F]" />
+          <p className="flex-1 min-w-0 text-sm text-[#161C23]">
+            <b className="truncate">Moving {title}</b>
+            <span className="block text-xs text-[#6D7A77]">Tap a ＋ spot in the day (or drop it there). Another day? Tap it below.</span>
+          </p>
+          <Button variant="secondary" className="shrink-0 !min-h-9" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+        <div className="-mx-4 px-4 overflow-x-auto">
+          <div className="flex gap-1.5 w-max pb-0.5">
+            {days.map((d, i) => (
+              <BarDay key={d} day={d} index={i} selected={d === day} blocked={dayStatus(d)} onClick={() => onDay(d)} />
+            ))}
+          </div>
+        </div>
       </div>
-      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-        <ol className="space-y-1.5">
-          {ids.map((id, i) => {
-            const r = byId.get(id);
-            return r ? <RearrangeItem key={id} row={r} index={i} count={ids.length} onMove={onMove} /> : null;
-          })}
-        </ol>
-      </SortableContext>
-      <div className="flex gap-1.5 overflow-x-auto pb-1" aria-label="Drop a stop on a day to move it there">
-        {days.map((d, i) => (d === day ? null : <DropDay key={d} day={d} index={i} />))}
-      </div>
-      <p className="text-[11px] text-[#6D7A77]">Times are worked out again when you save — travel time and prayer times included, bookings stay put.</p>
-      <div className="flex gap-2">
-        <Button variant="secondary" className="flex-1" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button className="flex-1" onClick={onDone}>
-          Done — save order
-        </Button>
-      </div>
-    </Card>
-  );
-}
-
-/** A day to drop a stop on while rearranging (moves it there right away). */
-function DropDay({ day, index }: { day: string; index: number }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `chip2:${day}` });
-  return (
-    <div ref={setNodeRef} className={cx('shrink-0 rounded-xl border border-dashed px-3 py-2 text-xs text-center min-w-[5.5rem]', isOver ? 'border-[#00685F] bg-[#00685F]/10 text-[#00685F]' : 'border-[#C9C2B8] text-[#3E4947]')}>
-      <span className="block font-bold">Day {index + 1}</span>
-      <span className="block whitespace-nowrap">{formatDay(day)}</span>
     </div>
   );
 }
 
-function RearrangeItem({ row, index, count, onMove }: { row: Row; index: number; count: number; onMove: (from: number, to: number) => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: row.item.id, data: { title: row.title } });
+function BarDay({ day, index, selected, blocked, onClick }: { day: string; index: number; selected: boolean; blocked: string | null; onClick: () => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `bar:${day}`, disabled: !!blocked });
   return (
-    <li ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={cx('flex items-center gap-2 rounded-xl border border-[#E7DFD5] bg-white min-h-12', isDragging && 'opacity-50 shadow-lg relative z-10')}>
-      <button type="button" {...attributes} {...listeners} aria-label={`Drag ${row.title}`} className="self-stretch w-12 shrink-0 flex items-center justify-center rounded-l-xl bg-[#F3EFE9] text-[#3E4947] touch-none cursor-grab active:cursor-grabbing">
-        <GripVertical className="w-5 h-5" />
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onClick}
+      disabled={!!blocked && !selected}
+      title={blocked ?? undefined}
+      aria-pressed={selected}
+      className={cx(
+        'shrink-0 rounded-xl border px-2.5 py-1.5 text-left min-w-[4.75rem] min-h-11',
+        selected ? 'bg-[#00685F] border-[#00685F] text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]',
+        blocked && !selected && 'opacity-40',
+        isOver && !selected && 'ring-2 ring-[#00685F]/40 border-[#00685F]',
+      )}
+    >
+      <span className={cx('block text-[10px] font-bold uppercase tracking-wider', selected ? 'text-white/80' : 'text-[#6D7A77]')}>Day {index + 1}</span>
+      <span className="block text-xs font-semibold whitespace-nowrap">{formatDay(day)}</span>
+    </button>
+  );
+}
+
+const walkOrRide = (m: number) => (m === 0 ? 'same place' : `${m} min ${m <= 18 ? 'walk' : 'ride'}`);
+
+/**
+ * A spot the stop being moved can go: when it would start and end, the
+ * travel in and out, what it pushes later — or why it doesn't fit. A drop
+ * target while dragging; hovering it re-times the whole day on screen.
+ */
+function GapSlot({ gap, titleOf, hovered, onHover, onPick }: { gap: GapOption; titleOf: (id?: string) => string | undefined; hovered: boolean; onHover: (key: string | null) => void; onPick: (g: GapOption) => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `gap:${gap.key}` });
+  const p = gap.placement;
+  const bits = [
+    p.legIn && `${walkOrRide(p.legIn.minutes)} from ${titleOf(p.legIn.fromId) ?? 'the stop before'}`,
+    p.legOut && `${walkOrRide(p.legOut.minutes)} to ${titleOf(p.legOut.toId) ?? 'the next stop'}`,
+    p.prayerInside > 0 && `incl. ${p.prayerInside} min to pray there`,
+    p.pushed.length === 1 && `moves ${titleOf(p.pushed[0].id) ?? 'a stop'} to ${fmtClock(p.starts.get(p.pushed[0].id) ?? 0)}`,
+    p.pushed.length > 1 && `moves ${p.pushed.length} stops later (${titleOf(p.pushed[0].id) ?? 'the next'} → ${fmtClock(p.starts.get(p.pushed[0].id) ?? 0)})`,
+  ].filter(Boolean);
+  const active = isOver || hovered;
+  return (
+    <div ref={setNodeRef} className="py-1">
+      <button
+        type="button"
+        disabled={!p.ok}
+        onClick={() => onPick(gap)}
+        onMouseEnter={() => onHover(gap.key)}
+        onMouseLeave={() => onHover(null)}
+        onFocus={() => onHover(gap.key)}
+        onBlur={() => onHover(null)}
+        className={cx(
+          'w-full min-h-11 rounded-xl border-2 border-dashed px-3 py-1.5 text-left transition-colors',
+          p.ok ? 'border-[#00685F]/50 bg-[#00685F]/5 text-[#00685F] hover:bg-[#00685F]/10' : 'border-[#E0D8CE] bg-[#F7F4EF] text-[#9AA5A3] cursor-not-allowed',
+          p.ok && active && 'border-[#00685F] bg-[#00685F]/15',
+        )}
+      >
+        {p.ok ? (
+          <>
+            <span className="flex items-center gap-1.5 text-sm font-bold">
+              <Plus className="w-4 h-4 shrink-0" /> Put here · {fmtClock(p.start)}–{fmtClock(p.end)}
+            </span>
+            {bits.length > 0 && <span className="block text-[11px] font-semibold text-[#3E4947]">{bits.join(' · ')}</span>}
+          </>
+        ) : (
+          <span className="block text-xs font-semibold">✕ Not here — {p.why}</span>
+        )}
       </button>
-      <span className="w-6 shrink-0 text-xs font-bold text-[#6D7A77] tabular-nums">{index + 1}</span>
-      <span className="flex-1 min-w-0 text-sm font-semibold text-[#161C23] truncate">{row.title}</span>
-      <button type="button" disabled={index === 0} onClick={() => onMove(index, index - 1)} aria-label={`Move ${row.title} earlier`} className="w-10 h-10 shrink-0 flex items-center justify-center text-[#161C23] disabled:opacity-30">
-        <ArrowUp className="w-4 h-4" />
-      </button>
-      <button type="button" disabled={index === count - 1} onClick={() => onMove(index, index + 1)} aria-label={`Move ${row.title} later`} className="w-10 h-10 shrink-0 flex items-center justify-center text-[#161C23] disabled:opacity-30">
-        <ArrowDown className="w-4 h-4" />
-      </button>
-    </li>
+    </div>
   );
 }
 
 function DayChip({ day, index, selected, status, count, city, onClick }: { day: string; index: number; selected: boolean; status: 'block' | 'risk' | null; count: number; city: string; onClick: () => void }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `chip:${day}` });
   return (
     <button
-      ref={setNodeRef}
       type="button"
       onClick={onClick}
       aria-pressed={selected}
       className={cx(
         'px-3 py-2 rounded-2xl border text-left min-w-[5.5rem] transition-colors',
         selected ? 'bg-[#00685F] border-[#00685F] text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]',
-        isOver && !selected && 'border-[#00685F] ring-2 ring-[#00685F]/30',
       )}
     >
       <span className={cx('flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider', selected ? 'text-white/80' : 'text-[#6D7A77]')}>
@@ -1256,13 +1567,12 @@ function DayChip({ day, index, selected, status, count, city, onClick }: { day: 
 }
 
 function DayList({ empty, children }: { empty: boolean; children: ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: 'day-list' });
   return (
-    <div ref={setNodeRef} className={cx('rounded-3xl transition-colors min-h-40', isOver && 'bg-[#00685F]/5 outline-2 outline-dashed outline-[#00685F]/40')}>
+    <div className="rounded-3xl min-h-40">
       {empty ? (
         <Card className="p-6 text-center space-y-1">
           <p className="font-semibold text-[#161C23]">Nothing planned yet</p>
-          <p className="text-sm text-[#6D7A77]">Drag an idea from the backlog here, or tap “Add” on one.</p>
+          <p className="text-sm text-[#6D7A77]">Add an idea from the backlog, or let AI plan the day.</p>
         </Card>
       ) : (
         children
@@ -1274,12 +1584,11 @@ function DayList({ empty, children }: { empty: boolean; children: ReactNode }) {
 function StopRow({
   row,
   shownStart,
-  index,
-  count,
-  days,
-  day,
-  onNudge,
-  onMoveDay,
+  moving,
+  busy,
+  onMove,
+  onShift,
+  onUnpin,
   onBacklog,
   dayZone,
   weather,
@@ -1288,18 +1597,19 @@ function StopRow({
   me,
   selected,
   onSelect,
+  onMap,
   onEdit,
 }: {
   row: Row;
-  /** While dragging / saving: the start the re-timed day gives it. */
+  /** While choosing a spot / saving: the start the re-timed day gives it. */
   shownStart?: number;
-  /** Position among the day's movable stops (-1 = locked). */
-  index: number;
-  count: number;
-  days: string[];
-  day: string;
-  onNudge: (by: -1 | 1) => void;
-  onMoveDay: (day: string) => void;
+  /** This is the stop being moved. */
+  moving: boolean;
+  /** Some stop is being moved (no other actions meanwhile). */
+  busy: boolean;
+  onMove: () => void;
+  onShift: (by: number) => void;
+  onUnpin: () => void;
   onBacklog: () => void;
   dayZone: string;
   weather?: WeatherRisk;
@@ -1308,18 +1618,20 @@ function StopRow({
   me: string;
   selected: boolean;
   onSelect: () => void;
+  onMap: () => void;
   onEdit: () => void;
 }) {
   const { item } = row;
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: item.id, disabled: item.locked, data: { title: row.title } });
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: item.id, disabled: item.locked || (busy && !moving), data: { title: row.title } });
   const moment = item.start === item.end;
   const len = toMin(item.end) - toMin(item.start);
   const s0 = shownStart ?? toMin(item.start);
   const moved = shownStart !== undefined && shownStart !== toMin(item.start);
   const movable = !item.locked;
+  const stop = { onMouseDown: (e: React.SyntheticEvent) => e.stopPropagation(), onTouchStart: (e: React.SyntheticEvent) => e.stopPropagation(), onKeyDown: (e: React.SyntheticEvent) => e.stopPropagation() };
   return (
-    <div ref={setNodeRef} className={cx(isDragging && 'opacity-40')}>
-      <Card className={cx('flex items-stretch', item.locked && 'bg-[#F3EFE9]', selected && 'ring-2 ring-[#00685F]/50')}>
+    <div ref={setNodeRef} className={cx((isDragging || moving) && 'opacity-40')}>
+      <Card className={cx('flex items-stretch', item.locked && 'bg-[#F3EFE9]', selected && 'ring-2 ring-[#00685F]/50', moving && 'outline-2 outline-dashed outline-[#00685F]')}>
         <div className={cx('w-[4.75rem] shrink-0 py-3 pl-3 text-xs font-bold tabular-nums', moved ? 'text-[#00685F]' : 'text-[#161C23]')}>
           <p>{fmtClock(s0)}</p>
           {!moment && <p className={cx('font-semibold', moved ? 'text-[#00685F]' : 'text-[#6D7A77]')}>{fmtClock(s0 + len)}</p>}
@@ -1334,9 +1646,15 @@ function StopRow({
               <span className="truncate">{row.title}</span>
             </p>
             {row.subtitle && !row.sides?.length && <p className="text-xs text-[#6D7A77] truncate">{row.subtitle}</p>}
+            {row.prayerKnown && <p className="text-[11px] text-[#8A6A1F]">🕌 Prayer space here / right by it — a prayer time during the visit is prayed here</p>}
           </button>
+          {item.pinned && movable && (
+            <button type="button" onClick={onUnpin} {...stop} className="mt-0.5 text-[11px] font-semibold text-[#6D7A77] underline underline-offset-2">
+              📌 Start set by hand — let it follow the stop before
+            </button>
+          )}
           {row.phone && (
-            <a href={`tel:${row.phone.replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-1 text-xs font-semibold text-[#00685F]" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
+            <a href={`tel:${row.phone.replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-1 text-xs font-semibold text-[#00685F]" {...stop}>
               <Phone className="w-3 h-3" /> {row.phone}
             </a>
           )}
@@ -1349,36 +1667,27 @@ function StopRow({
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" /> {w.text}
             </p>
           ))}
-          {/* Tapped: tap-friendly moves (earlier / later / another day) — the same as dragging. */}
-          {movable && selected && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-              <button type="button" disabled={index <= 0} onClick={() => onNudge(-1)} className="inline-flex items-center gap-1 rounded-full border border-[#E7DFD5] bg-white px-2.5 min-h-8 text-xs font-semibold text-[#161C23] disabled:opacity-40">
-                <ArrowUp className="w-3.5 h-3.5" /> Earlier
+          {/* Tapped: Move (then pick a spot, on this day or another) and small time nudges. */}
+          {movable && selected && !busy && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5" {...stop}>
+              <button type="button" onClick={onMove} className="inline-flex items-center gap-1 rounded-full bg-[#00685F] px-3 min-h-9 text-xs font-bold text-white">
+                <Move className="w-3.5 h-3.5" /> Move
               </button>
-              <button type="button" disabled={index < 0 || index >= count - 1} onClick={() => onNudge(1)} className="inline-flex items-center gap-1 rounded-full border border-[#E7DFD5] bg-white px-2.5 min-h-8 text-xs font-semibold text-[#161C23] disabled:opacity-40">
-                <ArrowDown className="w-3.5 h-3.5" /> Later
+              <button type="button" onClick={() => onShift(-15)} className="rounded-full border border-[#E7DFD5] bg-white px-3 min-h-9 text-xs font-semibold text-[#161C23]">
+                −15 min
               </button>
-              <select
-                aria-label={`Move ${row.title} to another day`}
-                value=""
-                onChange={(e) => e.target.value && onMoveDay(e.target.value)}
-                className="rounded-full border border-[#E7DFD5] bg-white px-2.5 min-h-8 text-xs font-semibold text-[#161C23]"
-              >
-                <option value="">Move to day…</option>
-                {days.map((d, k) =>
-                  d === day ? null : (
-                    <option key={d} value={d}>
-                      Day {k + 1} · {formatDay(d)}
-                    </option>
-                  ),
-                )}
-              </select>
+              <button type="button" onClick={() => onShift(15)} className="rounded-full border border-[#E7DFD5] bg-white px-3 min-h-9 text-xs font-semibold text-[#161C23]">
+                +15 min
+              </button>
+              <button type="button" onClick={onMap} className="md:hidden inline-flex items-center gap-1 rounded-full border border-[#E7DFD5] bg-white px-3 min-h-9 text-xs font-semibold text-[#161C23]">
+                <MapIcon className="w-3.5 h-3.5" /> Map
+              </button>
             </div>
           )}
         </div>
-        {movable && (
-          <div className="flex flex-col shrink-0 border-l border-[#F0EBE4]" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-            <button type="button" onClick={onEdit} aria-label={`Change ${row.title}`} title="Change day / time" className="flex-1 w-11 min-h-11 flex items-center justify-center text-[#6D7A77] hover:text-[#00685F]">
+        {movable && !busy && (
+          <div className="flex flex-col shrink-0 border-l border-[#F0EBE4]" {...stop}>
+            <button type="button" onClick={onEdit} aria-label={`Change ${row.title}`} title="Change day / time / length" className="flex-1 w-11 min-h-11 flex items-center justify-center text-[#6D7A77] hover:text-[#00685F]">
               <Pencil className="w-4 h-4" />
             </button>
             <button
@@ -1397,12 +1706,12 @@ function StopRow({
             <Lock className="w-4 h-4" />
           </span>
         ) : (
-          // The grip: drag from here (starts at once — mouse or finger); the rest of the card scrolls and taps normally.
+          // The grip: drag from here (mouse or finger) — a shortcut into the same move as the Move button.
           <button
             type="button"
             {...attributes}
             {...listeners}
-            aria-label={`Drag ${row.title} — up / down, or onto a day at the top`}
+            aria-label={`Drag ${row.title} into a spot`}
             title="Drag to move"
             className="w-11 shrink-0 flex items-center justify-center text-[#6D7A77] bg-[#F7F4EF] rounded-r-2xl touch-none cursor-grab active:cursor-grabbing hover:text-[#00685F]"
           >
@@ -1433,8 +1742,23 @@ function OnBoardRow({ booking }: { booking?: Booking }) {
   );
 }
 
-/** Travel from the block before: the Routes API leg when measured, else an estimate. */
-function TravelRow({ minutes, real, to }: { minutes: number; real?: TransitLeg; to?: 'prayer' }) {
+/**
+ * The time between two cards, split up so it adds up: the trip, the buffer,
+ * and any wait before a fixed block (prayer time, booking) or opening time.
+ */
+function gapBetween(from: Row | undefined, to: Row, legMin: number, shown: (id: string) => number | undefined): { buffer: number; wait: number; waitFor?: string } {
+  if (!from) return { buffer: 0, wait: 0 };
+  const start = (r: Row) => shown(r.item.id) ?? toMin(r.item.start);
+  const end = (r: Row) => start(r) + Math.max(0, toMin(r.item.end) - toMin(r.item.start));
+  const buffer = !from.prayer && legMin > 0 ? BUFFER_MIN : 0;
+  const wait = start(to) - end(from) - legMin - buffer;
+  const waitFor = to.prayer ? `${to.item.prayer?.prayer ?? 'the prayer'} time` : to.item.locked ? 'the booking' : to.item.pinned ? 'its set time 📌' : 'it opens';
+  // Under 5 min is just times rounded to the next 5 minutes.
+  return { buffer: wait < 0 ? 0 : buffer, wait: wait >= 5 ? wait : 0, waitFor };
+}
+
+/** Travel from the block before (the Routes API leg when measured, else an estimate), the buffer, and any wait. */
+function TravelRow({ minutes, real, to, buffer = 0, wait = 0, waitFor }: { minutes: number; real?: TransitLeg; to?: 'prayer'; buffer?: number; wait?: number; waitFor?: string }) {
   const mode = real?.mode ?? (minutes <= 18 ? 'walk' : 'transit');
   const Icon = MODE[mode].icon;
   const text =
@@ -1446,27 +1770,13 @@ function TravelRow({ minutes, real, to }: { minutes: number; real?: TransitLeg; 
   return (
     <p className="flex items-center gap-2 pl-8 py-1 text-xs text-[#6D7A77]">
       <span className="h-4 border-l-2 border-dotted border-[#D5CEC4]" />
-      <Icon className="w-3.5 h-3.5" /> {text}
+      <Icon className="w-3.5 h-3.5 shrink-0" />
+      <span>
+        {text}
+        {buffer > 0 && ` + ${buffer} min buffer`}
+        {wait > 0 && <span className="text-[#8A5A00]"> · {wait} min free before {waitFor}</span>}
+      </span>
     </p>
-  );
-}
-
-/** A block on the timeline that a card can be dropped before / after; shows where it would land. */
-function DropRow({ id, line, children }: { id: string; line: { where: 'before' | 'after'; text: string } | null; children: ReactNode }) {
-  const { setNodeRef } = useDroppable({ id: `slot:${id}` });
-  // Drawn over the edge of the block (takes no space) — nothing on the page moves while you drag.
-  const bar = line && (
-    <div className={cx('pointer-events-none absolute inset-x-0 z-20 flex items-center gap-2', line.where === 'before' ? '-top-2.5' : '-bottom-2.5')} aria-live="polite">
-      <span className="h-1 flex-1 rounded bg-[#00685F]" />
-      <span className="shrink-0 rounded-full bg-[#00685F] px-2 py-0.5 text-[11px] font-bold text-white shadow">{line.text}</span>
-      <span className="h-1 w-4 rounded bg-[#00685F]" />
-    </div>
-  );
-  return (
-    <div ref={setNodeRef} className="relative" data-block={id}>
-      {children}
-      {bar}
-    </div>
   );
 }
 
@@ -1495,6 +1805,8 @@ function Backlog({
   ideas,
   pairName,
   onAdd,
+  onPlace,
+  placing,
   day,
   destinations,
   dayCity,
@@ -1502,6 +1814,10 @@ function Backlog({
   ideas: Idea[];
   pairName: (ideaId: string) => string | undefined;
   onAdd: (idea: Idea) => void;
+  /** Pick a spot on the timeline for it (move mode). */
+  onPlace: (idea: Idea) => void;
+  /** The idea being placed right now. */
+  placing?: string;
   day: string;
   destinations: { name: string; location: GeoPoint }[];
   dayCity: string;
@@ -1562,7 +1878,7 @@ function Backlog({
               </h3>
               <ul className="space-y-2">
                 {list.map((i) => (
-                  <BacklogItem key={i.id} idea={i} pair={pairName(i.id)} hours={hoursOn(i, day)} onAdd={() => onAdd(i)} />
+                  <BacklogItem key={i.id} idea={i} pair={pairName(i.id)} hours={hoursOn(i, day)} onAdd={() => onAdd(i)} onPlace={() => onPlace(i)} placing={placing === i.id} />
                 ))}
               </ul>
             </section>
@@ -1573,12 +1889,12 @@ function Backlog({
   );
 }
 
-function BacklogItem({ idea, pair, hours, onAdd }: { idea: Idea; pair?: string; hours: { text: string; closed: boolean } | null; onAdd: () => void }) {
+function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Idea; pair?: string; hours: { text: string; closed: boolean } | null; onAdd: () => void; onPlace: () => void; placing: boolean }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `backlog:${idea.id}`, data: { title: idea.place.name } });
   const photo = idea.place.photoUrl ?? (idea.place.photoName ? placePhotoUrl(idea.place.photoName, 160) : null);
   return (
-    <li ref={setNodeRef} className={cx('flex items-center gap-1 rounded-2xl border border-[#E7DFD5] bg-white p-2', isDragging && 'opacity-40')}>
-      {/* Drag handle on larger screens; phones use "Add" so the list still scrolls. */}
+    <li ref={setNodeRef} className={cx('flex items-center gap-1 rounded-2xl border border-[#E7DFD5] bg-white p-2', (isDragging || placing) && 'opacity-40')}>
+      {/* Drag handle on larger screens; everywhere, "Place" picks a spot on the timeline and "Add" suggests one. */}
       <button
         type="button"
         {...attributes}
@@ -1610,9 +1926,14 @@ function BacklogItem({ idea, pair, hours, onAdd }: { idea: Idea; pair?: string; 
           )}
         </span>
       </button>
-      <Button variant="ghost" className="shrink-0 px-2.5" onClick={onAdd} aria-label={`Add ${idea.place.name} to a day`}>
-        <Plus className="w-4 h-4" /> Add
-      </Button>
+      <div className="flex flex-col sm:flex-row shrink-0">
+        <Button variant="ghost" className="shrink-0 !px-2.5 !min-h-9" onClick={onAdd} aria-label={`Add ${idea.place.name} at a suggested time`}>
+          <Plus className="w-4 h-4" /> Add
+        </Button>
+        <Button variant="ghost" className="shrink-0 !px-2.5 !min-h-9" onClick={onPlace} aria-label={`Pick a spot on the timeline for ${idea.place.name}`}>
+          <Move className="w-4 h-4" /> Place
+        </Button>
+      </div>
     </li>
   );
 }
@@ -1646,11 +1967,14 @@ function SplitGroups({ a, sides, people, me }: { a: Row; sides: Row[]; people: M
   );
 }
 
-/** The long visit (≥ LONG_VISIT_MIN — theme park, festival, hike…) a prayer falls inside, if any. */
-function longVisitAround(rows: Row[], prayer: Row): { title: string; ideaId?: string } | undefined {
+/**
+ * The visit a prayer falls inside, if any: a long one (≥ LONG_VISIT_MIN — theme
+ * park, festival, hike…) or one you can pray at (A → pray → back to A).
+ */
+function longVisitAround(rows: Row[], prayer: Row): { title: string; ideaId?: string; end: number; short: boolean } | undefined {
   const s = toMin(prayer.item.start);
-  const v = rows.find((r) => !r.prayer && !r.item.locked && toMin(r.item.start) <= s && toMin(r.item.end) > s && toMin(r.item.end) - toMin(r.item.start) >= LONG_VISIT_MIN);
-  return v ? { title: v.title, ...(v.item.ref.kind === 'idea' ? { ideaId: v.item.ref.ideaId } : {}) } : undefined;
+  const v = rows.find((r) => !r.prayer && !r.item.locked && toMin(r.item.start) <= s && toMin(r.item.end) > s && (toMin(r.item.end) - toMin(r.item.start) >= LONG_VISIT_MIN || r.prayInside));
+  return v ? { title: v.title, ...(v.item.ref.kind === 'idea' ? { ideaId: v.item.ref.ideaId } : {}), end: toMin(v.item.end), short: toMin(v.item.end) - toMin(v.item.start) < LONG_VISIT_MIN } : undefined;
 }
 
 /** Zuhur with Asar (or Maghrib with Isyak) both inside the same long visit — travellers may pray them together. */
@@ -1660,8 +1984,18 @@ function pairInLongVisit(rows: Row[], prayer: Row): string | undefined {
   const other = name ? PAIRS[name] : undefined;
   if (!other) return undefined;
   const visit = longVisitAround(rows, prayer);
+  if (visit?.short) return undefined;
   const partner = rows.find((r) => r.prayer && r.item.prayer?.prayer === other);
   return visit && partner && longVisitAround(rows, partner)?.title === visit.title ? other : undefined;
+}
+
+/** When a prayer's time ends: the next prayer's start (Isha: none shown). */
+function prayerUntil(prayers: DayFrame['prayers'], name?: string): number | undefined {
+  if (!prayers || !name) return undefined;
+  const next: Record<string, keyof NonNullable<DayFrame['prayers']>['times'] | 'sunrise'> = { Fajr: 'sunrise', Dhuhr: 'asr', Asr: 'maghrib', Maghrib: 'isha' };
+  const k = next[name];
+  if (!k) return undefined;
+  return k === 'sunrise' ? prayers.sunrise : prayers.times[k];
 }
 
 const MALAY_NAME: Record<string, string> = { Fajr: 'Subuh', Dhuhr: 'Zuhur', Asr: 'Asar', Maghrib: 'Maghrib', Isha: 'Isyak' };
@@ -1671,10 +2005,10 @@ function prayerGroups(item: ScheduleItem, members: Member[], me: string) {
   const p = item.prayer!;
   const name = (u: string) => (u === me ? 'you' : (members.find((m) => m.uid === u)?.displayName ?? '?'));
   const picks = p.fillerPicks ?? {};
-  const byTitle = new Map<string, { title: string; place?: { name: string; location: GeoPoint }; uids: string[] }>();
+  const byTitle = new Map<string, { title: string; place?: { name: string; location: GeoPoint }; meet?: { kind: string; name: string; at: string }; uids: string[] }>();
   for (const [uid, pk] of Object.entries(picks)) {
     if (pk.kind === 'rest') continue;
-    const g = byTitle.get(pk.title) ?? { title: pk.title, ...(pk.place ? { place: pk.place } : {}), uids: [] };
+    const g = byTitle.get(pk.title) ?? { title: pk.title, ...(pk.place ? { place: pk.place } : {}), ...(pk.meet ? { meet: pk.meet } : {}), uids: [] };
     g.uids.push(uid);
     byTitle.set(pk.title, g);
   }
@@ -1709,11 +2043,15 @@ function PrayerRow({
   onPick,
   before,
   after,
+  dayZone,
+  zoneName,
+  until,
+  onPlace,
 }: {
   row: Row;
   tripId: string;
-  /** The long visit this prayer falls in (pray there, then carry on). */
-  inside?: { title: string; ideaId?: string };
+  /** The visit this prayer falls in (pray there, then carry on). */
+  inside?: { title: string; ideaId?: string; end: number; short: boolean };
   /** The prayer it can be combined with inside the same visit (travellers' jamak). */
   pairInside?: string;
   people: Map<string, Member>;
@@ -1725,21 +2063,38 @@ function PrayerRow({
   onPick: () => void;
   before?: string;
   after?: string;
+  /** The day's timezone and its city ("Kyoto") — prayer times are on that clock. */
+  dayZone: string;
+  zoneName: string;
+  /** When this prayer's time ends (the next prayer begins), minutes. */
+  until?: number;
+  /** Choose another place to pray (the time stays). */
+  onPlace: () => void;
 }) {
   const p = row.item.prayer!;
   const f = p.facility;
   const g = prayerGroups(row.item, members, me);
   const myPick = p.fillerPicks?.[me];
   const iPray = g.praying.includes(me);
-  const route = before && after && before !== after ? `on the way from ${before} to ${after}` : before ? `near ${before}` : after ? `before ${after}` : '';
+  // Which rule placed it: the visit it's in, the stop before, the stop after, the hotel / station, or someone's choice.
+  const BASIS = { inside: 'at', before: 'near the stop before —', after: 'near the next stop —', hotel: 'near your hotel —', station: 'at / near the station —', area: 'where you are', chosen: 'chosen by your group' } as const;
+  const route = p.basis
+    ? `${BASIS[p.basis]}${p.basisName && p.basis !== 'chosen' && p.basis !== 'area' ? ` ${p.basisName}` : ''}`
+    : before && after && before !== after
+      ? `on the way from ${before} to ${after}`
+      : before
+        ? `near ${before}`
+        : after
+          ? `before ${after}`
+          : '';
   const meet = fmtClock(toMin(row.item.end));
   const where = f?.name ?? 'the prayer spot';
   const box = (key: string, color: { main: string; soft: string }, label: string, names: string[], sub?: string) => (
     <div key={key} className="rounded-lg px-2 py-1.5 min-w-0 border-l-4" style={{ background: color.soft, borderColor: color.main }}>
-      <p className="text-[11px] font-bold truncate" style={{ color: color.main }}>
+      <p className="text-[11px] font-bold leading-tight" style={{ color: color.main }}>
         {label}
       </p>
-      {sub && <p className="text-xs font-semibold text-[#161C23] truncate">{sub}</p>}
+      {sub && <p className="text-xs font-semibold text-[#161C23] leading-tight">{sub}</p>}
       <p className="text-[11px] text-[#6D7A77] truncate">{names.join(', ') || '—'}</p>
     </div>
   );
@@ -1756,24 +2111,30 @@ function PrayerRow({
   const atVenue = !!f && f.walkMin === 0;
   return (
     <div className={cx(inside && 'ml-5 pl-3 border-l-2 border-dashed border-[#EAD9A8]')}>
-    {inside && <p className="text-[11px] font-semibold text-[#8A6A1F] pt-1">During {inside.title} — pray there, then carry on</p>}
+    {inside && <p className="text-[11px] font-semibold text-[#8A6A1F] pt-1">During {inside.title} — {inside.short ? 'step out to pray right there, then back to it' : 'pray there, then carry on'}</p>}
     <Card className={cx('flex items-stretch my-1 border-[#EAD9A8] bg-[#FDF6E3]', selected && 'ring-2 ring-[#CA8A04]/50')}>
       <div className="w-[4.75rem] shrink-0 py-3 pl-3 text-xs font-bold tabular-nums" style={{ color: PRAYER_GROUP.main }}>
         <p>{fmtClock(toMin(row.item.start))}</p>
         <p className="font-semibold opacity-70">{meet}</p>
-        <p className="mt-0.5 text-[10px] leading-tight font-semibold opacity-70">Fixed time</p>
+        <p className="mt-0.5 text-[10px] leading-tight font-semibold opacity-70">🔒 {zoneName} time</p>
       </div>
       <div className="flex-1 min-w-0 py-3 pr-2">
         <button type="button" onClick={onSelect} aria-pressed={selected} className="block w-full text-left">
-          <p className="font-semibold truncate text-[#7A5500]">🕌 {p.prayer} prayer{split ? ' — the group splits' : ''}</p>
+          <p className="font-semibold text-[#7A5500]">
+            🕌 {p.prayer} prayer{split && <span className="font-normal text-[#8A6A1F]"> · the group splits</span>}
+          </p>
+          {until !== undefined && <p className="text-[11px] text-[#8A6A1F]">Its time lasts until {fmtClock(until)} ({zoneName}) — pray any time before then if plans slip</p>}
           <p className="text-xs text-[#6B5A2E]">
             {f
               ? `${f.name} · ${f.walkMin ? `${f.walkMin} min walk` : 'on site'}`
               : inside
                 ? 'No prayer room known here yet — ask staff (big venues often have one), or any clean, quiet spot'
                 : 'No mosque found nearby — any clean, quiet spot works'}
-            {f && route && !inside && <span className="text-[#6D7A77]"> · {route}</span>}
+            {f && route && !(inside && p.basis === 'inside') && <span className="text-[#6D7A77]"> · {route}</span>}
           </p>
+        </button>
+        <button type="button" onClick={onPlace} className="mt-1 text-xs font-semibold text-[#8A6A1F] underline underline-offset-2">
+          📍 Change place{p.chosen ? ' (chosen)' : ''}
         </button>
         {pairInside && (
           <p className="mt-1 text-xs text-[#6B5A2E]">
@@ -1788,10 +2149,10 @@ function PrayerRow({
         {spotBusy === 'done' && <p className="mt-1 text-xs text-[#0B6B45]">Thanks — every Safar trip visiting {inside?.title} will now pray there.</p>}
         {split ? (
           <div className="mt-1.5 space-y-1">
-            <p className="text-[11px] font-semibold text-[#161C23]">🚩 Everyone meets back at {where} at {meet}</p>
+            <p className="text-[11px] font-semibold text-[#161C23]">🚩 Everyone meets back at {inside?.short ? inside.title : where} at {meet}{g.picks.some((x) => x.meet && x.meet.kind !== 'prayer') ? ' (groups further away: see their box)' : ''}</p>
             <div className="grid grid-cols-2 gap-1.5">
               {box('pray', PRAYER_GROUP, '🕌 Praying', g.praying.map(g.name), where)}
-              {g.picks.map((x) => box(x.title, { main: x.color, soft: '#F5F7FB' }, '☕ Meanwhile', x.names, x.title))}
+              {g.picks.map((x) => box(x.title, { main: x.color, soft: '#F5F7FB' }, x.meet && x.meet.kind !== 'prayer' ? `☕ Meet ${x.meet.kind === 'next' ? 'at' : 'halfway,'} ${x.meet.name} ${fmtClock(toMin(x.meet.at))}` : '☕ Meanwhile', x.names, x.title))}
               {g.resting.length > 0 && box('rest', REST_GROUP, REST_GROUP.label, g.resting.map(g.name), 'Nearby')}
             </div>
           </div>
@@ -1818,6 +2179,7 @@ function PrayerRow({
         <Lock className="w-4 h-4" />
       </span>
     </Card>
+    {inside?.short && <p className="text-[11px] font-semibold text-[#8A6A1F] pb-1">↩ Back to {inside.title} until {fmtClock(inside.end)} — the others just stay there</p>}
     </div>
   );
 }

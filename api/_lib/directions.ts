@@ -3,6 +3,7 @@
 // driving where there's no transit route.
 import { metersBetween, WALK_MAX_M, type GeoPoint, type TransitLeg } from '../../src/domain/index.js';
 import { requireEnv } from './env.js';
+import { adminDb } from './firebaseAdmin.js';
 
 type Mode = TransitLeg['mode'];
 const TRAVEL_MODE: Record<Mode, string> = { walk: 'WALK', transit: 'TRANSIT', drive: 'DRIVE' };
@@ -34,4 +35,25 @@ export async function travelLeg(a: GeoPoint, b: GeoPoint): Promise<Omit<TransitL
     if (r) return { mode, ...r };
   }
   return null;
+}
+
+/** Google allows caching route results for up to 30 days. */
+const ROUTE_TTL = 30 * 86_400_000;
+const pointKey = (p: GeoPoint) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`;
+
+/**
+ * travelLeg, remembered for 30 days per pair of places (~10 m apart counts as
+ * the same) — AI plans and day refreshes ask for the same legs again and again.
+ */
+export async function cachedLeg(a: GeoPoint, b: GeoPoint): Promise<Omit<TransitLeg, 'fromId' | 'at'> | null> {
+  if (metersBetween(a, b) < 50) return { mode: 'walk', minutes: 0, meters: 0 };
+  const ref = adminDb().doc(`routeCache/${pointKey(a)}_${pointKey(b)}`);
+  const hit = (await ref.get().catch(() => null))?.data() as (Omit<TransitLeg, 'fromId' | 'at'> & { cachedAt: number }) | undefined;
+  if (hit && Date.now() - hit.cachedAt < ROUTE_TTL) {
+    const { cachedAt: _c, ...leg } = hit;
+    return leg;
+  }
+  const leg = await travelLeg(a, b);
+  if (leg) await ref.set({ ...leg, cachedAt: Date.now() }).catch(() => {});
+  return leg;
 }

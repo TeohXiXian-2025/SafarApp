@@ -40,14 +40,21 @@ function DurationChips({ value, onChange, suggested }: { value: number; onChange
   );
 }
 
-function DaySelect({ days, value, onChange }: { days: string[]; value: string; onChange: (v: string) => void }) {
+/** Why a stop can't go on a day (another city), or null. */
+export type DayRule = (day: string) => string | null;
+
+function DaySelect({ days, value, onChange, rule }: { days: string[]; value: string; onChange: (v: string) => void; rule?: DayRule }) {
   return (
     <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      {days.map((d, i) => (
-        <option key={d} value={d}>
-          Day {i + 1} · {formatDay(d)}
-        </option>
-      ))}
+      {days.map((d, i) => {
+        const no = d === value ? null : rule?.(d);
+        return (
+          <option key={d} value={d} disabled={!!no}>
+            Day {i + 1} · {formatDay(d)}
+            {no ? ` — ${no}` : ''}
+          </option>
+        );
+      })}
     </Select>
   );
 }
@@ -121,6 +128,7 @@ export function EditStopSheet({
   /** Split pairs: the length comes from the split (both groups + walking). */
   fixedLength?: boolean;
   days: string[];
+  dayRule?: DayRule;
   checker?: Checker;
   onClose: () => void;
   onSave: (patch: { day: string; start: string; durationMin: number }) => Promise<void>;
@@ -139,6 +147,7 @@ function EditStopForm({
   idea,
   fixedLength,
   days,
+  dayRule,
   checker,
   onClose,
   onSave,
@@ -148,6 +157,7 @@ function EditStopForm({
   idea?: Idea;
   fixedLength?: boolean;
   days: string[];
+  dayRule?: DayRule;
   checker?: Checker;
   onClose: () => void;
   onSave: (patch: { day: string; start: string; durationMin: number }) => Promise<void>;
@@ -184,7 +194,7 @@ function EditStopForm({
         </div>
       )}
       <Field label="Day">
-        <DaySelect days={days} value={day} onChange={setDay} />
+        <DaySelect days={days} value={day} onChange={setDay} rule={dayRule} />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Start">
@@ -234,9 +244,12 @@ export function AddStopSheet({
   defaultDay: string;
   /** The best day + start for this length (a clash-free time in the idea's city if there is one). */
   pickDefault?: (duration: number) => { day: string; start: string; fits: boolean };
+  dayRule?: DayRule;
   checker?: Checker;
   onClose: () => void;
-  onAdd: (day: string, start: string | undefined, durationMin: number) => Promise<void>;
+  onAdd: (day: string, start: string | undefined, durationMin: number, pinned: boolean) => Promise<void>;
+  /** Choose the spot on the timeline instead (move mode). */
+  onPickSpot?: (durationMin: number) => void;
 }) {
   return (
     <Sheet open={!!idea} onClose={onClose} title={idea ? `Add ${idea.place.name}` : 'Add'}>
@@ -250,17 +263,21 @@ function AddStopForm({
   days,
   defaultDay,
   pickDefault,
+  dayRule,
   checker,
   onClose,
   onAdd,
+  onPickSpot,
 }: {
   idea: Idea;
   days: string[];
   defaultDay: string;
   pickDefault?: (duration: number) => { day: string; start: string; fits: boolean };
+  dayRule?: DayRule;
   checker?: Checker;
   onClose: () => void;
-  onAdd: (day: string, start: string | undefined, durationMin: number) => Promise<void>;
+  onAdd: (day: string, start: string | undefined, durationMin: number, pinned: boolean) => Promise<void>;
+  onPickSpot?: (durationMin: number) => void;
 }) {
   // Pre-filled with a time that clashes with nothing (in the place's city); you can change any of it.
   const [initial] = useState(() => pickDefault?.(durationRange(idea.estDurationMin).min) ?? { day: defaultDay, start: '', fits: false });
@@ -286,7 +303,8 @@ function AddStopForm({
     setBusy(true);
     setError('');
     try {
-      await onAdd(day, start || undefined, duration);
+      // A time typed by hand is kept (📌); a suggested one follows the stop before.
+      await onAdd(day, start || undefined, duration, hint === 'manual' && !!start);
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -298,7 +316,7 @@ function AddStopForm({
   return (
     <div className="space-y-4">
       <Field label="Day">
-        <DaySelect days={days} value={day} onChange={changeDay} />
+        <DaySelect days={days} value={day} onChange={changeDay} rule={dayRule} />
       </Field>
       <Field label="How long" hint={idea.durationSetBy ? 'Picked by your group — tap another to change it.' : '✦ AI = its pick from the place type and reviews. Tap another to change it.'} group>
         <DurationChips value={duration} onChange={setDuration} suggested={idea.durationSetBy ? undefined : durationRange(idea.estDurationMin).min} />
@@ -319,7 +337,7 @@ function AddStopForm({
         {hint === 'fits'
           ? `Suggested: the first time on ${formatDay(day)} that clashes with nothing — opening hours, travel, prayer times.`
           : hint === 'fallback'
-            ? `Nothing fits without a clash in this city, so it's after the last stop on the emptiest day (${formatDay(day)}) — change it if you like.`
+            ? `Nothing fits without a clash on the days you're in this city, so it's after the last stop on the emptiest one (${formatDay(day)}) — change it if you like.`
             : start
               ? 'Your time.'
               : "Leave the start empty to go after the day's last stop."}
@@ -330,6 +348,11 @@ function AddStopForm({
       <Button className="w-full" disabled={busy} onClick={add}>
         {busy ? 'Adding…' : `${blocked ? 'Add anyway' : 'Add'} to ${formatDay(day)}`}
       </Button>
+      {onPickSpot && (
+        <Button variant="secondary" className="w-full" disabled={busy} onClick={() => (onPickSpot(duration), onClose())}>
+          Or choose the spot on the timeline
+        </Button>
+      )}
     </div>
   );
 }

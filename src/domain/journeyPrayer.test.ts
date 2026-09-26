@@ -93,3 +93,14 @@ describe('in-flight prayer times (at the plane’s position, like in-flight calc
     expect(Number(m[1]) * 60 + Number(m[2]) - (Number(m[3]) * 60 + Number(m[4]))).toBe(120);
   });
 });
+
+describe('journeyPrayers — the short card line', () => {
+  const HND = { location: { lat: 35.5494, lng: 139.7798 }, timezone: 'Asia/Tokyo', name: 'Haneda' };
+  it('says whose clock the time is on, and one thing to do', () => {
+    const r = journeyPrayers({ kind: 'flight', startAt: '2026-12-01T14:30:00+08:00', endAt: '2026-12-01T22:30:00+09:00', from: KUL, to: HND }, { from: 'KL', to: 'Tokyo' });
+    const asr = r.find((p) => p.prayer === 'asr')!;
+    expect(asr.when).toMatch(/KL time \(.* Tokyo time\)/);
+    expect(asr.fix).toMatch(/jamak taqdim/);
+    for (const p of r) expect(p.fix.length).toBeLessThan(90);
+  });
+});

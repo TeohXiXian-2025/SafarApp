@@ -108,6 +108,10 @@ export interface JourneyPrayer {
   prayer: PrayerKey;
   where: 'before' | 'after' | 'jamak_taqdim' | 'jamak_takhir' | 'on_board';
   text: string;
+  /** Its time, saying whose clock: "3:12 PM Tokyo time (2:12 PM KL time)". */
+  when: string;
+  /** One short thing to do: "pray seated on board — qibla to your right". */
+  fix: string;
 }
 
 const LABEL: Record<PrayerKey, string> = { fajr: 'Subuh', dhuhr: 'Zuhur', asr: 'Asar', maghrib: 'Maghrib', isha: 'Isyak' };
@@ -171,13 +175,17 @@ const clock = (ms: number, offset: number) => {
  * Where to pray each prayer whose time falls while you'd be at the airport /
  * station or travelling. Empty when no prayer is affected.
  */
-export function journeyPrayers(j: {
-  kind: string;
-  startAt: string;
-  endAt: string;
-  from?: { location: GeoPoint; timezone: string; name: string };
-  to: { location: GeoPoint; timezone: string; name: string };
-}): JourneyPrayer[] {
+export function journeyPrayers(
+  j: {
+    kind: string;
+    startAt: string;
+    endAt: string;
+    from?: { location: GeoPoint; timezone: string; name: string };
+    to: { location: GeoPoint; timezone: string; name: string };
+  },
+  /** How to name each end's clock ("KL", "Tokyo"); the airport / station names otherwise. */
+  clocks?: { from: string; to: string },
+): JourneyPrayer[] {
   if (j.kind === 'hotel' || !j.from) return [];
   const flight = j.kind === 'flight';
   const dep = Date.parse(j.startAt);
@@ -208,6 +216,14 @@ export function journeyPrayers(j: {
   const airTimes = flight ? inFlightPrayers(j.from.location, j.to.location, dep, arr, 5, { from: j.from.timezone, to: j.to.timezone }) : [];
   const from = flight ? 'the airport prayer room' : `the station (${j.from.name})`;
   const handled = new Set<PrayerKey>();
+  const [oName, dName] = [clocks?.from ?? j.from.name, clocks?.to ?? j.to.name];
+  /** A moment on one clock, and on the other when they differ. */
+  const both = (ms: number, first: 'o' | 'd') => {
+    const o = `${clock(ms, oOff)} ${oName} time`;
+    const d = `${clock(ms, dOff)} ${dName} time`;
+    if (oOff === dOff) return first === 'o' ? o : d;
+    return first === 'o' ? `${o} (${d})` : `${d} (${o})`;
+  };
   for (const w of affected) {
     if (handled.has(w.key)) continue;
     // The same prayer's window where you set off — it must already have started
@@ -217,11 +233,11 @@ export function journeyPrayers(j: {
     const destW = atDest.find((x) => x.key === w.key && x.start <= outAt && x.end > arr) ?? null;
     const L = LABEL[w.key];
     if (originW) {
-      out.push({ prayer: w.key, where: 'before', text: `${L} starts ${clock(originW.start, oOff)} — pray it at ${from} before boarding.` });
+      out.push({ prayer: w.key, where: 'before', text: `${L} starts ${clock(originW.start, oOff)} — pray it at ${from} before boarding.`, when: both(originW.start, 'o'), fix: `pray at ${from} before boarding` });
       continue;
     }
     if (destW && destW.end - need >= outAt) {
-      out.push({ prayer: w.key, where: 'after', text: `Pray ${L} after you arrive at ${j.to.name} — its time lasts until ${clock(destW.end, dOff)} there.` });
+      out.push({ prayer: w.key, where: 'after', text: `Pray ${L} after you arrive at ${j.to.name} — its time lasts until ${clock(destW.end, dOff)} there.`, when: both(Math.max(destW.start, w.start), 'd'), fix: `pray after landing — until ${clock(destW.end, dOff)} ${dName} time` });
       continue;
     }
     const pair = PAIR[w.key];
@@ -231,7 +247,13 @@ export function journeyPrayers(j: {
       const earlierW = here(atOrigin, earlier, boardBy - need) ?? atOrigin.find((x) => x.key === earlier && x.start + need <= boardBy && x.end > boardBy - 6 * 3_600_000);
       const laterW = atDest.find((x) => x.key === later && x.end - need >= outAt && x.start < outAt + 6 * 3_600_000);
       if (w.key === later && earlierW && earlierW.start + need <= boardBy) {
-        out.push({ prayer: w.key, where: 'jamak_taqdim', text: `Jamak taqdim: pray ${LABEL[earlier]} and ${L} together (${qasar(earlier)}) at ${from} before boarding, from ${clock(earlierW.start, oOff)}.` });
+        out.push({
+          prayer: w.key,
+          where: 'jamak_taqdim',
+          text: `Jamak taqdim: pray ${LABEL[earlier]} and ${L} together (${qasar(earlier)}) at ${from} before boarding, from ${clock(earlierW.start, oOff)}.`,
+          when: both(w.start, 'o'),
+          fix: `combine with ${LABEL[earlier]} at ${from} before boarding (jamak taqdim)`,
+        });
         continue;
       }
       if (w.key === earlier && laterW) {
@@ -241,6 +263,8 @@ export function journeyPrayers(j: {
           prayer: w.key,
           where: 'jamak_takhir',
           text: `Jamak ta'khir: pray ${L} and ${LABEL[later]} together (${qasar(earlier)}) after landing — from ${clock(from2, dOff)} until ${clock(laterW.end, dOff)} ${j.to.name} time.`,
+          when: both(w.start, 'd'),
+          fix: `combine with ${LABEL[later]} after landing, by ${clock(laterW.end, dOff)} (jamak ta'khir)`,
         });
         continue;
       }
@@ -252,6 +276,8 @@ export function journeyPrayers(j: {
     out.push({
       prayer: w.key,
       where: 'on_board',
+      when: both(air?.at ?? w.start, 'o'),
+      fix: air ? `pray seated on board — qibla ${air.fromSeat}` : 'pray seated on board, facing the qibla as best you can',
       text: air
         ? `${L} begins in the air at about ${when} — pray on board: seated if you can't stand; the qiblat is ${air.fromSeat} (${air.qibla}° from north); tayammum if you can't take wudu.`
         : `${L} falls during the ${flight ? 'flight' : 'journey'} — pray on board: seated if you can't stand, facing the qiblat as best you can, with tayammum if you can't take wudu.`,

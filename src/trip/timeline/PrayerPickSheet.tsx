@@ -1,8 +1,10 @@
-// What a member who doesn't pray does during a prayer break: an idea the group
-// already accepted (or a backup they liked) — the ones praying members marked
-// "good while we pray" first — a quick place right by the prayer space, any
-// other place nearby, or just resting. No vote: it's their own 30 minutes and
-// everyone meets back at the prayer place.
+// What a member who doesn't pray does during a prayer break: an idea the ones
+// praying marked "good while we pray" (e.g. on the split tab) first, then
+// accepted ideas, split alternatives and backups they liked — only ones in
+// the same city with time to go, stay and come back — a quick place right by
+// the prayer space, any other place nearby, or free time (the default). No
+// vote: it's their own time. Each option says where everyone meets again:
+// the prayer place when it's close, the next stop when that's nearer, or halfway.
 import { Coffee, MapPin, Sparkles, Star } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { fmtClock, toMin, type GeoPoint, type ScheduleItem } from '../../domain';
@@ -11,9 +13,12 @@ import { api, ApiError } from '../../lib/api';
 import { Badge, Button, ErrorBanner, Sheet, Spinner } from '../../ui';
 
 interface Options {
-  ideas: { ideaId: string; name: string; typeLabel: string; walkMin: number; status: string; marked: number; liked: boolean; short: boolean }[];
+  ideas: { ideaId: string; name: string; typeLabel: string; walkMin: number; status: string; marked: number; liked: boolean; short: boolean; stayMin: number; split: boolean; meet: { kind: 'prayer' | 'next' | 'middle'; name: string; at: string } }[];
   nearby: { placeId: string; name: string; location: GeoPoint; typeLabel?: string; rating?: number; walkMin: number }[];
 }
+
+type Meet = { kind: 'prayer' | 'next' | 'middle'; name: string; at: string };
+const meetText = (m: Meet) => `${m.kind === 'prayer' ? 'back at the prayer place' : m.kind === 'next' ? `at ${m.name}` : m.name && m.name !== 'halfway' ? `halfway (${m.name})` : 'halfway'} at ${fmtClock(toMin(m.at))}`;
 
 export function PrayerPickSheet({ item, tripId, myPick, onClose }: { item: ScheduleItem; tripId: string; myPick?: string; onClose: () => void }) {
   const [opts, setOpts] = useState<Options | null>(null);
@@ -64,7 +69,7 @@ export function PrayerPickSheet({ item, tripId, myPick, onClose }: { item: Sched
     <Sheet open onClose={onClose} title={`While the others pray ${p.prayer}`}>
       <div className="space-y-4">
         <p className="text-sm text-[#6D7A77]">
-          {fmtClock(toMin(item.start))}–{meet} · everyone meets back at <b className="text-[#161C23]">{where}</b> at {meet}. No vote needed — it's your own break.
+          {fmtClock(toMin(item.start))}–{meet} · close by, everyone meets back at <b className="text-[#161C23]">{where}</b> at {meet}; further away, at the next stop or halfway (shown on each option). Only places in this city with time to get there and back are listed. Nothing picked = free time nearby. No vote needed — it's your own break.
         </p>
         {!opts && !error && <Spinner label="Finding things nearby…" />}
         {opts && (
@@ -76,10 +81,11 @@ export function PrayerPickSheet({ item, tripId, myPick, onClose }: { item: Sched
                   row(
                     `i${i.ideaId}`,
                     i.name,
-                    `${i.typeLabel} · ${i.walkMin} min walk${i.short ? '' : ' · just a quick look'}${i.status === 'backup' ? ' · a backup you liked' : ''}`,
+                    `${i.typeLabel} · ${i.walkMin} min away · ~${i.stayMin} min there${i.short ? '' : ' (a quick look)'}${i.status === 'backup' || i.status === 'mixed' ? ' · one you liked' : ''} · 🚩 meet ${meetText(i.meet)}`,
                     () => void pick(`i${i.ideaId}`, { kind: 'idea', ideaId: i.ideaId }),
                     <>
                       {i.marked > 0 && <Badge>☕ good while we pray</Badge>}
+                      {i.split && <Badge tone="muted">split option</Badge>}
                       {i.liked && <Star className="w-3.5 h-3.5 fill-[#F2B544] text-[#F2B544]" />}
                     </>,
                   ),
@@ -121,7 +127,7 @@ export function PrayerPickSheet({ item, tripId, myPick, onClose }: { item: Sched
               <MapPin className="w-4 h-4" /> Search a place nearby
             </Button>
           )}
-          {row('rest', 'Rest / wait nearby', 'Take a break and meet the group when they’re done.', () => void pick('rest', { kind: 'rest' }), <Sparkles className="w-3.5 h-3.5 text-[#6D7A77]" />)}
+          {row('rest', 'Free time nearby', `Wander, rest or shop around ${where} and meet the group there at ${meet}.`, () => void pick('rest', { kind: 'rest' }), <Sparkles className="w-3.5 h-3.5 text-[#6D7A77]" />)}
           {myPick && (
             <button type="button" className="text-xs font-semibold text-[#B3261E] underline underline-offset-2" onClick={() => void pick('clear', null)}>
               Clear my choice ({myPick})

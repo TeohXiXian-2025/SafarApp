@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { arrangeTrip, dayFrames, daySuggestions, orderByDistance, prayerBreaks, prayerPlaceOnRoute, timeSequence, type DayFrame, type Unit } from './arrange';
 import type { DayPrayers } from './prayer';
 import { dayWarnings, estimateTravelMin } from './timeline';
+import { praysInside } from './placement';
 
 const h = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
 const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -30,21 +31,34 @@ describe('timeSequence', () => {
   });
 
   it('plans stops around a locked prayer time, prayed near the stop before', () => {
-    const t = timeSequence(frame({ prayers: PRAYERS }), [unit('a', 120), unit('b', 60), unit('c', 60)], { strict: true, travel: flat, buffer: 0 });
+    // The nearest prayer place is 20 min away: no praying during these visits — they step around the prayer time.
+    const far = { prayerWalkMin: 20 };
+    const t = timeSequence(frame({ prayers: PRAYERS }), [unit('a', 120, far), unit('b', 60, far), unit('c', 60, far)], { strict: true, travel: flat, buffer: 0 });
     // a 09:10–11:10, b 11:20–12:20; c would run into Dhuhr (13:05–13:35) → after it.
     expect(t.placed.map((p) => [p.id, clock(p.start)])).toEqual([
       ['a', '09:10'],
       ['b', '11:20'],
-      ['c', '13:50'],
+      ['c', '13:35'], // right after the prayer block (it already includes the walk)
     ]);
     expect(t.prayers.map((p) => [p.key, clock(p.start), clock(p.end), p.afterId])).toEqual([['dhuhr', '13:05', '13:35', 'b']]);
   });
 
   it('pauses the journey for a prayer that comes due on the way', () => {
-    const t = timeSequence(frame({ start: h('12:00'), prayers: PRAYERS }), [unit('a', 60), unit('b', 60)], { strict: true, travel: () => 20, buffer: 0 });
+    const t = timeSequence(frame({ start: h('12:00'), prayers: PRAYERS }), [unit('a', 60, { prayerWalkMin: 20 }), unit('b', 60, { prayerWalkMin: 20 })], { strict: true, travel: () => 20, buffer: 0 });
     // a 12:20–13:20 would overlap Dhuhr → a after it; the walk to b is split by nothing else.
     expect(t.prayers[0]).toMatchObject({ key: 'dhuhr', start: h('13:05') });
     expect(t.placed.every((p) => p.end <= h('13:05') || p.start >= h('13:35'))).toBe(true);
+  });
+
+  it('A → pray → back to A: a visit you can pray at holds the prayer time and gets its time back', () => {
+    // No prayer place known (ask staff / a quiet spot there) or one on site: the prayer happens during the visit.
+    const t = timeSequence(frame({ prayers: PRAYERS }), [unit('a', 120), unit('b', 120, { prayerWalkMin: 0 })], { strict: true, travel: flat, buffer: 0 });
+    // a 09:10–11:10; b 11:20 + 2 h reaches Dhuhr (13:05) → + the 30-min prayer block → 13:50.
+    expect(t.placed.map((p) => [p.id, clock(p.start), clock(p.end)])).toEqual([
+      ['a', '09:10', '11:10'],
+      ['b', '11:20', '13:50'],
+    ]);
+    expect(t.prayers.map((p) => [p.key, p.afterId])).toEqual([['dhuhr', 'b']]);
   });
 
   it('lets a long visit run through a prayer time and pray there', () => {
@@ -152,7 +166,7 @@ describe('prayerBreaks', () => {
   });
 
   it('reports a stop planned over a prayer time', () => {
-    const r = prayerBreaks(PRAYERS, [...stops.slice(0, 2), { id: 'c', start: h('15:00'), end: h('17:00') }], HOTEL);
+    const r = prayerBreaks(PRAYERS, [...stops.slice(0, 2), { id: 'c', start: h('15:00'), end: h('17:00'), prayerWalkMin: 20 }], HOTEL);
     expect(r.clashes.map((c) => [c.key, c.stopId])).toEqual([['asr', 'c']]);
     // The break stays at its time anyway.
     expect(r.prayers.find((p) => p.key === 'asr')?.start).toBe(h('16:25'));
@@ -275,6 +289,7 @@ describe('AI Arrange never creates a blocking conflict (or a tight transfer)', (
             end: clock(p.end),
             orderIndex: k,
             transitMin: k > 0 ? estimateTravelMin(placed[k - 1].unit.loc, p.unit.loc) : undefined,
+            ...(praysInside(p.unit.prayerWalkMin) ? { prayInside: true } : {}),
           })),
           ...d.timing.prayers.map((p, k) => ({ id: `pr${k}`, start: clock(p.start), end: clock(p.end), orderIndex: 0, kind: 'prayer' as const })),
           ...f.blocks.map((b, k) => ({ id: `blk${k}`, start: clock(b.start), end: clock(b.end), orderIndex: 0, locked: true })),
