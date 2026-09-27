@@ -6,7 +6,7 @@
 // road route, turned into a public-transport estimate.
 import { metersBetween, WALK_MAX_M, type GeoPoint, type TransitLeg } from '../../src/domain/index.js';
 import { optionalEnv, requireEnv } from './env.js';
-import { googleRefused, takeGoogle } from './openPlaces.js';
+import { googleRefused, refusal, takeGoogle } from './openPlaces.js';
 import { adminDb } from './firebaseAdmin.js';
 
 type Mode = TransitLeg['mode'];
@@ -24,7 +24,7 @@ async function route(a: GeoPoint, b: GeoPoint, mode: Mode): Promise<{ minutes: n
     body: JSON.stringify({ origin: point(a), destination: point(b), travelMode: TRAVEL_MODE[mode] }),
     signal: AbortSignal.timeout(8000),
   }).catch(() => null);
-  if (res?.status === 429) await googleRefused('routes');
+  if (res && refusal(res.status)) await googleRefused('routes');
   if (!res?.ok) return null;
   const r = ((await res.json()) as { routes?: { duration?: string; distanceMeters?: number }[] }).routes?.[0];
   if (!r?.duration) return null;

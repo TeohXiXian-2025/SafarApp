@@ -3,6 +3,9 @@
 
 export const paths = {
   user: (uid: string) => `users/${uid}`,
+  /** The 🔔 alerts (server-written) and when they were last read. */
+  inbox: (uid: string) => `users/${uid}/inbox`,
+  inboxState: (uid: string) => `users/${uid}/private/inbox`,
 
   trips: () => 'trips',
   trip: (tripId: string) => `trips/${tripId}`,

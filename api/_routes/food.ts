@@ -41,16 +41,22 @@ const GUESS_TTL_MS = 30 * 86_400_000;
 const guessRef = (placeKey: string) => adminDb().doc(`foodGuess/${placeKey}`);
 /**
  * Full checks started automatically or for a whole tab. Each reads Google
- * reviews (the scarce, paid-for call), so they share the monthly budget with
- * idea and manual checks (see analysis.ts): what's left this month, spread
- * evenly over the days left — at least a few a day while any is left.
+ * reviews and asks the AI, so they keep a daily ceiling: with a monthly budget
+ * set (see analysis.ts), what's left spread over the days left — at least a
+ * few a day while any is left; without one, HALAL_AUTO_CHECKS_PER_DAY
+ * (default 30). Checks people ask for aren't limited by it.
  */
 const AUTO_PER_REQUEST = 10;
 
+async function autoChecksPerDay(): Promise<number> {
+  const { today, month } = await checksLeftToday();
+  if (month === null || today === null) return Number(optionalEnv('HALAL_AUTO_CHECKS_PER_DAY')) || 30;
+  return Math.min(month, Math.max(today, 5));
+}
+
 /** Takes `n` from today's app-wide allowance (Upstash, else a Firestore counter). Returns how many you got. */
 async function takeAutoChecks(n: number): Promise<number> {
-  const { today, month } = await checksLeftToday();
-  const AUTO_CHECKS_PER_DAY = Math.min(month, Math.max(today, 5));
+  const AUTO_CHECKS_PER_DAY = await autoChecksPerDay();
   const day = new Date().toISOString().slice(0, 10);
   const url = optionalEnv('UPSTASH_REDIS_REST_URL');
   const token = optionalEnv('UPSTASH_REDIS_REST_TOKEN');
@@ -78,8 +84,7 @@ async function takeAutoChecks(n: number): Promise<number> {
 
 /** Today's use of the automatic checks (for the usage card). */
 export async function autoCheckUsage(): Promise<{ used: number; cap: number }> {
-  const { today, month } = await checksLeftToday();
-  const AUTO_CHECKS_PER_DAY = Math.min(month, Math.max(today, 5));
+  const AUTO_CHECKS_PER_DAY = await autoChecksPerDay();
   const day = new Date().toISOString().slice(0, 10);
   const url = optionalEnv('UPSTASH_REDIS_REST_URL');
   const token = optionalEnv('UPSTASH_REDIS_REST_TOKEN');
@@ -379,7 +384,8 @@ export const foodRoutes: RouteTable = {
       const placeKey = paths.placeKey({ placeId });
       let result = await cachedAnalysis(placeKey);
       if (!result) {
-        if ((await checksLeftToday()).month <= 0) throw new HttpError(429, "This month's halal checks are used up — the label shown is from free signals; ask the restaurant (tap Call) or report it after eating.");
+        const { month } = await checksLeftToday();
+        if (month !== null && month <= 0) throw new HttpError(429, "This month's halal checks are used up — the label shown is from free signals; ask the restaurant (tap Call) or report it after eating.");
         await useDailyQuota(member.uid, 'analyze');
         result = await runAnalysis(placeId, placeKey);
       }

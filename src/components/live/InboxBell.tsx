@@ -1,62 +1,58 @@
 // The 🔔 in the header: every alert (votes, splits, decisions, @mentions,
 // timeline changes) also lands here, so laptops — where push pop-ups depend
-// on the browser running in the background — still see them. Checked every
-// minute while the app is open; the tab title shows the unread count, and a
-// desktop pop-up appears if the tab is in the background and notifications
-// are allowed.
+// on the browser running in the background — still see them. Listened to
+// live (a read only when an alert arrives — no polling); the tab title shows
+// the unread count, and a desktop pop-up appears if the tab is in the
+// background and notifications are allowed.
+import { collection, limit, orderBy, query } from 'firebase/firestore';
 import { Bell } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { z } from 'zod';
+import { useAuth } from '../../auth/auth';
+import { paths } from '../../domain';
+import { db } from '../../firebase/config';
 import { api } from '../../lib/api';
+import { useDoc, useQuery } from '../../lib/firestore';
 import { timeAgo } from '../../lib/format';
 import { cx } from '../../ui';
 
-interface Item {
-  id: string;
-  title: string;
-  body: string;
-  url: string;
-  at: number;
-}
-
-const POLL_MS = 60_000;
+const Item = z.object({ title: z.string(), body: z.string(), url: z.string(), at: z.number() });
+const State = z.object({ readAt: z.number().optional() });
 
 export function InboxBell() {
-  const [items, setItems] = useState<Item[]>([]);
-  const [readAt, setReadAt] = useState(0);
+  const uid = useAuth((s) => s.user?.uid);
+  const live = useQuery(uid ? `inbox:${uid}` : null, () => query(collection(db, paths.inbox(uid!)), orderBy('at', 'desc'), limit(30)), Item);
+  const state = useDoc(uid ? paths.inboxState(uid) : null, State);
+  const items = live.data;
+  // Marking read shows at once; the server's readAt then arrives on the listener.
+  const [readLocal, setReadLocal] = useState(0);
+  const readAt = Math.max(state.data?.readAt ?? 0, readLocal);
   const [open, setOpen] = useState(false);
   const newest = useRef(0);
   const navigate = useNavigate();
 
-  const load = useCallback(async () => {
-    if (!navigator.onLine) return;
-    const r = await api.get<{ items: Item[]; readAt: number }>('inbox').catch(() => null);
-    if (!r) return;
-    // A background tab gets a desktop pop-up for anything new (no push needed).
-    const fresh = r.items.filter((i) => i.at > Math.max(newest.current, r.readAt));
-    if (newest.current && document.hidden && fresh.length && 'Notification' in window && Notification.permission === 'granted') {
+  // A background tab gets a desktop pop-up for anything new (no push needed).
+  // The first answer from the server only sets the baseline.
+  useEffect(() => {
+    if (live.loading || live.fromCache) return;
+    const top = Math.max(0, ...items.map((i) => i.at));
+    if (!newest.current) {
+      newest.current = Math.max(top, 1);
+      return;
+    }
+    const fresh = items.filter((i) => i.at > Math.max(newest.current, readAt));
+    newest.current = Math.max(newest.current, top);
+    if (document.hidden && fresh.length && 'Notification' in window && Notification.permission === 'granted') {
       const n = fresh[0];
       try {
-        new Notification(fresh.length > 1 ? `${n.title} (+${fresh.length - 1} more)` : n.title, { body: n.body, tag: `inbox-${n.id}`, icon: '/icons/icon-192.png' });
+        new Notification(fresh.length > 1 ? `${n.title} (+${fresh.length - 1} more)` : n.title, { body: n.body, tag: `inbox-${n.at}`, icon: '/icons/icon-192.png' });
       } catch {
         /* some browsers only allow notifications from the service worker */
       }
     }
-    newest.current = Math.max(newest.current, ...r.items.map((i) => i.at), 1);
-    setItems(r.items);
-    setReadAt(r.readAt);
-  }, []);
-
-  useEffect(() => {
-    void load();
-    const t = setInterval(() => document.visibilityState === 'visible' && void load(), POLL_MS);
-    const onFocus = () => void load();
-    window.addEventListener('focus', onFocus);
-    return () => {
-      clearInterval(t);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [load]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs per snapshot
+  }, [items, live.loading, live.fromCache]);
 
   const unread = items.filter((i) => i.at > readAt).length;
   useEffect(() => {
@@ -67,7 +63,7 @@ export function InboxBell() {
   const toggle = () => {
     setOpen((o) => !o);
     if (!open && unread) {
-      setReadAt(Date.now());
+      setReadLocal(Date.now());
       void api.post('inbox/read').catch(() => {});
     }
   };
@@ -91,9 +87,9 @@ export function InboxBell() {
           {items.length === 0 ? (
             <p className="px-2.5 py-3 text-[#6D7A77]">Nothing yet. Votes, split decisions, @mentions and plan changes show up here.</p>
           ) : (
-            items.map((i) => (
+            items.map((i, n) => (
               <button
-                key={i.id}
+                key={`${i.at}-${n}`}
                 type="button"
                 onClick={() => {
                   setOpen(false);

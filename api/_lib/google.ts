@@ -2,7 +2,7 @@ import type { GeoPoint, PlaceRef } from '../../src/domain/index.js';
 import { requireEnv } from './env.js';
 import { HttpError } from './http.js';
 import { AIRPORTS } from './airports.js';
-import { googleOut, googleRefused } from './openPlaces.js';
+import { googleOut, googleRefused, refusal } from './openPlaces.js';
 
 interface TzResult {
   timeZoneId: string;
@@ -94,7 +94,7 @@ async function googleFindPlace(query: string): Promise<PlaceRef | null> {
     body: JSON.stringify({ textQuery: query.slice(0, 200), pageSize: 1 }),
     signal: AbortSignal.timeout(8000),
   }).catch(() => null);
-  if (res?.status === 429) await googleRefused('text');
+  if (res && refusal(res.status)) await googleRefused('text');
   if (!res?.ok) return null;
   const body = (await res.json()) as {
     places?: { id: string; displayName?: { text: string }; formattedAddress?: string; location?: { latitude: number; longitude: number } }[];

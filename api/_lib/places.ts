@@ -4,7 +4,7 @@ import { optionalEnv, requireEnv } from './env.js';
 import { HttpError } from './http.js';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from './firebaseAdmin.js';
-import { googleRefused, isGooglePlaceId, openNearby, rememberPlaces, takeGoogle, textKinds, type OpenPlace, type PlaceSource } from './openPlaces.js';
+import { googleRefused, isGooglePlaceId, refusal, openNearby, rememberPlaces, takeGoogle, textKinds, type OpenPlace, type PlaceSource } from './openPlaces.js';
 
 const BASE_FIELDS = [
   'id',
@@ -172,24 +172,29 @@ export function distanceKm(a: GeoPoint, b: GeoPoint): number {
   return 2 * 6371 * Math.asin(Math.sqrt(h));
 }
 
-/** Photo lookups allowed per month, app-wide (GOOGLE_PHOTOS_MONTHLY_CAP) — keep it under Google's free allowance. */
-export const photoCap = () => Number(process.env.GOOGLE_PHOTOS_MONTHLY_CAP) || 800;
+/** Photo lookups allowed per month, app-wide (GOOGLE_PHOTOS_MONTHLY_CAP), or null (the default) for no cap. */
+export const photoCap = (): number | null => Number(process.env.GOOGLE_PHOTOS_MONTHLY_CAP) || null;
 const photoKey = () => `apiUsage/googlePhotos_${new Date().toISOString().slice(0, 7)}`;
 
-/** Takes one photo lookup from this month's allowance; false when it's used up. */
+/** Takes one photo lookup from this month's allowance; false when a cap is set and used up. */
 async function takePhoto(): Promise<boolean> {
   const ref = adminDb().doc(photoKey());
+  const cap = photoCap();
+  if (cap === null) {
+    void ref.set({ count: FieldValue.increment(1), updatedAt: Date.now() }, { merge: true }).catch(() => {});
+    return true;
+  }
   return adminDb()
     .runTransaction(async (tx) => {
       const used = Number((await tx.get(ref)).get('count') ?? 0);
-      if (used >= photoCap()) return false;
+      if (used >= cap) return false;
       tx.set(ref, { count: FieldValue.increment(1), updatedAt: Date.now() }, { merge: true });
       return true;
     })
     .catch(() => false);
 }
 
-export async function photoUsage(): Promise<{ used: number; cap: number }> {
+export async function photoUsage(): Promise<{ used: number; cap: number | null }> {
   return { used: Number((await adminDb().doc(photoKey()).get()).get('count') ?? 0), cap: photoCap() };
 }
 
@@ -199,7 +204,7 @@ export async function photoUsage(): Promise<{ used: number; cap: number }> {
  * bill a photo call on EVERY card view; the direct URL is cacheable.
  */
 export async function photoUrl(photoName: string, maxWidthPx = 640): Promise<string | null> {
-  // Each call is a billed "Place Details Photos" request: past this month's allowance, no photo (cards show a placeholder).
+  // Each call is a billed "Place Details Photos" request: past a set monthly cap, no photo (cards show a placeholder).
   if (!(await takePhoto())) return null;
   const url = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=${maxWidthPx}&skipHttpRedirect=true`;
   const res = await fetch(url, { headers: { 'X-Goog-Api-Key': requireEnv('GOOGLE_MAPS_SERVER_KEY') }, signal: AbortSignal.timeout(8000) }).catch(() => null);
@@ -264,7 +269,7 @@ async function googleNearby(
     }),
     signal: AbortSignal.timeout(6000),
   }).catch(() => null);
-  if (res?.status === 429) await googleRefused('nearby');
+  if (res && refusal(res.status)) await googleRefused('nearby');
   if (!res?.ok) return null; // unknown, not "none nearby"
   const places = ((await res.json()) as { places?: RawPlace[] }).places ?? [];
   return places
@@ -322,7 +327,7 @@ async function foodRequest(endpoint: 'searchNearby' | 'searchText', body: object
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(8000),
   }).catch(() => null);
-  if (res?.status === 429) await googleRefused(endpoint === 'searchText' ? 'text' : 'nearby');
+  if (res && refusal(res.status)) await googleRefused(endpoint === 'searchText' ? 'text' : 'nearby');
   if (!res?.ok) return null;
   const places = ((await res.json()) as { places?: RawFood[] }).places ?? [];
   return places.filter((p) => p.location && p.displayName?.text).map(toFood);

@@ -214,9 +214,9 @@ export async function openNearby(at: GeoPoint, googleTypes: string[], radiusM: n
 // ─── Daily Google budget (app-wide) ─────────────────────────────────────────
 
 const BUDGET_ENV = { nearby: 'GOOGLE_DAILY_NEARBY', text: 'GOOGLE_DAILY_TEXT', routes: 'GOOGLE_DAILY_ROUTES' } as const;
-const BUDGET_DEFAULT = { nearby: 250, text: 120, routes: 250 } as const;
 export type GoogleBudget = keyof typeof BUDGET_ENV;
-export const googleDailyCap = (kind: GoogleBudget) => Number(process.env[BUDGET_ENV[kind]]) || BUDGET_DEFAULT[kind];
+/** Safar's own daily cap, or null (the default): Google answers until it refuses. */
+export const googleDailyCap = (kind: GoogleBudget): number | null => Number(process.env[BUDGET_ENV[kind]]) || null;
 const budgetDoc = (kind: GoogleBudget) => adminDb().doc(`apiUsage/google_${kind}_${new Date().toISOString().slice(0, 10)}`);
 
 /** Google's daily quotas reset at midnight Pacific time (08:00 UTC in winter, 07:00 in summer — 08:00 is safe). */
@@ -228,6 +228,9 @@ const nextGoogleReset = (now = Date.now()) => {
 /** Until when Google refused each kind (quota exceeded) — remembered here and in Firestore, so nobody waits for it again. */
 const refusedUntil = new Map<GoogleBudget, number>();
 const refusedDoc = (kind: GoogleBudget) => adminDb().doc(`apiUsage/google_refused_${kind}`);
+
+/** 429 = quota exceeded, 403 = billing off (e.g. the free trial ended): Google won't answer until its reset. */
+export const refusal = (status: number) => status === 429 || status === 403;
 
 /** Google said "quota exceeded": skip it until its quota resets. */
 export async function googleRefused(kind: GoogleBudget) {
@@ -246,25 +249,30 @@ export async function googleOut(kind: GoogleBudget): Promise<boolean> {
 }
 
 /**
- * Takes one Google request from today's budget; false when it's used up or
- * Google refused until its reset (the backup sources answer instead — before
- * Google would bill or refuse).
+ * Takes one Google request from today's budget; false when Google refused
+ * until its reset, or a cap is set and used up (the backup sources answer
+ * instead). With no cap it only counts, for the Usage page.
  */
 export async function takeGoogle(kind: GoogleBudget): Promise<boolean> {
   if (await googleOut(kind)) return false;
   const ref = budgetDoc(kind);
+  const cap = googleDailyCap(kind);
+  if (cap === null) {
+    void ref.set({ count: FieldValue.increment(1), updatedAt: Date.now() }, { merge: true }).catch(() => {});
+    return true;
+  }
   return adminDb()
     .runTransaction(async (tx) => {
       const used = Number((await tx.get(ref)).get('count') ?? 0);
-      if (used >= googleDailyCap(kind)) return false;
+      if (used >= cap) return false;
       tx.set(ref, { count: FieldValue.increment(1), updatedAt: Date.now() }, { merge: true });
       return true;
     })
     .catch(() => true); // counting failed: don't block Google over it
 }
 
-export async function googleUsageToday(): Promise<Record<GoogleBudget, { used: number; cap: number }>> {
+export async function googleUsageToday(): Promise<Record<GoogleBudget, { used: number; cap: number | null }>> {
   const kinds = Object.keys(BUDGET_ENV) as GoogleBudget[];
   const snaps = await Promise.all(kinds.map((k) => budgetDoc(k).get()));
-  return Object.fromEntries(kinds.map((k, i) => [k, { used: Number(snaps[i].get('count') ?? 0), cap: googleDailyCap(k) }])) as Record<GoogleBudget, { used: number; cap: number }>;
+  return Object.fromEntries(kinds.map((k, i) => [k, { used: Number(snaps[i].get('count') ?? 0), cap: googleDailyCap(k) }])) as Record<GoogleBudget, { used: number; cap: number | null }>;
 }

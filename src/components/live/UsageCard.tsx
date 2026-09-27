@@ -9,8 +9,9 @@ import { Card, cx } from '../../ui';
 
 interface Cap {
   used: number;
-  cap: number;
-  left: number;
+  /** null = no cap (just counted). */
+  cap: number | null;
+  left: number | null;
   pct: number;
   note: string;
 }
@@ -26,10 +27,13 @@ interface Usage {
   googleNearby?: Cap;
   googleText?: Cap;
   googleRoutes?: Cap;
+  /** null = the server's service account can't read Cloud Monitoring yet. */
+  firestoreReads?: Cap | null;
   ai: { last7Days: { day: string; gemini: number; groq: number; failed: number }[]; models: { model: string; resting: boolean }[]; note: string };
 }
 
 const ROWS: [keyof Omit<Usage, 'month' | 'ai'>, string][] = [
+  ['firestoreReads', 'Firestore reads (today)'],
   ['hotels', 'Hotel searches'],
   ['instagramTiktok', 'Instagram / TikTok links'],
   ['xiaohongshu', 'Xiaohongshu links'],
@@ -77,7 +81,7 @@ export function UsageCard({ fallback = null }: { fallback?: ReactNode }) {
               <div className="flex justify-between text-sm">
                 <span className="text-[#161C23]">{label}</span>
                 <span className={cx('tabular-nums', c.pct >= 70 ? 'font-bold text-[#8A5A00]' : 'text-[#6D7A77]')}>
-                  {c.used} / {c.cap}
+                  {c.cap === null ? `${c.used} · no cap` : `${c.used} / ${c.cap}`}
                 </span>
               </div>
               <div className="h-1.5 rounded-full bg-[#F3EFE9] overflow-hidden">
@@ -88,6 +92,9 @@ export function UsageCard({ fallback = null }: { fallback?: ReactNode }) {
           );
         })}
       </ul>
+      {u.firestoreReads === null && (
+        <p className="text-xs text-[#6D7A77]">Firestore reads today: give the server's service account the "Monitoring Viewer" role in Google Cloud to see them here.</p>
+      )}
       <p className="text-sm text-[#161C23]">
         AI: {today.gemini + today.groq} requests today ({today.groq} by the backup Groq){today.failed ? ` · ${today.failed} failed` : ''} · {week.ok} this week
         {week.failed ? `, ${week.failed} failed` : ''}.

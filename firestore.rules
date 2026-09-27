@@ -38,6 +38,16 @@ service cloud.firestore {
         && request.resource.data.displayName.size() > 0
         && request.resource.data.displayName.size() <= 100;
       allow delete: if false;
+
+      // The 🔔 inbox is listened to live (no polling). Server-written.
+      match /inbox/{id} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow write: if false;
+      }
+      match /private/inbox {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow write: if false;
+      }
     }
 
     // ─── Trips ───────────────────────────────────────────────────────

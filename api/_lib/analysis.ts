@@ -4,9 +4,9 @@
 //
 // A full check reads the place's Google reviews (Place Details, Enterprise +
 // Atmosphere SKU: ~1,000 free a month, then about US$20–40 per 1,000). Every
-// full check — idea, Food tab, automatic — is counted against one monthly
-// budget, HALAL_CHECKS_PER_MONTH (default 900: inside the free tier, leaving
-// room for the other Place Details calls).
+// full check — idea, Food tab, automatic — is counted. An optional monthly
+// budget, HALAL_CHECKS_PER_MONTH, caps them (none by default); if Google
+// refuses, labels come from the free signals.
 import { FieldValue } from 'firebase-admin/firestore';
 import type { HalalAssessment, Sentiment } from '../../src/domain/index.js';
 import { optionalEnv } from './env.js';
@@ -49,8 +49,8 @@ export async function cachedAnalyses(placeKeys: string[]): Promise<Map<string, A
   return out;
 }
 
-/** Full checks this month may use (the owner can raise it in Vercel — above ~1,000 Google bills). */
-export const monthlyCheckBudget = () => Math.max(0, Number(optionalEnv('HALAL_CHECKS_PER_MONTH')) || 900);
+/** Full checks this month may use (HALAL_CHECKS_PER_MONTH), or null (the default) for no cap. */
+export const monthlyCheckBudget = (): number | null => Number(optionalEnv('HALAL_CHECKS_PER_MONTH')) || null;
 const monthKey = (d = new Date()) => d.toISOString().slice(0, 7);
 const monthRef = (m = monthKey()) => adminDb().doc(`apiUsage/halalChecks_${m}`);
 
@@ -59,10 +59,11 @@ export async function monthlyChecksUsed(): Promise<number> {
   return Number((await monthRef().get()).get('count') ?? 0);
 }
 
-/** Checks left this month, spread over the days left (so the month doesn't run dry early). */
-export async function checksLeftToday(): Promise<{ today: number; month: number; used: number; budget: number }> {
+/** Checks left this month, spread over the days left (so the month doesn't run dry early). null = no cap. */
+export async function checksLeftToday(): Promise<{ today: number | null; month: number | null; used: number; budget: number | null }> {
   const budget = monthlyCheckBudget();
   const used = await monthlyChecksUsed();
+  if (budget === null) return { today: null, month: null, used, budget };
   const month = Math.max(0, budget - used);
   const now = new Date();
   const daysLeft = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate() - now.getUTCDate() + 1;

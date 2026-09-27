@@ -10,7 +10,7 @@ import { withAuth } from '../_lib/auth.js';
 import { optionalEnv } from '../_lib/env.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { handle, HttpError, json, readJson } from '../_lib/http.js';
-import { inboxPath, inboxStatePath, loadPrefs, notify, prefsPath, subsPath } from '../_lib/push.js';
+import { inboxStatePath, loadPrefs, notify, prefsPath, subsPath } from '../_lib/push.js';
 import type { RouteTable } from '../_lib/routes.js';
 import { ideaDocRef, loadTripData } from '../_lib/schedule.js';
 import { closeOverdue, onReadyForAdmin, stillToChoose, stillToVote } from '../_lib/tally.js';
@@ -66,18 +66,6 @@ async function reminders(req: Request): Promise<Response> {
 }
 
 export const notificationRoutes: RouteTable = {
-  /** The in-app inbox: latest alerts and how many are unread. */
-  'GET inbox': withAuth(
-    async (_req, { user }) => {
-      const db = adminDb();
-      const [items, state] = await Promise.all([db.collection(inboxPath(user.uid)).orderBy('at', 'desc').limit(30).get(), db.doc(inboxStatePath(user.uid)).get()]);
-      const readAt = Number(state.get('readAt') ?? 0);
-      const list = items.docs.map((d) => ({ id: d.id, ...(d.data() as { title: string; body: string; url: string; kind: string; at: number }) }));
-      return json({ items: list, readAt, unread: list.filter((i) => i.at > readAt).length });
-    },
-    { perMinute: 30 },
-  ),
-
   /** Mark everything up to now as read. */
   'POST inbox/read': withAuth(
     async (_req, { user }) => {

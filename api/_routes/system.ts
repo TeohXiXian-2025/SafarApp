@@ -11,6 +11,7 @@ import type { RouteTable } from '../_lib/routes.js';
 import { socialUsage } from '../_lib/socialProviders.js';
 import { autoCheckUsage } from './food.js';
 import { checksLeftToday } from '../_lib/analysis.js';
+import { firestoreReadsToday, FREE_READS_PER_DAY } from '../_lib/firestoreReads.js';
 
 export const systemRoutes: RouteTable = {
   // Public liveness check. Reports which integrations are configured
@@ -34,7 +35,7 @@ export const systemRoutes: RouteTable = {
       if (owners.length && !owners.includes((user.email ?? '').toLowerCase())) throw new HttpError(403, 'Only the app owner can see usage');
       const month = new Date().toISOString().slice(0, 7);
       const models = geminiModels();
-      const [serp, social, aviation, ai, down, auto, checks, photos, google] = await Promise.all([
+      const [serp, social, aviation, ai, down, auto, checks, photos, google, reads] = await Promise.all([
         serpUsage(),
         socialUsage(),
         adminDb().doc(`apiUsage/aviationstack_${month}`).get(),
@@ -44,22 +45,28 @@ export const systemRoutes: RouteTable = {
         checksLeftToday(),
         photoUsage(),
         googleUsageToday(),
+        firestoreReadsToday(),
       ]);
-      const cap = (used: number, max: number) => ({ used, cap: max, left: Math.max(0, max - used), pct: max ? Math.round((used / max) * 100) : 0 });
+      // max null = no cap: just the count.
+      const cap = (used: number, max: number | null) => ({ used, cap: max, left: max === null ? null : Math.max(0, max - used), pct: max ? Math.round((used / max) * 100) : 0 });
       return json({
         month,
         hotels: { ...cap(serp.used, serp.cap), note: 'Google Hotels (SerpApi). At the cap, hotels switch to LiteAPI sample prices.' },
         instagramTiktok: { ...cap(social.scrapecreators.used, social.scrapecreators.cap), note: 'ScrapeCreators. At the cap, pasted links fall back to the caption only.' },
         xiaohongshu: { ...cap(social.apify.used, social.apify.cap), note: 'Apify. At the cap, pasted links fall back to the caption only.' },
-        halalAutoChecks: { ...cap(auto.used, auto.cap), note: "Automatic Halal Radar checks in the Food tab today (app-wide) — this month's remaining budget spread over the days left." },
+        halalAutoChecks: { ...cap(auto.used, auto.cap), note: 'Automatic Halal Radar checks in the Food tab today (app-wide). Cap = HALAL_AUTO_CHECKS_PER_DAY (default 30), or with a monthly budget set, what is left spread over the days left. Checks people ask for are not limited by it.' },
         halalChecksMonth: {
           ...cap(checks.used, checks.budget),
-          note: `Full halal checks (Google reviews) this month, all trips. Budget = HALAL_CHECKS_PER_MONTH (now ${checks.budget}); Google's free tier is ~1,000/month, above that about US$20–40 per 1,000. Raise it in Vercel → Settings → Environment Variables if billing is on. At the cap, labels come from free signals (listings, restaurant type, country, traveller reports).`,
+          note: `Full halal checks (Google reviews) this month, all trips. Optional cap = HALAL_CHECKS_PER_MONTH (${checks.budget ?? 'none'}); Google's free tier is ~1,000/month, above that about US$20–40 per 1,000. At a cap, or if Google refuses, labels come from free signals (listings, restaurant type, country, traveller reports).`,
         },
-        googleNearby: { ...cap(google.nearby.used, google.nearby.cap), note: `Google nearby searches today (mosques, halal food, cafés, indoor places). Cap = GOOGLE_DAILY_NEARBY. Past it: Geoapify → OpenStreetMap → places Safar already knows.` },
-        googleText: { ...cap(google.text.used, google.text.cap), note: `Google text searches today ("halal food", "prayer room"). Cap = GOOGLE_DAILY_TEXT. Past it: the same backups.` },
-        googleRoutes: { ...cap(google.routes.used, google.routes.cap), note: `Google travel times today. Cap = GOOGLE_DAILY_ROUTES. Past it: openrouteservice (walking exact, trains estimated), then a distance estimate.` },
-        placePhotos: { ...cap(photos.used, photos.cap), note: `Google place photos looked up this month (billed as "Place Details Photos"). Cap = GOOGLE_PHOTOS_MONTHLY_CAP (now ${photos.cap}). At the cap, cards show no photo until next month.` },
+        googleNearby: { ...cap(google.nearby.used, google.nearby.cap), note: `Google nearby searches today (mosques, halal food, cafés, indoor places). Optional cap = GOOGLE_DAILY_NEARBY (none by default). If Google refuses: Geoapify → OpenStreetMap → places Safar already knows.` },
+        googleText: { ...cap(google.text.used, google.text.cap), note: `Google text searches today ("halal food", "prayer room"). Optional cap = GOOGLE_DAILY_TEXT (none by default). If Google refuses: the same backups.` },
+        googleRoutes: { ...cap(google.routes.used, google.routes.cap), note: `Google travel times today. Optional cap = GOOGLE_DAILY_ROUTES (none by default). If Google refuses: openrouteservice (walking exact, trains estimated), then a distance estimate.` },
+        placePhotos: { ...cap(photos.used, photos.cap), note: `Google place photos looked up this month (billed as "Place Details Photos"). Optional cap = GOOGLE_PHOTOS_MONTHLY_CAP (${photos.cap ?? 'none'}). At a cap, cards show no photo until next month.` },
+        firestoreReads:
+          reads === null
+            ? null
+            : { ...cap(reads, FREE_READS_PER_DAY), note: 'Firestore reads today, all users (free up to 50K/day, resets 3 pm Malaysia time). From 80%, refreshing old place details waits until tomorrow; everything people do keeps working.' },
         flightStatus: { ...cap(Number(aviation.get('count') ?? 0), Number(process.env.FLIGHT_STATUS_MONTHLY_CAP) || 90), note: 'AviationStack. At the cap, travellers report delays themselves.' },
         ai: {
           last7Days: ai,

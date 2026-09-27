@@ -6,7 +6,7 @@ import { requireEnv } from './env.js';
 
 let app: App | undefined;
 
-function adminApp(): App {
+export function adminApp(): App {
   if (app) return app;
   if (getApps().length) return (app = getApps()[0]);
   // FIREBASE_SERVICE_ACCOUNT is the service-account JSON, base64-encoded.
@@ -17,6 +17,10 @@ function adminApp(): App {
   });
   return app;
 }
+
+/** The Firebase / Google Cloud project id (from the service account). */
+export const adminProjectId = (): string =>
+  JSON.parse(Buffer.from(requireEnv('FIREBASE_SERVICE_ACCOUNT'), 'base64').toString('utf8')).project_id;
 
 export const adminAuth = () => getAuth(adminApp());
 let db: Firestore | undefined;

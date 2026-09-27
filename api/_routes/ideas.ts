@@ -41,6 +41,7 @@ import { loadTrip, logActivity } from '../_lib/trip.js';
 import { useDailyQuota } from '../_lib/quota.js';
 import { notify } from '../_lib/push.js';
 import { applyMove, dissolve } from '../_lib/splits.js';
+import { saveReads } from '../_lib/firestoreReads.js';
 
 const ideaRef = (tripId: string, id: string) => adminDb().doc(paths.idea(tripId, id));
 
@@ -342,9 +343,11 @@ export const ideaRoutes: RouteTable = {
   /**
    * Re-fetch place details older than 30 days (Google's caching terms) for a
    * trip's ideas. Called when the board opens; a few per call keeps it cheap.
+   * Near the day's free Firestore reads it waits for another visit.
    */
   'POST ideas/refresh': withTrip(
     async (_req, { tripId }) => {
+      if (await saveReads()) return json({ refreshed: 0, remaining: 0, deferred: true });
       const snap = await adminDb().collection(paths.ideas(tripId)).get();
       const stale = snap.docs
         .map((d) => Idea.safeParse(d.data()))

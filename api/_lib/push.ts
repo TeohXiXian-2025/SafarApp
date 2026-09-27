@@ -4,15 +4,15 @@
 // throttled so a burst of new ideas is one alert. Never throws — a failed
 // notification must not fail the action that caused it.
 import webpush from 'web-push';
-import { NotifyPrefs, PushSub, shouldSend, type NotifyKind } from '../../src/domain/index.js';
+import { NotifyPrefs, paths, PushSub, shouldSend, type NotifyKind } from '../../src/domain/index.js';
 import { optionalEnv } from './env.js';
 import { adminDb } from './firebaseAdmin.js';
 
 export const subsPath = (uid: string) => `users/${uid}/pushSubs`;
 export const prefsPath = (uid: string) => `users/${uid}/private/notify`;
 /** In-app alerts (the 🔔 in the header) — kept for every notification, even with push off. */
-export const inboxPath = (uid: string) => `users/${uid}/inbox`;
-export const inboxStatePath = (uid: string) => `users/${uid}/private/inbox`;
+export const inboxPath = paths.inbox;
+export const inboxStatePath = paths.inboxState;
 
 /** Saves the alert to each person's in-app inbox (laptops, or push turned off). */
 async function toInbox(uids: string[], note: Note) {
