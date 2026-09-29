@@ -7,14 +7,10 @@ coverage/
 .env*
 !.env.example
 .vercel
+tsconfig.tsbuildinfo
 
-# Private working docs (kept locally, not on GitHub)
-docs/BUILD_PLAN.md
-docs/SYSTEM_AND_TEST_GUIDE.md
-docs/FIX_PLAN.md
-docs/TEST_GUIDE.md
-docs/test-kit/
+# Private working docs, plans and test kits (kept locally, not on GitHub)
+docs/
+
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
-docs/REDESIGN_PLAN.md
-docs/REDESIGN_PLAN_V2.md

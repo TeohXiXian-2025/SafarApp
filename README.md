@@ -30,6 +30,7 @@
   * [5.1 Tech Stack](#51-tech-stack)
   * [5.2 System Architecture Diagram](#52-system-architecture-diagram)
   * [5.3 Build Plan & Scope](#53-build-plan--scope)
+* [6. Try It & Run It](#6-try-it--run-it)
 
 ---
 
@@ -317,3 +318,35 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 #### 🎯 Feasibility & Scope Boundaries
 * **Zero Payment Gateway Overhead:** Focused 100% on the core logistical planning, conflict resolution, and intelligence algorithms rather than getting bogged down in credit card processing or live airline booking systems.
 * **Serverless Architecture:** Eliminates backend server maintenance and deployment friction, allowing full focus on user experience, real-time collaboration, and AI performance.
+
+---
+
+<a id="6-try-it--run-it"></a>
+## 🚀 6. Try It & Run It
+
+* **Live app:** https://safar-app-cristal-teohs-projects.vercel.app
+* **Demo trip (no account):** https://safar-app-cristal-teohs-projects.vercel.app/demo — you play Aisyah, planning a December week in Japan for four very different people, guided step by step. Sample documents are in [`public/demo-kit/`](public/demo-kit).
+* **Pitch deck:** https://safar-app-cristal-teohs-projects.vercel.app/pitch
+
+### Project structure
+
+| Folder | What's in it |
+| :--- | :--- |
+| `src/domain/` | The rules, shared by the app and the server: prayer times, timeline and placement, voting and splits, halal conflicts, stays, expenses, vault checks, qibla, the demo story (with unit tests next to each file) |
+| `src/pages/`, `src/trip/` | The screens: landing, sign-in, demo, my trips; and inside a trip — Home, Plan, Ideas, Food, Bookings, Money, People, Settings, the demo's Trip Quest |
+| `src/ui/`, `src/components/live/`, `src/lib/` | Shared UI pieces, header and inbox, live Firestore listeners, the API client |
+| `api/` | One Vercel function (`api/router.ts`) serving every `/api/*` route in `api/_routes/`, with helpers in `api/_lib/` (AI reading, places, routes, prayer places, push, the demo trip) |
+| `scripts/` | End-to-end tests (`e2e-*.mjs`), key checks, rule deployment, the demo kit and preview image sources |
+| `public/` | Icons, the demo kit files, the link-preview image, the push service worker |
+| `firestore.rules`, `storage.rules` | Who can read what (released with `npm run deploy:rules`) |
+
+### Run it locally
+
+```bash
+npm install
+cp .env.example .env.local   # fill in the keys (see the comments in the file)
+npm run dev                  # app + API on http://localhost:5173
+npm test                     # unit tests
+npm run e2e:demo             # an end-to-end test (needs npm run dev running)
+```
+

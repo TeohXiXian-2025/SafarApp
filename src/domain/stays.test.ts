@@ -140,6 +140,19 @@ describe('booking a hotel around the flights', () => {
     expect(hotelJourneyProblem({ ...stay('2026-12-07T15:00', '2026-12-09T12:00'), travellerUids: ['b'] }, [inbound, outbound])).toBeNull();
   });
 
+  it('is fine when guests arrive separately — the late one checks in later', () => {
+    // b flew in the day before; a lands at 18:05: the room is taken at 15:00 by b.
+    const bEarly = { ...inbound, number: '600', startLocal: '2026-12-06T09:00', endLocal: '2026-12-06T10:05', startAt: '2026-12-06T09:00:00+08:00', endAt: '2026-12-06T10:05:00+08:00', travellerUids: ['b'] };
+    const both = { ...stay('2026-12-07T15:00', '2026-12-09T08:00'), travellerUids: ['a', 'b'] };
+    expect(hotelJourneyProblem(both, [inbound, outbound, bEarly])).toBeNull();
+  });
+
+  it('still refuses when every guest arrives after check-in', () => {
+    const together = { ...inbound, travellerUids: ['a', 'b'] };
+    const both = { ...stay('2026-12-07T15:00', '2026-12-09T08:00'), travellerUids: ['a', 'b'] };
+    expect(hotelJourneyProblem(both, [together])).toMatch(/before MH 602 lands at 18:05/);
+  });
+
   it('suggests check-in after landing and check-out before leaving for the airport', () => {
     const s = suggestStayTimes({ checkIn: '2026-12-07', checkOut: '2026-12-09', location: KLCC }, { checkIn: '15:00', checkOut: '12:00' }, [inbound, outbound], ['a']);
     expect(s.checkIn).toBe('2026-12-07T19:35');

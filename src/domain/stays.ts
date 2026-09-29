@@ -395,19 +395,31 @@ interface JourneyLike {
 const journeyName = (j: Pick<JourneyLike, 'carrier' | 'number' | 'kind'>) => [j.carrier, j.number].filter(Boolean).join(' ') || j.kind;
 const hhmm = (local: string) => local.slice(11, 16);
 
+type StayTimes = { startLocal: string; endLocal: string; startAt: string; endAt: string; travellerUids: string[]; location: GeoPoint };
+
 /**
  * Why a hotel stay (check-in / check-out instants, with offsets) doesn't work
  * with the guests' journeys, or null. Catches checking in while still in the
  * air or before landing in that city, and checking out after leaving it.
+ * The times are the room's, not each person's: guests who travel separately
+ * (one lands in the evening, another takes a later bus) check in when they
+ * arrive, so it's only a problem when it is one for EVERY guest.
  */
-export function hotelJourneyProblem(
-  hotel: { startLocal: string; endLocal: string; startAt: string; endAt: string; travellerUids: string[]; location: GeoPoint },
-  journeys: JourneyLike[],
-): string | null {
+export function hotelJourneyProblem(hotel: StayTimes, journeys: JourneyLike[]): string | null {
+  let first: string | null = null;
+  for (const uid of hotel.travellerUids) {
+    const problem = guestProblem(hotel, journeys.filter((j) => j.travellerUids.includes(uid)));
+    if (!problem) return null; // someone can check in and out at these times
+    first ??= problem;
+  }
+  return first;
+}
+
+function guestProblem(hotel: StayTimes, journeys: JourneyLike[]): string | null {
   const inn = Date.parse(hotel.startAt);
   const out = Date.parse(hotel.endAt);
   for (const j of journeys) {
-    if (j.kind === 'hotel' || !j.travellerUids.some((u) => hotel.travellerUids.includes(u))) continue;
+    if (j.kind === 'hotel') continue;
     const dep = Date.parse(j.startAt);
     const arr = Date.parse(j.endAt);
     const name = journeyName(j);
