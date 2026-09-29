@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayWarnings, estimateTravelMin, findSlot, nextSlot, toClock, toMin, tripDays } from './timeline';
+import { dayWarnings, estimateTravelMin, findSlot, nextSlot, planChain, toClock, toMin, tripDays } from './timeline';
 
 const item = (id: string, start: string, end: string, locked = false, orderIndex = 0) => ({ id, start, end, locked, orderIndex });
 const HOURS = ['Monday: 9:00 AM – 5:00 PM', 'Tuesday: Closed'];
@@ -215,4 +215,40 @@ it('planChain: a moment or prayer during a stop never makes the next stop start 
   const p = planChain(rows, () => 20);
   const placed = rows.filter((r) => !r.fixed).map((r) => ({ id: r.id, s: p.starts.get(r.id)!, e: p.starts.get(r.id)! + (r.end - r.start) })).sort((x, y) => x.s - y.s);
   for (let i = 1; i < placed.length; i++) expect(placed[i].s).toBeGreaterThanOrEqual(placed[i - 1].e);
+});
+
+describe('tight chain and the dawn prayer', () => {
+  const at = (lat: number, lng: number) => ({ lat, lng });
+  const fajr = { id: 'fajr', start: 365, end: 385, fixed: true, prayer: true, loc: at(3.16, 101.7) };
+  const walk = () => 7;
+
+  it("doesn't pull the day's first stop back to right after Fajr", () => {
+    const plan = planChain([fajr, { id: 'A', start: 540, end: 660, fixed: false, loc: at(3.1579, 101.7116) }], walk, undefined, { tight: true });
+    expect(plan.starts.get('A')).toBe(540);
+  });
+
+  it('still chains the next stop right after the one before', () => {
+    const plan = planChain(
+      [fajr, { id: 'A', start: 540, end: 660, fixed: false, loc: at(3.1579, 101.7116) }, { id: 'B', start: 900, end: 960, fixed: false, loc: at(3.1537, 101.7131) }],
+      walk,
+      undefined,
+      { tight: true },
+    );
+    expect(plan.starts.get('A')).toBe(540);
+    expect(plan.starts.get('B')).toBeGreaterThanOrEqual(660);
+    expect(plan.starts.get('B')).toBeLessThan(700);
+  });
+});
+
+describe('tight chain and opening hours', () => {
+  const walk = () => 7;
+  const shop = { lat: 3.1456, lng: 101.6955 };
+  it('moves an unpinned stop to opening time', () => {
+    const plan = planChain([{ id: 'C', start: 420, end: 480, fixed: false, loc: shop, open: [[600, 1320]] }], walk, undefined, { tight: true });
+    expect(plan.starts.get('C')).toBe(600);
+  });
+  it('keeps a time typed by hand, even before opening', () => {
+    const plan = planChain([{ id: 'C', start: 420, end: 480, fixed: false, pinned: true, loc: shop, open: [[600, 1320]] }], walk, undefined, { tight: true });
+    expect(plan.starts.get('C')).toBe(420);
+  });
 });

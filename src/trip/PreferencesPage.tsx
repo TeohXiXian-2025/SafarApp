@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { HALAL_TIER_LABELS, HOTEL_PRIORITY_LABELS, INTEREST_OPTIONS, MemberPrefs, paths, type HalalTier } from '../domain';
 import { db } from '../firebase/config';
-import { Button, Card, Chip, ErrorBanner, Field, Input, Toggle } from '../ui';
+import { Button, Card, Chip, ErrorBanner, Field, Input, PageHeader, Toggle } from '../ui';
 import { useTrip } from './TripLayout';
 
 const PACES: { key: MemberPrefs['pace']; label: string; hint: string }[] = [
@@ -64,11 +64,9 @@ export function PreferencesPage() {
   };
 
   return (
-    <div className="max-w-xl space-y-4">
-      <div>
-        <h1 className="text-xl font-extrabold text-[#161C23]">Your travel preferences</h1>
-        <p className="text-sm text-[#6D7A77]">The group plan, hotel picks and restaurant suggestions balance everyone's answers.</p>
-      </div>
+    <div className="max-w-xl mx-auto space-y-4">
+      <PageHeader eyebrow="People" title="My needs" />
+      <p className="-mt-2 text-sm text-[#6D7A77]">The group plan, hotel picks and restaurant suggestions balance everyone's answers.</p>
 
       <Card className="p-5 space-y-4">
         <h2 className="font-bold text-[#161C23]">Budget ({trip.currency})</h2>

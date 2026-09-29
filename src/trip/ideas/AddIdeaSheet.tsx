@@ -154,7 +154,7 @@ export function AddIdeaSheet({ open, onClose, initialText }: { open: boolean; on
 
   const addPicked = async () => {
     if (!result) return;
-    setWorking('Adding to the Idea Board…');
+    setWorking('Adding to Ideas…');
     try {
       const items = result.candidates.filter((c) => picked.has(c.place.placeId!)).map((c) => ({ placeId: c.place.placeId!, source: result.source }));
       const r = await addIdeas(trip.id, items);
@@ -170,7 +170,7 @@ export function AddIdeaSheet({ open, onClose, initialText }: { open: boolean; on
 
   const addSearched = async () => {
     if (!searchPick) return;
-    setWorking('Adding to the Idea Board…');
+    setWorking('Adding to Ideas…');
     try {
       // A Google place by its id; one found by the OpenStreetMap backup search by what it is and where.
       const item = searchPick.placeId
@@ -201,7 +201,7 @@ export function AddIdeaSheet({ open, onClose, initialText }: { open: boolean; on
   ];
 
   return (
-    <Sheet open={open} onClose={close} title="Add to the Idea Board" wide={!!result}>
+    <Sheet open={open} onClose={close} title="Add to Ideas" wide={!!result}>
       <input
         ref={fileInput}
         type="file"

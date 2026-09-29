@@ -19,7 +19,7 @@ import {
 } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
-import { Avatar, Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
+import { Avatar, Button, Card, confirmDialog, cx, ErrorBanner, PageHeader, Spinner } from '../../ui';
 import { formatDay } from '../bookings/format';
 import { useTrip } from '../TripLayout';
 import { ExpenseSheet, tripToday } from './ExpenseSheet';
@@ -55,16 +55,13 @@ export function ExpensesPage() {
   const mine = view.net[me.uid] ?? 0;
 
   return (
-    <div className="max-w-2xl space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-extrabold text-[#161C23]">Money</h1>
-          <p className="text-sm text-[#6D7A77]">Shared costs, who owes whom, and your budget. Everything in {trip.currency}.</p>
-        </div>
+    <div className="max-w-3xl mx-auto space-y-4">
+      <PageHeader eyebrow={`Everything in ${trip.currency}`} title="Money">
         <Button onClick={() => setEditing('new')} className="shrink-0">
-          <Plus className="w-4 h-4" /> Add
+          <Plus className="w-4 h-4" /> Add expense
         </Button>
-      </div>
+      </PageHeader>
+      <p className="-mt-2 text-sm text-[#6D7A77]">Shared costs, who owes whom, and your budget.</p>
 
       {expenses.error && <ErrorBanner>Could not load expenses: {expenses.error.message}</ErrorBanner>}
 
@@ -265,7 +262,7 @@ function ExpenseRow({ expense: e, nameOf, money, stop, onEdit }: { expense: Expe
   const canDelete = e.settlement ? receiver : canEdit;
 
   const remove = async () => {
-    if (!confirm(e.settlement ? 'Undo this payment?' : `Delete “${e.title}”?`)) return;
+    if (!(await confirmDialog(e.settlement ? { title: 'Undo this payment?', confirmLabel: 'Undo payment', danger: true } : { title: `Delete “${e.title}”?`, confirmLabel: 'Delete', danger: true }))) return;
     setBusy(true);
     try {
       await api.post('expenses/delete', { id: e.id }, { tripId: trip.id });

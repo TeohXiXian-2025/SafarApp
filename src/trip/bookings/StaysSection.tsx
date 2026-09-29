@@ -10,7 +10,7 @@ import { Link } from 'react-router';
 import { Booking, cityOf, formatMoney, groupHotelBudget, HotelOption, nextDay, nightsWithoutStay, paths, Stay, suggestStayTimes, toMinor, tripNights, uncoveredNights } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
-import { Badge, Button, Card, cx, ErrorBanner, Field, Input, Select, Sheet, Spinner } from '../../ui';
+import { Badge, Button, Card, confirmDialog, cx, ErrorBanner, Field, Input, Select, Sheet, Spinner } from '../../ui';
 import { CommentThread } from '../CommentThread';
 import { useTrip } from '../TripLayout';
 import { BookingCard } from './BookingCard';
@@ -89,7 +89,7 @@ export function StaysSection({ bookings, onUpload, onEditBooking }: { bookings: 
   };
 
   const replan = async () => {
-    if (!confirm('Re-plan stays from the current timeline? Stays with a picked hotel are kept.')) return;
+    if (!(await confirmDialog({ title: 'Re-plan stays from the current plan?', body: 'Stays with a picked hotel are kept.', confirmLabel: 'Re-plan' }))) return;
     setReplanning(true);
     try {
       await api.post('stays/plan', { replan: true }, { tripId: trip.id });
@@ -255,8 +255,8 @@ function StayCard({ stay, booked, journeys, onEdit, onUpload }: { stay: Stay; bo
                 variant="ghost"
                 className="!min-h-8 !px-3 text-xs text-[#B3261E]"
                 loading={busy}
-                onClick={() => {
-                  if (!confirm(`Cancel the booking at ${b.to.name}? Its check-in and check-out leave the timeline. (Cancel it on the booking site too.)`)) return;
+                onClick={async () => {
+                  if (!(await confirmDialog({ title: `Cancel the booking at ${b.to.name}?`, body: 'Its check-in and check-out leave the plan. Cancel it on the booking site too.', confirmLabel: 'Cancel booking', cancelLabel: 'Keep it', danger: true }))) return;
                   setBusy(true);
                   setError('');
                   api
@@ -652,7 +652,7 @@ function StayEditor({ stay, onClose }: { stay?: Stay; onClose: () => void }) {
     }
   };
   const remove = async () => {
-    if (!stay || !confirm(`Remove the ${stay.city} stay and its hotel list? Bookings you already made stay.`)) return;
+    if (!stay || !(await confirmDialog({ title: `Remove the ${stay.city} stay?`, body: 'Its hotel list goes too. Bookings you already made stay.', confirmLabel: 'Remove', danger: true }))) return;
     setSaving(true);
     await api.post('stays/delete', { id: stay.id }, { tripId: trip.id }).catch(() => {});
     onClose();

@@ -6,7 +6,7 @@ import { Booking, journeyPrayers, prays, type BookingDraft } from '../../domain'
 import { JourneyPrayerList } from '../JourneyPrayerList';
 import { api, ApiError } from '../../lib/api';
 import { fileUrl } from '../../lib/storage';
-import { Avatar, Badge, Button, Card, ErrorBanner, Sheet } from '../../ui';
+import { Avatar, Badge, Button, Card, confirmDialog, ErrorBanner, Sheet } from '../../ui';
 import { useTrip } from '../TripLayout';
 import { BookingEditor, draftProblem, type EditableDraft } from './BookingEditor';
 import { bookingTitle, clockName, dayDiff, formatDay, KIND, localParts } from './format';
@@ -26,7 +26,7 @@ export function BookingCard({ booking: b, canEdit, isMine, onEdit }: { booking: 
   const travellers = members.filter((m) => b.travellerUids.includes(m.uid));
 
   const remove = async () => {
-    if (!confirm(`Delete this ${k.label.toLowerCase()} booking?`)) return;
+    if (!(await confirmDialog({ title: `Delete this ${k.label.toLowerCase()} booking?`, body: 'It leaves the plan for everyone on it.', confirmLabel: 'Delete', danger: true }))) return;
     setBusy(true);
     try {
       await api.post('bookings/delete', { id: b.id }, { tripId: trip.id });

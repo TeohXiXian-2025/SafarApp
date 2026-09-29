@@ -53,12 +53,13 @@ export function JoinPage() {
         {!preview && !error ? (
           <Spinner label="Opening invite…" />
         ) : (
-          <Card className="p-6 space-y-5">
+          <Card className="p-6 space-y-5 overflow-hidden">
             {preview && (
               <>
-                <div className="space-y-1">
-                  <p className="text-sm text-[#6D7A77]">{preview.adminName ?? 'Someone'} invited you to join</p>
-                  <h1 className="text-2xl font-extrabold text-[#161C23]">{preview.name}</h1>
+                <div className="relative -mx-6 -mt-6 px-6 pt-6 pb-5 bg-night text-white overflow-hidden">
+                  <div className="absolute inset-0 star-lattice opacity-50" aria-hidden />
+                  <p className="relative text-[11px] font-bold uppercase tracking-[.1em] text-gold-soft">{preview.adminName ?? 'Someone'} invited you to join</p>
+                  <h1 className="relative font-display text-3xl font-semibold mt-1">{preview.name}</h1>
                 </div>
                 <div className="space-y-2 text-sm text-[#6D7A77]">
                   <p className="flex items-center gap-2">

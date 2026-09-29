@@ -4,7 +4,7 @@ import { NotificationsCard } from '../components/live/NotificationsCard';
 import { TripForm } from '../components/live/TripForm';
 import { UsageCard } from '../components/live/UsageCard';
 import { api, ApiError } from '../lib/api';
-import { Button, Card, ErrorBanner, Field, Input } from '../ui';
+import { Button, Card, ErrorBanner, Field, Input, PageHeader } from '../ui';
 import { useTrip } from './TripLayout';
 
 export function SettingsPage() {
@@ -17,7 +17,8 @@ export function SettingsPage() {
 
   if (!isAdmin) {
     return (
-      <div className="max-w-xl space-y-4">
+      <div className="max-w-xl mx-auto space-y-4">
+        <PageHeader eyebrow="Trip" title="Settings" />
         <NotificationsCard />
         <Card className="p-5 text-sm text-[#6D7A77]">Only the trip admin can change trip details.</Card>
         <UsageCard />
@@ -43,7 +44,8 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="max-w-xl space-y-4">
+    <div className="max-w-xl mx-auto space-y-4">
+      <PageHeader eyebrow="Trip" title="Settings" />
       <NotificationsCard />
       <Card className="p-5 space-y-4">
         <h2 className="font-bold text-[#161C23]">Trip details</h2>

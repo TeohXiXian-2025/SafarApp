@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router';
 import { AppHeader } from '../components/live/AppHeader';
 import { TripForm } from '../components/live/TripForm';
 import { api } from '../lib/api';
-import { Card } from '../ui';
+import { Card, PageHeader } from '../ui';
 
 export function NewTripPage() {
   const navigate = useNavigate();
@@ -11,10 +11,8 @@ export function NewTripPage() {
     <div className="min-h-dvh bg-[#FAF8F5]">
       <AppHeader />
       <main className="max-w-xl mx-auto px-4 py-6 space-y-5 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
-        <div>
-          <h1 className="text-2xl font-extrabold text-[#161C23]">Plan a new trip</h1>
-          <p className="text-sm text-[#6D7A77] mt-1">You'll be the trip admin. You can invite your group next.</p>
-        </div>
+        <PageHeader eyebrow="New trip" title="Where are you going?" />
+        <p className="-mt-3 text-sm text-[#6D7A77]">You'll be the trip admin. You can invite your group next.</p>
         <Card className="p-5">
           <TripForm
             submitLabel="Create trip"

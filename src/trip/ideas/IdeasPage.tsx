@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router';
 import { citiesByDay, cityDatesText, cityOf, Idea, openingRanges, paths, placeIsStale, ScheduleItem, Split, Stay, type IdeaStatus } from '../../domain';
 import { api } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
-import { Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
+import { Button, Card, cx, ErrorBanner, PageHeader, Spinner } from '../../ui';
 import { useTrip } from '../TripLayout';
 import { AddIdeaSheet } from './AddIdeaSheet';
 import { IdeaCard } from './IdeaCard';
@@ -13,10 +13,10 @@ import { NeedsYouStrip, useNeeds } from './NeedsYou';
 type Filter = 'voting' | 'backlog' | 'mixed' | 'backup' | 'rejected';
 
 const FILTERS: { key: Filter; label: string; statuses: IdeaStatus[]; empty: string }[] = [
-  { key: 'voting', label: 'Voting', statuses: ['voting'], empty: 'Nothing to vote on. Add places from TikTok, Instagram, Xiaohongshu or search.' },
-  { key: 'backlog', label: 'Backlog', statuses: ['backlog', 'scheduled'], empty: 'Ideas the group accepted land here, ready for the timeline.' },
-  { key: 'mixed', label: 'Split votes', statuses: ['mixed', 'split_pending'], empty: 'No disagreements so far.' },
-  { key: 'backup', label: 'Backup', statuses: ['backup'], empty: 'No backups. The admin can keep split-vote places here as a plan B.' },
+  { key: 'voting', label: 'Vote now', statuses: ['voting'], empty: 'Nothing to vote on. Add places from TikTok, Instagram, Xiaohongshu or search.' },
+  { key: 'backlog', label: 'Agreed', statuses: ['backlog', 'scheduled'], empty: 'Places the group agrees on land here, ready for a day on the plan.' },
+  { key: 'mixed', label: 'Needs a decision', statuses: ['mixed', 'split_pending'], empty: 'Nothing needs a decision — no disagreements so far.' },
+  { key: 'backup', label: 'Reserve', statuses: ['backup'], empty: 'Nothing in reserve. The admin can keep places most voted against here — for rain swaps or while others pray.' },
   { key: 'rejected', label: 'Rejected', statuses: ['rejected'], empty: 'Nothing rejected.' },
 ];
 const isFilter = (v: string | null): v is Filter => FILTERS.some((f) => f.key === v);
@@ -129,21 +129,18 @@ export function IdeasPage() {
   const sections = multiCity
     ? trip.destinations.map((d, k) => ({ key: k, name: d.name, dates: cityDatesText(d), ideas: shown.filter((i) => cityIdx(i) === k) })).filter((x) => x.ideas.length)
     : [{ key: 0, name: '', dates: null, ideas: shown }];
-  const chip = (on: boolean) => cx('shrink-0 px-3 min-h-8 rounded-full text-xs font-semibold border', on ? 'bg-[#00685F] border-[#00685F] text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]');
+  const chip = (on: boolean) => cx('shrink-0 px-3 min-h-8 rounded-full text-xs font-semibold border', on ? 'bg-night border-night text-white' : 'bg-white border-[#E7DFD5] text-[#161C23] hover:border-[#00685F]/40');
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-extrabold text-[#161C23]">Idea Board</h1>
-          <p className="text-sm text-[#6D7A77]">
-            {needsMyVote ? `${needsMyVote} idea${needsMyVote === 1 ? '' : 's'} waiting for your vote.` : 'Suggest places, vote together — unanimous picks go to the backlog.'}
-          </p>
-        </div>
+      <PageHeader
+        eyebrow={needsMyVote ? `${needsMyVote} waiting for your vote` : 'Suggest · vote · agree'}
+        title="Ideas"
+      >
         <Button onClick={() => setAdding(true)} className="shrink-0">
-          <Plus className="w-4 h-4" /> Add
+          <Plus className="w-4 h-4" /> Add place or link
         </Button>
-      </div>
+      </PageHeader>
 
       <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1" role="tablist" aria-label="Filter ideas">
         {FILTERS.map((f) => (
@@ -159,12 +156,12 @@ export function IdeasPage() {
               }
             }}
             className={cx(
-              'shrink-0 inline-flex items-center gap-1.5 px-3.5 min-h-9 rounded-full text-sm font-semibold border',
-              filter === f.key ? 'bg-[#161C23] border-[#161C23] text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]',
+              'shrink-0 inline-flex items-center gap-1.5 px-3.5 min-h-10 rounded-xl text-sm font-semibold border transition-colors',
+              filter === f.key ? 'bg-night border-night text-white shadow-[0_6px_14px_rgba(11,59,54,.22)]' : 'bg-white border-[#E7DFD5] text-[#161C23] hover:border-[#00685F]/40',
             )}
           >
             {f.label}
-            <span className={cx('text-xs rounded-full px-1.5', filter === f.key ? 'bg-white/20' : 'bg-[#F3EFE9] text-[#6D7A77]')}>{counts[f.key]}</span>
+            <span className={cx('text-xs rounded-full px-1.5 tabular-nums', filter === f.key ? 'bg-gold text-night' : 'bg-[#F3EFE9] text-[#6D7A77]')}>{counts[f.key]}</span>
           </button>
         ))}
       </div>
@@ -208,7 +205,7 @@ export function IdeasPage() {
       ) : ideas.data.length === 0 ? (
         <Card className="p-6 text-center space-y-3">
           <Lightbulb className="w-8 h-8 mx-auto text-[#00685F]" />
-          <p className="font-bold text-[#161C23]">Start your Idea Board</p>
+          <p className="font-display text-2xl font-semibold text-[#161C23]">Start your ideas</p>
           <p className="text-sm text-[#6D7A77]">
             Paste a TikTok, Instagram or Xiaohongshu link and AI pulls out every place in it — each checked for halal status and reviews.
           </p>
@@ -222,7 +219,7 @@ export function IdeasPage() {
         sections.map((sec) => (
           <section key={sec.key} className="space-y-3">
             {sec.name && (
-              <h2 className="flex items-center gap-1.5 text-sm font-bold text-[#161C23] border-b border-[#E7DFD5] pb-1.5">
+              <h2 className="flex items-center gap-1.5 font-display text-xl font-semibold text-[#161C23] border-b border-[#E7DFD5] pb-2">
                 <MapPin className="w-4 h-4 text-[#00685F]" /> {sec.name}
                 {sec.dates && <span className="font-semibold text-[#6D7A77]">· {sec.dates}</span>}
                 <span className="ml-auto text-xs font-semibold text-[#6D7A77]">{sec.ideas.length}</span>

@@ -261,6 +261,10 @@ export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) =
   const fixed = sorted.filter((r) => r.fixed && !r.soft);
   const move = (a?: GeoPoint, b?: GeoPoint) => (a && b ? travel(a, b) : 0);
   let cur: { id: string; end: number; loc?: GeoPoint; long: boolean; holds?: boolean; start: number; prayer?: boolean } | null = null;
+  // Tight chaining pulls a stop earlier only to follow a real stop or booking. Before the day's
+  // first one there are only prayer times (Fajr) — nowhere the group comes from — so the first
+  // stop keeps its start (it still moves later if it would clash).
+  let anchored = false;
   // From the prayer place on to the next stop: the whole walk (so the times on screen add up), no buffer.
   const afterPrayer = (leg: number) => leg;
   for (const r of sorted) {
@@ -280,6 +284,7 @@ export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) =
         continue;
       }
       cur = { id: r.id, start: r.start, end: Math.max(r.end, r.start), loc: r.loc ?? cur?.loc, long: false, prayer: !!r.prayer };
+      if (!r.prayer) anchored = true;
       continue;
     }
     const dur = Math.max(5, r.end - r.start);
@@ -290,8 +295,9 @@ export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) =
     const need = cur?.prayer ? afterPrayer(leg) : leg + (leg > 0 ? buffer : 0);
     // Tight: a stop starts when the one before ends + the trip there (+ buffer) — no idle gaps —
     // unless it was pinned to a time by hand, or isn't open yet.
-    let start = cur ? (opts.tight && !r.pinned ? ceil5(cur.end + need) : Math.max(r.start, ceil5(cur.end + need))) : r.start;
-    if (opts.tight && r.open?.length) {
+    let start = cur ? (opts.tight && !r.pinned && anchored ? ceil5(cur.end + need) : Math.max(r.start, ceil5(cur.end + need))) : r.start;
+    // A time typed by hand stays even outside opening hours — the day shows the problem and "Fix this day" offers the move.
+    if (opts.tight && !r.pinned && r.open?.length) {
       const range = r.open.find(([o, c]) => Math.max(start, o) + dur <= c);
       if (range && start < range[0]) start = ceil5(range[0]);
     }
@@ -313,6 +319,7 @@ export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) =
     starts.set(r.id, start);
     if (cur) legs.set(r.id, { fromId: cur.id, minutes: leg });
     cur = { id: r.id, start, end: start + dur, loc: r.loc ?? cur?.loc, long, holds };
+    anchored = true;
   }
   return { starts, legs };
 }

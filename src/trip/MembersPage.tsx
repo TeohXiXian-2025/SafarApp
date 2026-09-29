@@ -5,7 +5,7 @@ import type { Invite, Member } from '../domain';
 import { api, ApiError } from '../lib/api';
 import { shareUrl } from '../config';
 import { timeAgo } from '../lib/format';
-import { Avatar, Badge, Button, Card, ErrorBanner } from '../ui';
+import { Avatar, Badge, Button, Card, confirmDialog, ErrorBanner, PageHeader } from '../ui';
 import { GroupPrefsCard } from './GroupPrefsCard';
 import { useTrip } from './TripLayout';
 
@@ -31,19 +31,21 @@ export function MembersPage() {
   };
 
   const q = { tripId: trip.id };
-  const remove = (m: Member) =>
-    confirm(`Remove ${m.displayName} from this trip?`) && act(`remove:${m.uid}`, () => api.post('members/remove', { uid: m.uid }, q));
-  const makeAdmin = (m: Member) =>
-    confirm(`Make ${m.displayName} the trip admin? You'll become a regular member.`) &&
+  const remove = async (m: Member) =>
+    (await confirmDialog({ title: `Remove ${m.displayName} from this trip?`, body: 'They lose access right away.', confirmLabel: 'Remove', danger: true })) && act(`remove:${m.uid}`, () => api.post('members/remove', { uid: m.uid }, q));
+  const makeAdmin = async (m: Member) =>
+    (await confirmDialog({ title: `Make ${m.displayName} the trip admin?`, body: "You'll become a regular member.", confirmLabel: 'Make admin' })) &&
     act(`admin:${m.uid}`, () => api.post('members/transfer-admin', { uid: m.uid }, q));
-  const leave = () =>
-    confirm('Leave this trip? You can only rejoin with a new invite link.') &&
+  const leave = async () =>
+    (await confirmDialog({ title: 'Leave this trip?', body: 'You can only rejoin with a new invite link.', confirmLabel: 'Leave trip', danger: true })) &&
     act('leave', async () => {
       await api.post('members/leave', {}, q);
       navigate('/trips', { replace: true });
     });
 
   return (
+    <div className="max-w-5xl mx-auto space-y-5">
+    <PageHeader eyebrow={`${members.length} ${members.length === 1 ? 'person' : 'people'}`} title="People" />
     <div className="grid gap-4 md:grid-cols-[1fr_360px] items-start">
       <div className="space-y-4">
         <Link to="../settings" relative="path" className="md:hidden flex items-center justify-between rounded-2xl border border-[#E7DFD5] bg-white px-4 py-3 text-sm font-semibold text-[#161C23]">
@@ -54,7 +56,7 @@ export function MembersPage() {
         </Link>
         {params.get('welcome') && isAdmin && (
           <Card className="p-4 border-[#00685F]/30 bg-[#00685F]/5">
-            <p className="font-bold text-[#00685F]">Trip created 🎉</p>
+            <p className="font-bold text-[#00685F]">Trip created</p>
             <p className="text-sm text-[#161C23]">Next: share an invite link so your group can join.</p>
           </Card>
         )}
@@ -108,6 +110,7 @@ export function MembersPage() {
         )}
       </div>
     </div>
+    </div>
   );
 }
 
@@ -141,7 +144,7 @@ function InvitePanel({ tripId, tripName }: { tripId: string; tripName: string })
   };
 
   const revoke = async (token: string) => {
-    if (!confirm('Revoke this link? People who already joined stay in the trip.')) return;
+    if (!(await confirmDialog({ title: 'Revoke this link?', body: 'People who already joined stay in the trip.', confirmLabel: 'Revoke', danger: true }))) return;
     await api.post('invites/revoke', { token }, { tripId }).catch(() => {});
     await load();
   };

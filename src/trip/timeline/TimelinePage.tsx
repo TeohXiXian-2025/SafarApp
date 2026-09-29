@@ -23,7 +23,7 @@ import {
   type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { AlertTriangle, Car, Loader2, Footprints, GitFork, GripVertical, Lock, Map as MapIcon, MapPin, Move, Pencil, Phone, Plus, Sparkles, TrainFront, Undo2, Utensils, X } from 'lucide-react';
+import { AlertTriangle, Car, Check, ChevronDown, Clock, CloudRain, Coffee, Flag, Loader2, Footprints, GitFork, GripVertical, Lock, Map as MapIcon, MapPin, Moon, Move, Pencil, Phone, Pin, Plus, Sparkles, TrainFront, Undo2, Utensils, X } from 'lucide-react';
 import { collection, limit, orderBy, query } from 'firebase/firestore';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -95,7 +95,7 @@ import {
 import { db } from '../../firebase/config';
 import { api } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
-import { Badge, Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
+import { Badge, Button, Card, cx, ErrorBanner, Sheet, Spinner, Toast } from '../../ui';
 import { bookingTitle, clockName, formatDay, KIND, tzCity } from '../bookings/format';
 import { useTrip } from '../TripLayout';
 import { PRAYER_GROUP, PRAYER_PICK_COLORS, REST_GROUP, TRACK_COLOR, trackKeyOf } from '../trackColors';
@@ -715,6 +715,13 @@ export function TimelinePage() {
   const [placing, setPlacing] = useState<ScheduleItem | null>(null);
   const [dragging, setDragging] = useState<{ title: string } | null>(null);
   const [showMap, setShowMap] = useState(false);
+  // Layout-only state (redesign): phone "Unplanned" tray, the plan-B panel, the "To sort out" list.
+  const [trayOpen, setTrayOpen] = useState(false);
+  const [showPlanB, setShowPlanB] = useState(false);
+  const [sortOpen, setSortOpen] = useState<boolean | null>(null);
+  // Which layout is on screen. Unplanned places are draggable, so they're mounted in exactly one place.
+  const isLg = useMedia('(min-width: 1024px)');
+  const isMd = useMedia('(min-width: 768px)');
 
   const call = async (fn: () => Promise<unknown>) => {
     setError('');
@@ -976,324 +983,420 @@ export function TimelinePage() {
     }
   });
 
+  // "To sort out" — everything this day still needs, one row each (was a stack of banners).
+  const sortItems: { key: string; tone: 'block' | 'risk' | 'info' | 'ai'; text: ReactNode; action?: ReactNode }[] = [];
+  if (openPlan)
+    sortItems.push({
+      key: 'plan',
+      tone: 'ai',
+      text: (
+        <>
+          Auto-plan for <b>{openPlan.day ? formatDay(openPlan.day) : 'the whole trip'}</b> is ready
+          {openPlan.createdBy !== me.uid ? ` (by ${people.get(openPlan.createdBy)?.displayName ?? 'a member'})` : ''}
+          {isAdmin ? ' — review and apply it.' : ' — the admin can apply it.'}
+        </>
+      ),
+      action: (
+        <Button variant="secondary" className="!min-h-9 !px-3 text-xs" onClick={() => setViewPlan(true)}>
+          Review
+        </Button>
+      ),
+    });
+  if (blocks > 0 || risks > 0)
+    sortItems.push({
+      key: 'fix',
+      tone: blocks ? 'block' : 'risk',
+      text: (
+        <>
+          {blocks ? (
+            <b>
+              {blocks} thing{blocks > 1 ? 's' : ''} won't work
+            </b>
+          ) : null}
+          {blocks && risks ? ' · ' : ''}
+          {risks ? `${risks} tight` : ''} on this day — see the stops below
+        </>
+      ),
+      action: (
+        <Button variant={blocks ? 'primary' : 'secondary'} className="!min-h-9 !px-3 text-xs" onClick={() => setFixing(true)}>
+          Fix this day
+        </Button>
+      ),
+    });
+  for (const m of meals) {
+    if (!m.there || m.eat) continue;
+    const name = m.key === 'lunch' ? 'Lunch' : 'Dinner';
+    sortItems.push({
+      key: `meal-${m.key}`,
+      tone: 'risk',
+      text: m.within ? (
+        <>
+          <b>{name}</b> at {m.within.title} — find halal food inside or right by it
+        </>
+      ) : (
+        <>
+          <b>{name} not planned</b> <span className="text-[#6D7A77] tabular-nums">· {m.key === 'lunch' ? '11:30 AM–2 PM' : '6–8:30 PM'}</span>
+        </>
+      ),
+      action: (
+        <Button variant="secondary" className="!min-h-9 !px-3 text-xs" onClick={() => setMealFor(m.key)}>
+          Find halal {m.key} {m.within ? 'there' : 'nearby'}
+        </Button>
+      ),
+    });
+  }
+  for (const g of gapsToday)
+    sortItems.push({
+      key: g.key,
+      tone: 'risk',
+      text: (
+        <>
+          <b>{g.kind === 'between' ? `${g.from} → ${g.to}: no transport booked.` : g.kind === 'there' ? `Getting to ${g.to}: no transport booked.` : `Going home from ${g.from}: no transport booked.`}</b> <span className="text-[#6D7A77]">Add the train, bus or flight so this day can be planned around it.</span>
+        </>
+      ),
+      action: (
+        <Link to="../bookings?tab=transport" relative="path" className="shrink-0 inline-flex items-center min-h-9 px-3 rounded-xl border border-[#DDD5CA] bg-white text-xs font-bold text-[#161C23]">
+          Add ticket
+        </Link>
+      ),
+    });
+  if (isAdmin && trip.destinations.length > 1 && !hasCityDates(trip.destinations))
+    sortItems.push({
+      key: 'citydates',
+      tone: 'info',
+      text: <>Tell Safar when you're in each city — hotels, transport alerts, Auto-plan and Unplanned then follow it.</>,
+      action: (
+        <Link to="../settings" relative="path" className="shrink-0 inline-flex items-center min-h-9 px-3 rounded-xl border border-[#DDD5CA] bg-white text-xs font-bold text-[#161C23]">
+          Add dates
+        </Link>
+      ),
+    });
+  if (weather.size > 0)
+    sortItems.push({
+      key: 'weather',
+      tone: 'info',
+      text: (
+        <>
+          <b>{day === todayThere ? 'Today' : 'Tomorrow'}:</b> weather may spoil {weather.size} outdoor stop{weather.size > 1 ? 's' : ''}
+        </>
+      ),
+      action: (
+        <Button variant="secondary" className="!min-h-9 !px-3 text-xs" onClick={() => setShowPlanB((v) => !v)} aria-expanded={showPlanB}>
+          {showPlanB ? 'Hide plan B' : 'Plan B'}
+        </Button>
+      ),
+    });
+  for (const h of weatherHeads.filter((x) => x.day !== day))
+    sortItems.push({
+      key: `wx-${h.day}`,
+      tone: 'info',
+      text: (
+        <>
+          <b>
+            {h.day === todayThere ? 'Today' : 'Tomorrow'} (Day {days.indexOf(h.day) + 1}
+            {dayCities.get(h.day)?.length && trip.destinations.length > 1 ? `, ${cityLabel(trip.destinations, dayCities.get(h.day)!)}` : ''})
+          </b>
+          : {h.risks.map((x) => x.row.title).join(', ')} — {h.risks[0].risk.text.split(' — ')[0].toLowerCase()}
+        </>
+      ),
+      action: (
+        <Button variant="secondary" className="!min-h-9 !px-3 text-xs" onClick={() => setDay(h.day)}>
+          See plan B
+        </Button>
+      ),
+    });
+  for (const sg of suggestions)
+    sortItems.push({
+      key: `sg-${sg.text}`,
+      tone: 'risk',
+      text: sg.text,
+      action: sg.order ? (
+        <Button
+          variant="secondary"
+          className="!min-h-9 !px-3 text-xs shrink-0"
+          onClick={() => {
+            setPending({ day, order: sg.order! });
+            void call(() => api.post('schedule/reorder', { day, order: sg.order }, { tripId: trip.id }));
+          }}
+
+        >
+          Use this order
+        </Button>
+      ) : undefined,
+    });
+  if (canUndo && lastJob)
+    sortItems.push({
+      key: 'undo',
+      tone: 'info',
+      text: <>Auto-plan was applied{lastJob.appliedAt ? ` ${new Date(lastJob.appliedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}` : ''}.</>,
+      action: (
+        <Button variant="ghost" className="!min-h-9 !px-3 text-xs" onClick={() => call(() => api.post('schedule/undo', { jobId: lastJob.id }, { tripId: trip.id }))}>
+          <Undo2 className="w-4 h-4" /> Undo
+        </Button>
+      ),
+    });
+  const sortShown = sortOpen ?? (blocks > 0 || isLg);
+  const dayIndex = days.indexOf(day);
+  const cityHere = trip.destinations.length > 1 && !!dayCities.get(day)?.length ? cityLabel(trip.destinations, dayCities.get(day)!) : dayDest.name;
+  const longDay = new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  const backlogProps = {
+    ideas: backlog,
+    pairName,
+    placing: moving?.ideaId,
+    day,
+    destinations: trip.destinations,
+    dayCity: dayCities.get(day)?.length ? trip.destinations[dayCities.get(day)!.at(-1)!].name : nearestDestination(trip.destinations, firstStop ?? frame.base).name,
+  };
+
   return (
     <DndContext sensors={sensors} collisionDetection={collision} autoScroll={{ acceleration: 30, threshold: { x: 0, y: 0.18 } }} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>
-      <div className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <h1 className="text-xl font-extrabold text-[#161C23]">Timeline</h1>
-            <p className="text-sm text-[#6D7A77]">Tap a stop, then Move (or drag its grip ⋮⋮) and pick a spot. Bookings and prayer times stay fixed.</p>
-          </div>
-          {/* One control, two scopes: AI plans this day or the whole trip (a shared preview the admin applies). */}
-          <div className="flex items-stretch gap-2 sm:shrink-0">
-            <div role="group" aria-label="AI plan" className="flex flex-1 sm:flex-none min-h-11 rounded-xl border border-[#00685F] overflow-hidden text-sm font-bold">
-              <span className="flex items-center gap-1.5 pl-3 pr-2.5 bg-[#00685F] text-white">
-                <Sparkles className="w-4 h-4" /> <span className="whitespace-nowrap">AI plan</span>
-              </span>
-              {(['day', 'trip'] as const).map((scope) => (
-                <button
-                  key={scope}
-                  type="button"
-                  onClick={() => void arrange(scope)}
-                  disabled={!!arranging}
-                  className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 whitespace-nowrap text-[#00685F] bg-white hover:bg-[#00685F]/10 border-l border-[#00685F]/30 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {arranging === scope && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {scope === 'day' ? 'This day' : 'Whole trip'}
-                </button>
-              ))}
+      <div className="lg:grid lg:grid-cols-[210px_minmax(0,1fr)_minmax(260px,340px)] xl:grid-cols-[230px_minmax(0,1fr)_minmax(320px,420px)] lg:gap-5 xl:gap-7 items-start">
+        {/* Laptop: the days and Unplanned in a left pane. */}
+        {isLg && (
+          <aside className="sticky top-[76px] max-h-[calc(100dvh-96px)] overflow-y-auto overscroll-contain pr-1 -mr-1 space-y-4" aria-label="Days and unplanned places">
+            <div>
+              <p className="px-2 pb-2 text-[11px] font-bold uppercase tracking-[.08em] text-[#6D7A77]">{days.length} days</p>
+              <div className="flex flex-col gap-0.5">
+                {days.map((d, i) => (
+                  <DayRailItem
+                    key={d}
+                    day={d}
+                    index={i}
+                    selected={d === day}
+                    status={dayStatus.get(d) ?? null}
+                    count={rowsByDay.get(d)?.filter((r) => !r.prayer).length ?? 0}
+                    city={trip.destinations.length > 1 ? cityLabel(trip.destinations, dayCities.get(d) ?? []) : ''}
+                    onClick={() => setDay(d)}
+                  />
+                ))}
+              </div>
             </div>
-            <Button variant="secondary" className="md:hidden shrink-0" onClick={() => setShowMap((v) => !v)} aria-pressed={showMap}>
-              <MapIcon className="w-4 h-4" /> {showMap ? 'List' : 'Map'}
-            </Button>
-          </div>
-        </div>
-        {openPlan && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#00685F]/30 bg-[#00685F]/5 px-4 py-2.5 text-sm">
-            <span className="text-[#161C23] min-w-0">
-              <Sparkles className="inline w-4 h-4 text-[#00685F] -mt-0.5" /> An AI plan for <b>{openPlan.day ? formatDay(openPlan.day) : 'the whole trip'}</b> is ready
-              {openPlan.createdBy !== me.uid ? ` (by ${people.get(openPlan.createdBy)?.displayName ?? 'a member'})` : ''}
-              {isAdmin ? ' — review and apply it.' : ' — the admin can apply it.'}
-            </span>
-            <Button variant="secondary" className="shrink-0 !min-h-9" onClick={() => setViewPlan(true)}>
-              Review
-            </Button>
-          </div>
-        )}
-        {canUndo && lastJob && (
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#E7DFD5] bg-white px-4 py-2.5 text-sm">
-            <span className="text-[#6D7A77]">
-              AI Arrange was applied{lastJob.appliedAt ? ` ${new Date(lastJob.appliedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}` : ''}.
-            </span>
-            <Button variant="ghost" className="shrink-0" onClick={() => call(() => api.post('schedule/undo', { jobId: lastJob.id }, { tripId: trip.id }))}>
-              <Undo2 className="w-4 h-4" /> Undo
-            </Button>
-          </div>
+            <Backlog {...backlogProps} onAdd={setAdding} onPlace={startPlace} />
+          </aside>
         )}
 
-        <div className="-mx-4 px-4 overflow-x-auto">
-          <div className="flex gap-2 w-max pb-1">
-            {days.map((d, i) => (
-              <DayChip
-                key={d}
-                day={d}
-                index={i}
-                selected={d === day}
-                status={dayStatus.get(d) ?? null}
-                count={rowsByDay.get(d)?.filter((r) => !r.prayer).length ?? 0}
-                city={trip.destinations.length > 1 ? cityLabel(trip.destinations, dayCities.get(d) ?? []) : ''}
-                onClick={() => setDay(d)}
-              />
-            ))}
-          </div>
-        </div>
-
-        {error && <ErrorBanner>{error}</ErrorBanner>}
-        {notice && <p className="rounded-2xl border border-[#C9DDF2] bg-[#F3F8FD] px-4 py-2 text-sm text-[#1D4E89]">{notice}</p>}
-        {removed && (
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#E7DFD5] bg-white px-4 py-2 text-sm">
-            <span className="text-[#161C23] min-w-0 truncate">
-              <b>{removed.title}</b> went back to the backlog.
-            </span>
-            {removed.ideaId && (
-              <Button
-                variant="ghost"
-                className="shrink-0 !min-h-8"
-                onClick={() => {
-                  const r = removed;
-                  setRemoved(null);
-                  void call(() => api.post('schedule/add', { ideaId: r.ideaId, day: r.day, start: r.start, durationMin: r.duration }, { tripId: trip.id }));
-                }}
-              >
-                <Undo2 className="w-4 h-4" /> Undo
+        <div className="min-w-0 space-y-4">
+          {/* Day header */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between lg:flex-col lg:items-stretch 2xl:flex-row 2xl:items-end">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#00685F]">
+                Day {dayIndex + 1} of {days.length} · {cityHere}
+              </p>
+              <h1 className="font-display text-[26px] md:text-[30px] leading-tight font-semibold text-[#161C23]">{longDay}</h1>
+              <p className="text-[13px] text-[#6D7A77]">
+                Times in {dayDest.name} ({tz})
+                {rows.some((r) => r.zone && r.zone !== tz) && ' · flights and trains show their own airport / station clock'}
+              </p>
+            </div>
+            {/* One control, two scopes: Auto-plan this day or the whole trip (a shared preview the admin applies). */}
+            <div className="flex items-stretch gap-2 sm:shrink-0">
+              <div role="group" aria-label="Auto-plan" className="flex flex-1 sm:flex-none min-h-10 rounded-xl border border-[#DDD5CA] bg-white overflow-hidden text-[13px] font-bold">
+                <span className="flex items-center gap-1.5 pl-3 pr-2.5 text-[#161C23]">
+                  <Sparkles className="w-4 h-4 text-gold" /> <span className="whitespace-nowrap hidden sm:inline">Auto-plan</span>
+                </span>
+                {(['day', 'trip'] as const).map((scope) => (
+                  <button
+                    key={scope}
+                    type="button"
+                    onClick={() => void arrange(scope)}
+                    disabled={!!arranging}
+                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 whitespace-nowrap text-[#00685F] hover:bg-[#00685F]/10 border-l border-[#EEE8E0] disabled:opacity-50"
+                  >
+                    {arranging === scope && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {scope === 'day' ? 'This day' : 'Whole trip'}
+                  </button>
+                ))}
+              </div>
+              <Button variant="secondary" className="lg:hidden shrink-0 !min-h-10" onClick={() => setShowMap((v) => !v)} aria-pressed={showMap}>
+                <MapIcon className="w-4 h-4" /> {showMap ? 'List' : 'Map'}
               </Button>
-            )}
+            </div>
           </div>
-        )}
 
-        {gapsToday.map((g) => (
-          <div key={g.key} className="flex items-start gap-3 rounded-2xl border border-[#F0D7A7] bg-[#FDF3E1] px-4 py-3 text-sm text-[#6B3F06]">
-            <TrainFront className="w-5 h-5 shrink-0 mt-0.5" />
-            <p className="flex-1">
-              <b>{g.kind === 'between' ? `${g.from} → ${g.to}: no transport booked.` : g.kind === 'there' ? `Getting to ${g.to}: no transport booked.` : `Going home from ${g.from}: no transport booked.`}</b>{' '}
-              Add the train, bus or flight so this day can be planned around it.
-            </p>
-            <Link to="../bookings?tab=transport" relative="path" className="shrink-0 font-bold text-[#00685F]">
-              Add
-            </Link>
-          </div>
-        ))}
+          {/* Phone / tablet: day chips */}
+          {!isLg && (
+            <div className="-mx-4 px-4 md:-mx-6 md:px-6 overflow-x-auto">
+              <div className="flex gap-2 w-max pb-1">
+                {days.map((d, i) => (
+                  <DayChip
+                    key={d}
+                    day={d}
+                    index={i}
+                    selected={d === day}
+                    status={dayStatus.get(d) ?? null}
+                    count={rowsByDay.get(d)?.filter((r) => !r.prayer).length ?? 0}
+                    city={trip.destinations.length > 1 ? cityLabel(trip.destinations, dayCities.get(d) ?? []) : ''}
+                    onClick={() => setDay(d)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
-        {meals.some((m) => m.there) && (
-          <div className={cx('rounded-2xl border px-4 py-2.5 text-sm space-y-1.5', missingMeals.length ? 'border-[#F2D8B0] bg-[#FFF8EC]' : 'border-[#CFE7E2] bg-[#EEF7F5]')}>
-            {meals.map((m) => {
-              const name = m.key === 'lunch' ? 'Lunch' : 'Dinner';
-              return (
-                <div key={m.key} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <Utensils className={cx('w-4 h-4 shrink-0', m.eat ? 'text-[#00685F]' : m.there ? 'text-[#8A5A00]' : 'text-[#9AA5A3]')} />
-                  <p className="flex-1 min-w-[10rem] text-[#161C23]">
-                    <b>{name}</b>{' '}
-                    {m.eat ? (
-                      <span>✓ {m.eat.title.replace(/^(Lunch|Dinner) · /, '')} · {fmtClock(toMin(m.eat.item.start))}</span>
-                    ) : m.within ? (
-                      <span>at {m.within.title} — find halal food inside or right by it</span>
-                    ) : m.there ? (
-                      <span className="text-[#8A5A00]">🟡 not planned yet ({m.key === 'lunch' ? '11:30 AM–2 PM' : '6–8:30 PM'})</span>
-                    ) : (
-                      <span className="text-[#6D7A77]">— travelling / not there then</span>
-                    )}
+          {error && <ErrorBanner>{error}</ErrorBanner>}
+
+          {/* The day at a glance: stops, fixed bookings, prayer times (gold) and rain. */}
+          {!loading && rows.length > 0 && <DayGlance rows={rows} warnings={warnings} rainy={weather} />}
+          {frame.prayers && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="inline-flex items-center gap-1 font-semibold text-[#6D7A77]">
+                <Lock className="w-3.5 h-3.5" /> Prayer times, fixed:
+              </span>
+              {(['dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => (
+                <span key={k} className="inline-flex items-center h-6 px-2 rounded-full bg-night text-white font-semibold tabular-nums">
+                  <span className="text-gold-soft mr-1">{PRAYER_LABEL[k]}</span>
+                  {fmtClock(frame.prayers!.times[k])}
+                </span>
+              ))}
+              {outlook && <span className="inline-flex items-center min-h-6 px-2 rounded-full bg-[#EEF3F8] text-[#1D4E89] font-semibold">{outlook}</span>}
+            </div>
+          )}
+          {!frame.prayers && outlook && <p className="text-xs text-[#1D4E89]">Weather: {outlook}</p>}
+
+          {/* To sort out */}
+          {sortItems.length > 0 ? (
+            <section className="bg-white border border-[#E7DFD5] rounded-2xl overflow-hidden shadow-[0_1px_2px_rgba(22,28,35,.04)]">
+              <button type="button" onClick={() => setSortOpen(!sortShown)} aria-expanded={sortShown} className="w-full flex items-center gap-2.5 min-h-12 px-4 text-left">
+                <span className={cx('w-2 h-2 rounded-full shrink-0', blocks ? 'bg-[#B3261E] anim-pulse' : 'bg-amber')} />
+                <span className="flex-1 text-sm font-bold text-[#161C23]">
+                  {sortItems.length} to sort out
+                  {blocks ? <span className="font-medium text-[#9B1C15]"> · {blocks} won't work</span> : null}
+                </span>
+                <ChevronDown className={cx('w-4 h-4 text-[#6D7A77] transition-transform', sortShown && 'rotate-180')} />
+              </button>
+              {sortShown && (
+                <ul>
+                  {sortItems.map((it) => (
+                    <li key={it.key} className="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 px-4 py-2.5 border-t border-[#F1EDE7] text-sm">
+                      <span
+                        className={cx(
+                          'w-2 h-2 rounded-full shrink-0',
+                          it.tone === 'block' ? 'bg-[#B3261E]' : it.tone === 'risk' ? 'bg-amber' : it.tone === 'ai' ? 'bg-gold' : 'bg-[#1D4E89]',
+                        )}
+                      />
+                      <span className="flex-1 min-w-[12rem] text-[#161C23]">{it.text}</span>
+                      {it.action}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ) : (
+            !loading &&
+            rows.length > 0 && (
+              <p className="flex items-center gap-2 text-sm text-[#00685F] font-semibold">
+                <Check className="w-4 h-4" /> Nothing to sort out on this day.
+              </p>
+            )
+          )}
+          {showPlanB && (
+            <>
+              {weather.size > 0 && (
+                <div className="rounded-2xl border border-[#C9DDF2] bg-[#F3F8FD] px-4 py-3 space-y-3 text-sm">
+                  <p className="font-bold text-[#1D4E89]">
+                    {day === todayThere ? 'Today' : 'Tomorrow'}: weather may spoil {weather.size} outdoor stop{weather.size > 1 ? 's' : ''} — pick a plan B
                   </p>
-                  {m.there && !m.eat && (
-                    <Button variant="secondary" className="shrink-0 !min-h-8 !px-3 text-xs" onClick={() => setMealFor(m.key)}>
-                      Find halal {m.key} {m.within ? 'there' : 'nearby'}
+                  {[...weather].map(([id, w]) => {
+                    const r = rows.find((x) => x.item.id === id)!;
+                    const dur = toMin(r.item.end) - toMin(r.item.start);
+                    // A drier time today that still fits the plan.
+                    const checker = makeChecker(rowsByDay, bookingMap, r.idea, [r.item.id]);
+                    const drier = forecast
+                      ? Array.from({ length: 53 }, (_, k) => 8 * 60 + k * 15)
+                          .filter((s) => s + dur <= 22 * 60 && s !== toMin(r.item.start) && !weatherRisk(forecast, day, s, s + dur) && !checker?.check(day, s, dur).some((x) => x.severity === 'block'))
+                          .sort((a, b) => Math.abs(a - toMin(r.item.start)) - Math.abs(b - toMin(r.item.start)))[0]
+                      : undefined;
+                    const found = indoor[id];
+                    const moveTo = otherDay[id];
+                    const btn = '!min-h-8 !px-3 text-xs';
+                    return (
+                      <div key={id} className="space-y-1.5 rounded-xl bg-white/70 border border-[#DCE8F5] p-2.5">
+                        <p className="text-[#161C23]">
+                          <b>{r.title}</b> ({fmtClock(toMin(r.item.start))}): {w.risk.text}
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {drier !== undefined && (
+                            <Button variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/update', { id, start: toClock(drier) }, { tripId: trip.id }))}>
+                              ⏰ Move to {fmtClock(drier)} (drier)
+                            </Button>
+                          )}
+                          {w.swaps.map((sw) => (
+                            <Button key={sw.id} variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/swap', { id, ideaId: sw.id }, { tripId: trip.id }))}>
+                              🏛 Swap for {sw.place.name}
+                              {sw.status === 'backup' ? ' (backup)' : ''}
+                            </Button>
+                          ))}
+                          {found === undefined && (
+                            <Button variant="ghost" className={btn} onClick={() => findIndoor(id)}>
+                              🔎 Indoor places nearby
+                            </Button>
+                          )}
+                          {found === 'loading' && <span className="text-xs text-[#6D7A77] self-center">Looking for indoor places…</span>}
+                          {Array.isArray(found) &&
+                            found.map((p) => (
+                              <Button key={p.placeId} variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/swap-place', { id, placeId: p.placeId, name: p.name, location: p.location, typeLabel: p.typeLabel }, { tripId: trip.id }))}>
+                                🏛 {p.name} · {p.typeLabel} · {p.minutes} min{p.source ? ' · OpenStreetMap' : ''}
+                              </Button>
+                            ))}
+                          {Array.isArray(found) && !found.length && <span className="text-xs text-[#6D7A77] self-center">No indoor places found nearby.</span>}
+                          {moveTo === undefined && (
+                            <Button variant="ghost" className={btn} onClick={() => void findDrierDay(r)}>
+                              📅 A drier day in this city
+                            </Button>
+                          )}
+                          {moveTo === 'loading' && <span className="text-xs text-[#6D7A77] self-center">Checking the other days…</span>}
+                          {moveTo === 'none' && <span className="text-xs text-[#6D7A77] self-center">No drier day with room in this city (within the forecast).</span>}
+                          {moveTo && typeof moveTo === 'object' && (
+                            <Button
+                              variant="secondary"
+                              className={btn}
+                              onClick={() =>
+                                void call(async () => {
+                                  await api.post('schedule/update', { id, day: moveTo.day, start: toClock(moveTo.start) }, { tripId: trip.id });
+                                  setDay(moveTo.day);
+                                })
+                              }
+                            >
+                              📅 Move to {formatDay(moveTo.day)}, {fmtClock(moveTo.start)} (dry)
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {planB?.day === day ? (
+                    <p className="text-sm text-[#161C23] flex gap-1.5">
+                      <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-[#1D4E89]" /> {planB.text}
+                    </p>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      className="!min-h-8 !px-3 text-xs"
+                      loading={askingPlanB}
+                      onClick={() => {
+                        setAskingPlanB(true);
+                        void call(async () => {
+                          const r = await api.post<{ text: string }>(
+                            'schedule/weather-plan',
+                            {
+                              day,
+                              risks: [...weather].map(([id, w]) => ({ itemId: id, text: w.risk.text })),
+                            },
+                            { tripId: trip.id },
+                          );
+                          setPlanB({ day, text: r.text });
+                        }).finally(() => setAskingPlanB(false));
+                      }}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> Ask AI (swap, reschedule or a place nearby)
                     </Button>
                   )}
                 </div>
-              );
-            })}
-          </div>
-        )}
-
-        {isAdmin && trip.destinations.length > 1 && !hasCityDates(trip.destinations) && (
-          <p className="rounded-xl bg-[#F3F8FD] border border-[#C9DDF2] px-3 py-2 text-xs text-[#1D4E89]">
-            📍 Tell Safar when you're in each city (Settings → “When are you in each city?”) — hotels, transport alerts, AI Arrange and the backlog then follow it.{' '}
-            <Link to="../settings" relative="path" className="font-bold underline">
-              Add dates
-            </Link>
-          </p>
-        )}
-
-        <div className="text-xs text-[#6D7A77] space-y-1">
-          <p>
-            {trip.destinations.length > 1 && !!dayCities.get(day)?.length && <b className="text-[#161C23]">📍 {cityLabel(trip.destinations, dayCities.get(day)!)} · </b>}
-            Times are local to {dayDest.name} ({tz}).
-            {rows.some((r) => r.zone && r.zone !== tz) && ' Flight and train times are on their own airport / station clock — marked under the time.'}
-          </p>
-          {outlook && <p>Weather: {outlook}</p>}
-          {frame.prayers && (
-            <p>
-              🔒 Prayer times ({dayDest.name}): {(['dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => `${PRAYER_LABEL[k]} ${fmtClock(frame.prayers!.times[k])}`).join(' · ')} — fixed like bookings; stops are planned around them.
-            </p>
+              )}
+            </>
           )}
-        </div>
-        {(blocks > 0 || risks > 0) && (
-          <div className={cx('flex items-center gap-3 rounded-2xl border px-4 py-3', blocks ? 'border-[#F2B8B5] bg-[#FDECEA]' : 'border-[#F2D8B0] bg-[#FFF8EC]')}>
-            <AlertTriangle className={cx('w-5 h-5 shrink-0', blocks ? 'text-[#B3261E]' : 'text-[#8A5A00]')} />
-            <p className="flex-1 text-sm text-[#161C23]">
-              {blocks ? `🔴 ${blocks} thing${blocks > 1 ? 's' : ''} won't work — fix now` : ''}
-              {blocks && risks ? ' · ' : ''}
-              {risks ? `🟡 ${risks} tight` : ''} on this day — see the stops below.
-            </p>
-            <Button variant={blocks ? 'primary' : 'secondary'} className="shrink-0 min-h-9" onClick={() => setFixing(true)}>
-              Fix this day
-            </Button>
-          </div>
-        )}
 
-        {weatherHeads.filter((h) => h.day !== day).map((h) => (
-          <button
-            key={h.day}
-            type="button"
-            onClick={() => setDay(h.day)}
-            className="w-full text-left flex items-start gap-3 rounded-2xl border border-[#C9DDF2] bg-[#F3F8FD] px-4 py-2.5 text-sm text-[#1D4E89]"
-          >
-            <span className="text-base leading-none mt-0.5">🌦</span>
-            <span className="flex-1 min-w-0">
-              <b>{h.day === todayThere ? 'Today' : 'Tomorrow'} (Day {days.indexOf(h.day) + 1}{dayCities.get(h.day)?.length && trip.destinations.length > 1 ? `, ${cityLabel(trip.destinations, dayCities.get(h.day)!)}` : ''})</b>: the weather may spoil{' '}
-              {h.risks.map((x) => x.row.title).join(', ')} — {h.risks[0].risk.text.split(' — ')[0].toLowerCase()}.
-              <span className="block text-xs font-semibold underline underline-offset-2">See plan B</span>
-            </span>
-          </button>
-        ))}
-
-        {weather.size > 0 && (
-          <div className="rounded-2xl border border-[#C9DDF2] bg-[#F3F8FD] px-4 py-3 space-y-3 text-sm">
-            <p className="font-bold text-[#1D4E89]">
-              🌦 {day === todayThere ? 'Today' : 'Tomorrow'}: weather may spoil {weather.size} outdoor stop{weather.size > 1 ? 's' : ''} — pick a plan B
-            </p>
-            {[...weather].map(([id, w]) => {
-              const r = rows.find((x) => x.item.id === id)!;
-              const dur = toMin(r.item.end) - toMin(r.item.start);
-              // A drier time today that still fits the plan.
-              const checker = makeChecker(rowsByDay, bookingMap, r.idea, [r.item.id]);
-              const drier = forecast
-                ? Array.from({ length: 53 }, (_, k) => 8 * 60 + k * 15)
-                    .filter((s) => s + dur <= 22 * 60 && s !== toMin(r.item.start) && !weatherRisk(forecast, day, s, s + dur) && !checker?.check(day, s, dur).some((x) => x.severity === 'block'))
-                    .sort((a, b) => Math.abs(a - toMin(r.item.start)) - Math.abs(b - toMin(r.item.start)))[0]
-                : undefined;
-              const found = indoor[id];
-              const moveTo = otherDay[id];
-              const btn = '!min-h-8 !px-3 text-xs';
-              return (
-                <div key={id} className="space-y-1.5 rounded-xl bg-white/70 border border-[#DCE8F5] p-2.5">
-                  <p className="text-[#161C23]">
-                    <b>{r.title}</b> ({fmtClock(toMin(r.item.start))}): {w.risk.text}
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {drier !== undefined && (
-                      <Button variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/update', { id, start: toClock(drier) }, { tripId: trip.id }))}>
-                        ⏰ Move to {fmtClock(drier)} (drier)
-                      </Button>
-                    )}
-                    {w.swaps.map((sw) => (
-                      <Button key={sw.id} variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/swap', { id, ideaId: sw.id }, { tripId: trip.id }))}>
-                        🏛 Swap for {sw.place.name}
-                        {sw.status === 'backup' ? ' (backup)' : ''}
-                      </Button>
-                    ))}
-                    {found === undefined && (
-                      <Button variant="ghost" className={btn} onClick={() => findIndoor(id)}>
-                        🔎 Indoor places nearby
-                      </Button>
-                    )}
-                    {found === 'loading' && <span className="text-xs text-[#6D7A77] self-center">Looking for indoor places…</span>}
-                    {Array.isArray(found) &&
-                      found.map((p) => (
-                        <Button key={p.placeId} variant="secondary" className={btn} onClick={() => void call(() => api.post('schedule/swap-place', { id, placeId: p.placeId, name: p.name, location: p.location, typeLabel: p.typeLabel }, { tripId: trip.id }))}>
-                          🏛 {p.name} · {p.typeLabel} · {p.minutes} min{p.source ? ' · OpenStreetMap' : ''}
-                        </Button>
-                      ))}
-                    {Array.isArray(found) && !found.length && <span className="text-xs text-[#6D7A77] self-center">No indoor places found nearby.</span>}
-                    {moveTo === undefined && (
-                      <Button variant="ghost" className={btn} onClick={() => void findDrierDay(r)}>
-                        📅 A drier day in this city
-                      </Button>
-                    )}
-                    {moveTo === 'loading' && <span className="text-xs text-[#6D7A77] self-center">Checking the other days…</span>}
-                    {moveTo === 'none' && <span className="text-xs text-[#6D7A77] self-center">No drier day with room in this city (within the forecast).</span>}
-                    {moveTo && typeof moveTo === 'object' && (
-                      <Button
-                        variant="secondary"
-                        className={btn}
-                        onClick={() =>
-                          void call(async () => {
-                            await api.post('schedule/update', { id, day: moveTo.day, start: toClock(moveTo.start) }, { tripId: trip.id });
-                            setDay(moveTo.day);
-                          })
-                        }
-                      >
-                        📅 Move to {formatDay(moveTo.day)}, {fmtClock(moveTo.start)} (dry)
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            {planB?.day === day ? (
-              <p className="text-sm text-[#161C23] flex gap-1.5">
-                <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-[#1D4E89]" /> {planB.text}
-              </p>
-            ) : (
-              <Button
-                variant="secondary"
-                className="!min-h-8 !px-3 text-xs"
-                loading={askingPlanB}
-                onClick={() => {
-                  setAskingPlanB(true);
-                  void call(async () => {
-                    const r = await api.post<{ text: string }>(
-                      'schedule/weather-plan',
-                      {
-                        day,
-                        risks: [...weather].map(([id, w]) => ({ itemId: id, text: w.risk.text })),
-                      },
-                      { tripId: trip.id },
-                    );
-                    setPlanB({ day, text: r.text });
-                  }).finally(() => setAskingPlanB(false));
-                }}
-              >
-                <Sparkles className="w-3.5 h-3.5" /> Ask AI (swap, reschedule or a place nearby)
-              </Button>
-            )}
-          </div>
-        )}
-
-        {!!suggestions.length && (
-          <div className="rounded-2xl border border-[#F2D8B0] bg-[#FFF8EC] px-4 py-3 space-y-2">
-            <p className="text-sm font-bold text-[#8A5A00]">🟡 Works, but could be better</p>
-            {suggestions.map((sg) => (
-              <div key={sg.text} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[#161C23]">
-                <p className="flex-1 min-w-[12rem]">{sg.text}</p>
-                {sg.order && (
-                  <Button
-                    variant="secondary"
-                    className="!min-h-8 !px-3 text-xs shrink-0"
-                    onClick={() => {
-                      setPending({ day, order: sg.order! });
-                      void call(() => api.post('schedule/reorder', { day, order: sg.order }, { tripId: trip.id }));
-                    }}
-                  >
-                    Use this order
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="grid gap-4 grid-cols-[minmax(0,1fr)] md:grid-cols-[minmax(0,1fr)_320px] items-start">
-          <div className={cx('space-y-2', showMap && 'hidden md:block')}>
+          <div className={cx('space-y-2', showMap && 'hidden lg:block')}>
             {loading ? (
               <Spinner label="Loading timeline…" />
             ) : (
@@ -1381,25 +1484,91 @@ export function TimelinePage() {
             )}
           </div>
 
-          <div className="space-y-4 md:sticky md:top-4">
-            <div className={cx('space-y-1.5', !showMap && 'hidden md:block')}>
-              <Card className="overflow-hidden h-72 md:h-80">
-                <DayMap stops={mapStops} links={mapLinks} selectedId={selected} onSelect={setSelected} />
-              </Card>
-            </div>
-            <Backlog
-              ideas={backlog}
-              pairName={pairName}
-              onAdd={setAdding}
-              onPlace={startPlace}
-              placing={moving?.ideaId}
-              day={day}
-              destinations={trip.destinations}
-              dayCity={dayCities.get(day)?.length ? trip.destinations[dayCities.get(day)!.at(-1)!].name : nearestDestination(trip.destinations, firstStop ?? frame.base).name}
-            />
-          </div>
+          {/* Tablet: Unplanned under the day (laptop has it on the left, phone in a pull-up tray). */}
+          {isMd && !isLg && <Backlog {...backlogProps} onAdd={setAdding} onPlace={startPlace} />}
+        </div>
+
+        {/* Map: a sticky pane on laptop; the Map button shows it on phone / tablet. */}
+        <div className={cx('lg:sticky lg:top-[76px]', !showMap && 'hidden lg:block')}>
+          <Card className="overflow-hidden h-[62dvh] lg:h-[calc(100dvh-96px)]">
+            <DayMap stops={mapStops} links={mapLinks} selectedId={selected} onSelect={setSelected} />
+          </Card>
         </div>
       </div>
+
+      {/* Phone: Unplanned as a pull-up tray above the tab bar. */}
+      {!isMd && !moving && (
+        <button
+          type="button"
+          onClick={() => setTrayOpen(true)}
+          className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+4.1rem)] z-20 h-14 bg-white border-t border-[#E7DFD5] rounded-t-2xl shadow-[0_-8px_24px_rgba(22,28,35,.1)] text-left"
+          aria-label={`Unplanned places: ${backlog.length}`}
+        >
+          <span className="block mx-auto mt-1.5 h-1 w-9 rounded-full bg-[#D5CEC4]" aria-hidden />
+          <span className="flex items-center gap-2 px-4 pt-1.5">
+            <b className="text-sm text-[#161C23]">Unplanned</b>
+            <span className="text-sm font-semibold text-[#6D7A77]">
+              · {backlog.length} place{backlog.length === 1 ? '' : 's'}
+            </span>
+            <ChevronDown className="w-4 h-4 ml-auto rotate-180 text-[#6D7A77]" />
+          </span>
+        </button>
+      )}
+      {!isMd && (
+        <Sheet open={trayOpen} onClose={() => setTrayOpen(false)} title={`Unplanned · ${backlog.length}`}>
+          <Backlog
+            {...backlogProps}
+            bare
+            onAdd={(i) => {
+              setTrayOpen(false);
+              setAdding(i);
+            }}
+            onPlace={(i) => {
+              setTrayOpen(false);
+              startPlace(i);
+            }}
+          />
+        </Sheet>
+      )}
+
+      {/* Short-lived notices (undo, a time the route pushed). */}
+      {!moving && (notice || removed) && (
+        <div className="fixed z-30 left-3 right-3 top-[calc(env(safe-area-inset-top)+4rem)] md:top-auto md:bottom-6 md:left-auto md:right-6 md:w-[420px] space-y-2">
+          {notice && (
+            <Toast
+              action={
+                <button type="button" onClick={() => setNotice('')} aria-label="Dismiss" className="w-9 h-9 rounded-xl inline-flex items-center justify-center text-white/70 hover:bg-white/10">
+                  <X className="w-4 h-4" />
+                </button>
+              }
+            >
+              {notice}
+            </Toast>
+          )}
+          {removed && (
+            <Toast
+              action={
+                removed.ideaId && (
+                  <button
+                    type="button"
+                    className="shrink-0 inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-white/10 font-bold"
+                    onClick={() => {
+                      const r = removed;
+                      setRemoved(null);
+                      void call(() => api.post('schedule/add', { ideaId: r.ideaId, day: r.day, start: r.start, durationMin: r.duration }, { tripId: trip.id }));
+                    }}
+
+                  >
+                    <Undo2 className="w-4 h-4" /> Undo
+                  </button>
+                )
+              }
+            >
+              <b>{removed.title}</b> went back to Unplanned.
+            </Toast>
+          )}
+        </div>
+      )}
 
       {dragging && dragAt && (
         <div className="pointer-events-none fixed z-50 max-w-[14rem] truncate rounded-xl bg-[#00685F] px-3 py-1.5 text-xs font-bold text-white shadow-lg" style={{ left: dragAt.x + 14, top: dragAt.y + 10 }}>
@@ -1509,7 +1678,7 @@ export function TimelinePage() {
  */
 function MoveBar({ title, days, day, dayStatus, onDay, onCancel }: { title: string; days: string[]; day: string; dayStatus: (d: string) => string | null; onDay: (d: string) => void; onCancel: () => void }) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#00685F]/30 bg-white/95 backdrop-blur shadow-[0_-8px_24px_rgba(0,0,0,0.08)] pb-[env(safe-area-inset-bottom)]" role="region" aria-label="Moving a stop">
+    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#00685F]/30 bg-white/95 backdrop-blur shadow-[0_-8px_24px_rgba(0,0,0,0.08)] pb-[env(safe-area-inset-bottom)] animate-[safar-sheet-up_.3s_cubic-bezier(.2,.8,.2,1)_both]" role="region" aria-label="Moving a stop">
       <div className="max-w-5xl mx-auto px-4 pt-2.5 pb-2 space-y-2">
         <div className="flex items-center gap-3">
           <Move className="w-4 h-4 shrink-0 text-[#00685F]" />
@@ -1545,7 +1714,7 @@ function BarDay({ day, index, selected, blocked, onClick }: { day: string; index
       aria-pressed={selected}
       className={cx(
         'shrink-0 rounded-xl border px-2.5 py-1.5 text-left min-w-[4.75rem] min-h-11',
-        selected ? 'bg-[#00685F] border-[#00685F] text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]',
+        selected ? 'bg-night border-night text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]',
         blocked && !selected && 'opacity-40',
         isOver && !selected && 'ring-2 ring-[#00685F]/40 border-[#00685F]',
       )}
@@ -1612,19 +1781,93 @@ function DayChip({ day, index, selected, status, count, city, onClick }: { day: 
       onClick={onClick}
       aria-pressed={selected}
       className={cx(
-        'px-3 py-2 rounded-2xl border text-left min-w-[5.5rem] transition-colors',
-        selected ? 'bg-[#00685F] border-[#00685F] text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]',
+        'relative px-3 py-2 rounded-2xl border text-left min-w-[5.5rem] transition-colors',
+        selected ? 'bg-night border-night text-white shadow-[0_6px_14px_rgba(11,59,54,.28)]' : 'bg-white border-[#E7DFD5] text-[#161C23]',
       )}
     >
-      <span className={cx('flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider', selected ? 'text-white/80' : 'text-[#6D7A77]')}>
+      <span className={cx('flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider', selected ? 'text-gold-soft' : 'text-[#6D7A77]')}>
         Day {index + 1}
         {status && <span aria-label={status === 'block' ? 'Has problems' : 'Something is tight'} className={cx('w-2 h-2 rounded-full', status === 'block' ? 'bg-[#E5484D]' : 'bg-[#F2B544]')} />}
       </span>
       <span className="block text-sm font-semibold whitespace-nowrap">{formatDay(day)}</span>
       {city && <span className={cx('block text-[11px] font-semibold whitespace-nowrap max-w-[9rem] truncate', selected ? 'text-white' : 'text-[#00685F]')}>{city}</span>}
-      <span className={cx('block text-[11px]', selected ? 'text-white/80' : 'text-[#6D7A77]')}>{count ? `${count} stop${count > 1 ? 's' : ''}` : 'Free'}</span>
+      <span className={cx('block text-[11px]', selected ? 'text-white/75' : 'text-[#6D7A77]')}>{count ? `${count} stop${count > 1 ? 's' : ''}` : 'Free'}</span>
     </button>
   );
+}
+
+/** Laptop: one day in the left pane's list. Same data as the phone chips. */
+function DayRailItem({ day, index, selected, status, count, city, onClick }: { day: string; index: number; selected: boolean; status: 'block' | 'risk' | null; count: number; city: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={cx('w-full flex items-center gap-2.5 min-h-11 px-2 rounded-xl text-left text-[13px] transition-colors', selected ? 'bg-night text-white' : 'text-[#161C23] hover:bg-[#F1EDE7]')}
+    >
+      <span className={cx('w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold tabular-nums shrink-0', selected ? 'bg-gold text-night' : 'bg-[#F1EDE7] text-[#45524F]')}>{index + 1}</span>
+      <span className="flex-1 min-w-0">
+        <span className={cx('block font-semibold truncate', selected && 'font-bold')}>{formatDay(day)}</span>
+        <span className={cx('block text-[11px] truncate', selected ? 'text-white/70' : 'text-[#6D7A77]')}>
+          {city ? `${city} · ` : ''}
+          {count ? `${count} stop${count > 1 ? 's' : ''}` : 'Free'}
+        </span>
+      </span>
+      {status && <span aria-label={status === 'block' ? 'Has problems' : 'Something is tight'} className={cx('w-2 h-2 rounded-full shrink-0', status === 'block' ? 'bg-[#E5484D]' : 'bg-[#F2B544]')} />}
+    </button>
+  );
+}
+
+/**
+ * The day at a glance, 5 am → 11 pm: stops as bars (red if something won't
+ * work), bookings in blue, prayer times as gold ticks, rain-risk stops in amber.
+ * Read-only — built from the rows the list below shows.
+ */
+function DayGlance({ rows, warnings, rainy }: { rows: Row[]; warnings: Map<string, DayWarning[]>; rainy: Map<string, unknown> }) {
+  const from = 5 * 60;
+  const to = 23 * 60;
+  const pos = (m: number) => `${Math.min(100, Math.max(0, ((m - from) / (to - from)) * 100))}%`;
+  return (
+    <div aria-hidden className="select-none">
+      <div className="relative h-8 rounded-lg bg-[#F1EDE7] overflow-hidden">
+        {rows.map((r, i) => {
+          const a = toMin(r.item.start);
+          const b = Math.max(a, toMin(r.item.end));
+          if (r.prayer) return <span key={r.item.id} className="absolute top-0 bottom-0 w-[3px] -ml-px bg-gold" style={{ left: pos(a) }} />;
+          if (b <= from || a >= to) return null;
+          const bad = (warnings.get(r.item.id) ?? []).some((w) => w.severity === 'block');
+          const tone = bad ? 'bg-[#B3261E]' : r.item.locked ? 'bg-[#1D4E89]' : rainy.has(r.item.id) ? 'bg-amber' : 'bg-[#161C23]';
+          return (
+            <span
+              key={r.item.id}
+              className={cx('absolute top-2 h-4 rounded anim-grow', tone)}
+              style={{ left: pos(a), width: `max(4px, calc(${pos(b)} - ${pos(a)}))`, animationDelay: `${i * 40}ms` }}
+            />
+          );
+        })}
+      </div>
+      <div className="relative h-4 mt-1 text-[10px] font-semibold text-[#8A9592] tabular-nums">
+        {[6, 9, 12, 15, 18, 21].map((h) => (
+          <span key={h} className="absolute -translate-x-1/2" style={{ left: pos(h * 60) }}>
+            {h}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** True while a media query matches (layout switches in JS where mounting matters). */
+function useMedia(q: string) {
+  const [on, setOn] = useState(() => typeof window !== 'undefined' && window.matchMedia(q).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(q);
+    const f = () => setOn(mq.matches);
+    f();
+    mq.addEventListener('change', f);
+    return () => mq.removeEventListener('change', f);
+  }, [q]);
+  return on;
 }
 
 function DayList({ empty, children }: { empty: boolean; children: ReactNode }) {
@@ -1632,8 +1875,8 @@ function DayList({ empty, children }: { empty: boolean; children: ReactNode }) {
     <div className="rounded-3xl min-h-40">
       {empty ? (
         <Card className="p-6 text-center space-y-1">
-          <p className="font-semibold text-[#161C23]">Nothing planned yet</p>
-          <p className="text-sm text-[#6D7A77]">Add an idea from the backlog, or let AI plan the day.</p>
+          <p className="font-display text-xl font-semibold text-[#161C23]">Nothing planned yet</p>
+          <p className="text-sm text-[#6D7A77]">Add a place from Unplanned, or Auto-plan the day.</p>
         </Card>
       ) : (
         children
@@ -1692,26 +1935,42 @@ function StopRow({
   const stop = { onMouseDown: (e: React.SyntheticEvent) => e.stopPropagation(), onTouchStart: (e: React.SyntheticEvent) => e.stopPropagation(), onKeyDown: (e: React.SyntheticEvent) => e.stopPropagation() };
   return (
     <div ref={setNodeRef} className={cx((isDragging || moving) && 'opacity-40')}>
-      <Card className={cx('flex items-stretch', item.locked && 'bg-[#F3EFE9]', selected && 'ring-2 ring-[#00685F]/50', moving && 'outline-2 outline-dashed outline-[#00685F]')}>
-        <div className={cx('w-[4.75rem] shrink-0 py-3 pl-3 text-xs font-bold tabular-nums', moved ? 'text-[#00685F]' : 'text-[#161C23]')}>
+      <Card
+        className={cx(
+          'flex items-stretch transition-shadow',
+          item.locked && '!bg-[#F4F1EC] !border-[#E1D9CE]',
+          selected && 'ring-2 ring-[#00685F]/50 shadow-[0_8px_20px_rgba(22,28,35,.08)]',
+          moving && 'outline-2 outline-dashed outline-[#00685F]',
+        )}
+      >
+        <div className={cx('w-[4.75rem] shrink-0 py-3 pl-3 text-[13px] font-bold tabular-nums', moved ? 'text-[#00685F]' : 'text-[#161C23]')}>
           <p>{fmtClock(s0)}</p>
           {!moment && <p className={cx('font-semibold', moved ? 'text-[#00685F]' : 'text-[#6D7A77]')}>{fmtClock(s0 + len)}</p>}
           {row.zone && (row.zone !== dayZone || item.ref.kind === 'booking') && (
             <p className={cx('mt-0.5 text-[10px] leading-tight font-semibold', row.zone !== dayZone ? 'text-[#8A5A00]' : 'text-[#9AA5A3]')}>{row.zoneName ?? tzCity(row.zone)} time</p>
           )}
         </div>
+        {row.idea && (
+          <div className="hidden sm:block py-2.5 pr-3 shrink-0">
+            <PlaceThumb photoUrl={row.idea.place.photoUrl} at={row.idea.place.location} className="w-12 h-12 rounded-xl" small />
+          </div>
+        )}
         <div className="flex-1 min-w-0 py-3 pr-2">
           <button type="button" onClick={onSelect} onKeyDown={(e) => e.stopPropagation()} aria-pressed={selected} className="block w-full text-left">
-            <p className="flex items-center gap-1.5 font-semibold text-[#161C23]">
+            <p className="flex items-center gap-1.5 font-bold text-[#161C23]">
               <span className="text-[#00685F] shrink-0">{row.icon}</span>
               <span className="truncate">{row.title}</span>
             </p>
             {row.subtitle && !row.sides?.length && <p className="text-xs text-[#6D7A77] truncate">{row.subtitle}</p>}
-            {row.prayerKnown && <p className="text-[11px] text-[#8A6A1F]">🕌 Prayer space here / right by it — a prayer time during the visit is prayed here</p>}
+            {row.prayerKnown && (
+              <p className="flex items-start gap-1 text-[11px] text-gold-ink">
+                <Moon className="w-3 h-3 shrink-0 mt-0.5" /> Prayer space here / right by it — a prayer time during the visit is prayed here
+              </p>
+            )}
           </button>
           {item.pinned && movable && (
-            <button type="button" onClick={onUnpin} {...stop} className="mt-0.5 text-[11px] font-semibold text-[#6D7A77] underline underline-offset-2">
-              📌 Start set by hand — let it follow the stop before
+            <button type="button" onClick={onUnpin} {...stop} className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#6D7A77] underline underline-offset-2">
+              <Pin className="w-3 h-3" /> Start set by hand — let it follow the stop before
             </button>
           )}
           {row.phone && (
@@ -1719,9 +1978,17 @@ function StopRow({
               <Phone className="w-3 h-3" /> {row.phone}
             </a>
           )}
-          {row.note && <p className="text-xs font-semibold text-[#8A5A00]">🕑 {row.note}</p>}
+          {row.note && (
+            <p className="flex items-start gap-1 text-xs font-semibold text-[#8A5A00]">
+              <Clock className="w-3.5 h-3.5 shrink-0 mt-px" /> {row.note}
+            </p>
+          )}
           {!!row.journey?.length && <JourneyPrayerList list={row.journey} />}
-          {weather && <p className="mt-1 text-xs text-[#1D4E89]">🌦 {weather.text}</p>}
+          {weather && (
+            <p className="mt-1 flex items-start gap-1 text-xs text-[#1D4E89]">
+              <CloudRain className="w-3.5 h-3.5 shrink-0 mt-px" /> {weather.text}
+            </p>
+          )}
           {!!row.sides?.length && <SplitGroups a={row} sides={row.sides} people={people} me={me} />}
           {warnings.map((w) => (
             <p key={`${w.itemId}-${w.kind}`} className={cx('mt-1 flex items-start gap-1 text-xs', w.severity === 'block' ? 'text-[#B3261E] font-semibold' : 'text-[#8A5A00]')}>
@@ -1754,8 +2021,8 @@ function StopRow({
             <button
               type="button"
               onClick={onBacklog}
-              aria-label={`Take ${row.title} off the timeline (back to the backlog)`}
-              title="Back to the backlog"
+              aria-label={`Take ${row.title} off the plan (back to Unplanned)`}
+              title="Back to Unplanned"
               className="flex-1 w-11 min-h-11 flex items-center justify-center text-[#B3261E] hover:bg-[#FDECEA] border-t border-[#F0EBE4]"
             >
               <X className="w-4 h-4" />
@@ -1763,8 +2030,9 @@ function StopRow({
           </div>
         )}
         {item.locked ? (
-          <span className="w-11 shrink-0 flex items-center justify-center text-[#9AA5A3]" title="Booking — fixed time">
+          <span className="w-12 shrink-0 flex flex-col items-center justify-center gap-0.5 text-[#6D7A77]" title="Booking — fixed time (ticket / check-in)">
             <Lock className="w-4 h-4" />
+            <span className="text-[9px] font-bold uppercase tracking-wider">Fixed</span>
           </span>
         ) : (
           // The grip: drag from here (mouse or finger) — a shortcut into the same move as the Move button.
@@ -1774,7 +2042,7 @@ function StopRow({
             {...listeners}
             aria-label={`Drag ${row.title} into a spot`}
             title="Drag to move"
-            className="w-11 shrink-0 flex items-center justify-center text-[#6D7A77] bg-[#F7F4EF] rounded-r-2xl touch-none cursor-grab active:cursor-grabbing hover:text-[#00685F]"
+            className="w-11 shrink-0 flex items-center justify-center text-[#8A9592] bg-[#F7F4EF] rounded-r-2xl touch-none cursor-grab active:cursor-grabbing hover:text-[#00685F]"
           >
             <GripVertical className="w-5 h-5" />
           </button>
@@ -1873,7 +2141,10 @@ function Backlog({
   day,
   destinations,
   dayCity,
+  bare,
 }: {
+  /** No card around it (inside the phone tray, which has its own title). */
+  bare?: boolean;
   ideas: Idea[];
   pairName: (ideaId: string) => string | undefined;
   onAdd: (idea: Idea) => void;
@@ -1897,17 +2168,19 @@ function Backlog({
     return true;
   });
   const groups = cities.map((c) => [c, shown.filter((i) => cityOf(i) === c)] as const).filter(([, l]) => l.length);
-  const chip = (on: boolean) => cx('shrink-0 px-2.5 min-h-7 rounded-full text-xs font-semibold border', on ? 'bg-[#161C23] border-[#161C23] text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]');
+  const chip = (on: boolean) => cx('shrink-0 px-2.5 min-h-7 rounded-full text-xs font-semibold border', on ? 'bg-night border-night text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]');
 
   return (
-    <Card className="p-4 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="font-bold text-[#161C23]">Backlog</h2>
-        <Badge tone="muted">{ideas.length}</Badge>
-      </div>
+    <div className={cx('space-y-3', !bare && 'bg-white rounded-2xl border border-[#E7DFD5] p-4 shadow-[0_1px_2px_rgba(22,28,35,.04)]')}>
+      {!bare && (
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-[11px] font-bold uppercase tracking-[.08em] text-[#6D7A77]">Unplanned · {ideas.length}</h2>
+          {ideas.length > 0 && <span className="hidden lg:inline text-[11px] text-[#8A9592]">Drag onto the day</span>}
+        </div>
+      )}
       {ideas.length === 0 ? (
         <p className="text-sm text-[#6D7A77]">
-          Ideas everyone approves land here. <Link to="../ideas" relative="path" className="font-semibold text-[#00685F]">Go to the Idea Board</Link>
+          Places the group agrees on land here, ready for a day. <Link to="../ideas" relative="path" className="font-semibold text-[#00685F]">Go to Ideas</Link>
         </p>
       ) : (
         <>
@@ -1935,7 +2208,7 @@ function Backlog({
           {!groups.length && <p className="text-sm text-[#6D7A77]">Nothing matches these filters.</p>}
           {groups.map(([c, list]) => (
             <section key={c} className="space-y-2">
-              <h3 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#6D7A77]">
+              <h3 className="flex flex-wrap items-center gap-x-1.5 text-[11px] font-bold uppercase tracking-wider text-[#6D7A77]">
                 <MapPin className="w-3 h-3" /> {c} · {list.length}
                 {c === dayCity && <span className="normal-case tracking-normal font-semibold text-[#00685F]">· where you are this day</span>}
               </h3>
@@ -1948,7 +2221,7 @@ function Backlog({
           ))}
         </>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -1956,7 +2229,7 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `backlog:${idea.id}`, data: { title: idea.place.name } });
 
   return (
-    <li ref={setNodeRef} className={cx('flex items-center gap-1 rounded-2xl border border-[#E7DFD5] bg-white p-2', (isDragging || placing) && 'opacity-40')}>
+    <li ref={setNodeRef} className={cx('flex flex-wrap items-center gap-1 rounded-2xl border border-[#E7DFD5] bg-white p-2', (isDragging || placing) && 'opacity-40')}>
       {/* Drag handle on larger screens; everywhere, "Place" picks a spot on the timeline and "Add" suggests one. */}
       <button
         type="button"
@@ -1967,8 +2240,8 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
       >
         <GripVertical className="w-4 h-4" />
       </button>
-      <button type="button" onClick={onAdd} className="flex items-center gap-2 flex-1 min-w-0 text-left">
-        <PlaceThumb photoUrl={idea.place.photoUrl} at={idea.place.location} className="w-10 h-10 rounded-xl shrink-0" small />
+      <button type="button" onClick={onAdd} className="flex items-center gap-2.5 flex-1 min-w-[9rem] text-left">
+        <PlaceThumb photoUrl={idea.place.photoUrl} at={idea.place.location} className="w-11 h-11 rounded-xl shrink-0" small />
         <span className="min-w-0">
           <span className="block text-sm font-semibold text-[#161C23] truncate">{idea.place.name}</span>
           <span className="block text-xs text-[#6D7A77] truncate">
@@ -1989,7 +2262,7 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
           )}
         </span>
       </button>
-      <div className="flex flex-col sm:flex-row shrink-0">
+      <div className="flex shrink-0 ml-auto">
         <Button variant="ghost" className="shrink-0 !px-2.5 !min-h-9" onClick={onAdd} aria-label={`Add ${idea.place.name} at a suggested time`}>
           <Plus className="w-4 h-4" /> Add
         </Button>
@@ -2020,7 +2293,7 @@ function SplitGroups({ a, sides, people, me }: { a: Row; sides: Row[]; people: M
   return (
     <div className="mt-1.5 space-y-1">
       <p className="text-[11px] font-semibold text-[#161C23] flex items-center gap-1">
-        <GitFork className="w-3 h-3" /> Split into {sides.length + 1} groups — 🚩 everyone meets back here at {fmtClock(toMin(a.item.end))}
+        <GitFork className="w-3 h-3" /> Split into {sides.length + 1} groups — <Flag className="w-3 h-3 text-gold-ink" /> everyone meets back here at {fmtClock(toMin(a.item.end))}
       </p>
       <div className="grid grid-cols-2 gap-1.5">
         {group(a)}
@@ -2173,21 +2446,25 @@ function PrayerRow({
   };
   const atVenue = !!f && f.walkMin === 0;
   return (
-    <div className={cx(inside && 'ml-5 pl-3 border-l-2 border-dashed border-[#EAD9A8]')}>
-    {inside && <p className="text-[11px] font-semibold text-[#8A6A1F] pt-1">During {inside.title} — {inside.short ? 'step out to pray right there, then back to it' : 'pray there, then carry on'}</p>}
-    <Card className={cx('flex items-stretch my-1 border-[#EAD9A8] bg-[#FDF6E3]', selected && 'ring-2 ring-[#CA8A04]/50')}>
-      <div className="w-[4.75rem] shrink-0 py-3 pl-3 text-xs font-bold tabular-nums" style={{ color: PRAYER_GROUP.main }}>
+    <div className={cx(inside && 'ml-5 pl-3 border-l-2 border-dashed border-gold/60')}>
+    {inside && <p className="text-[11px] font-semibold text-gold-ink pt-1">During {inside.title} — {inside.short ? 'step out to pray right there, then back to it' : 'pray there, then carry on'}</p>}
+    <Card className={cx('relative overflow-hidden flex items-stretch my-1 !bg-night-2 !border-night-2 text-white', selected && 'ring-2 ring-gold/70')}>
+      <span className="pointer-events-none absolute inset-y-0 right-0 w-48 star-lattice opacity-60 [mask-image:linear-gradient(90deg,transparent,#000)]" aria-hidden />
+      <div className="relative w-[4.75rem] shrink-0 py-3 pl-3 text-[13px] font-bold tabular-nums text-gold-soft">
         <p>{fmtClock(toMin(row.item.start))}</p>
-        <p className="font-semibold opacity-70">{meet}</p>
-        <p className="mt-0.5 text-[10px] leading-tight font-semibold opacity-70">🔒 {zoneName} time</p>
+        <p className="font-semibold text-white/60">{meet}</p>
+        <p className="mt-0.5 flex items-center gap-0.5 text-[10px] leading-tight font-semibold text-white/60">
+          <Lock className="w-2.5 h-2.5" /> {zoneName} time
+        </p>
       </div>
-      <div className="flex-1 min-w-0 py-3 pr-2">
+      <div className="relative flex-1 min-w-0 py-3 pr-2">
         <button type="button" onClick={onSelect} aria-pressed={selected} className="block w-full text-left">
-          <p className="font-semibold text-[#7A5500]">
-            🕌 {p.prayer} prayer{split && <span className="font-normal text-[#8A6A1F]"> · the group splits</span>}
+          <p className="font-bold text-white">
+            <Moon className="inline w-4 h-4 -mt-0.5 mr-1.5 text-gold-soft" />
+            {p.prayer} prayer{split && <span className="font-normal text-white/70"> · the group splits</span>}
           </p>
-          {until !== undefined && <p className="text-[11px] text-[#8A6A1F]">Its time lasts until {fmtClock(until)} ({zoneName}) — pray any time before then if plans slip</p>}
-          <p className="text-xs text-[#6B5A2E]">
+          {until !== undefined && <p className="text-[11px] text-white/65">Its time lasts until {fmtClock(until)} ({zoneName}) — pray any time before then if plans slip</p>}
+          <p className="text-xs text-white/80">
             {row.provisional
               ? 'Finding a prayer place nearby…'
               : f?.far
@@ -2197,58 +2474,62 @@ function PrayerRow({
               : inside
                 ? 'No prayer room known here yet — ask staff (big venues often have one), or any clean, quiet spot'
                 : 'No mosque found nearby — any clean, quiet spot works'}
-            {f && route && !(inside && p.basis === 'inside') && <span className="text-[#6D7A77]"> · {route}</span>}
+            {f && route && !(inside && p.basis === 'inside') && <span className="text-white/55"> · {route}</span>}
           </p>
         </button>
         {!row.provisional && (
-          <button type="button" onClick={onPlace} className="mt-1 text-xs font-semibold text-[#8A6A1F] underline underline-offset-2">
-            📍 Change place{p.chosen ? ' (chosen)' : ''}
+          <button type="button" onClick={onPlace} className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-gold-soft underline underline-offset-2">
+            <MapPin className="w-3 h-3" /> Change place{p.chosen ? ' (chosen)' : ''}
           </button>
         )}
         {pairInside && (
-          <p className="mt-1 text-xs text-[#6B5A2E]">
-            🧳 Travellers may pray {MALAY_NAME[p.prayer]} and {MALAY_NAME[pairInside]} together now (jamak taqdim{p.prayer === 'Maghrib' ? ', Maghrib 3 + Isyak 2' : ', 2 rakaat each'}) — one stop, and the rest of {inside?.title ?? 'the visit'} is free. Follow your madhhab.
+          <p className="mt-1 text-xs text-white/80">
+            Travellers may pray {MALAY_NAME[p.prayer]} and {MALAY_NAME[pairInside]} together now (jamak taqdim{p.prayer === 'Maghrib' ? ', Maghrib 3 + Isyak 2' : ', 2 rakaat each'}) — one stop, and the rest of {inside?.title ?? 'the visit'} is free. Follow your madhhab.
           </p>
         )}
         {inside?.ideaId && !atVenue && spotBusy !== 'done' && (
-          <button type="button" disabled={spotBusy === 'busy'} onClick={() => void reportSpot()} className="mt-1 text-xs font-semibold text-[#00685F] underline underline-offset-2 disabled:opacity-50">
-            📍 There's a prayer room here — tell everyone
+          <button type="button" disabled={spotBusy === 'busy'} onClick={() => void reportSpot()} className="mt-1 flex items-center gap-1 text-xs font-semibold text-gold-soft underline underline-offset-2 disabled:opacity-50">
+            <MapPin className="w-3 h-3" /> There's a prayer room here — tell everyone
           </button>
         )}
-        {spotBusy === 'done' && <p className="mt-1 text-xs text-[#0B6B45]">Thanks — every Safar trip visiting {inside?.title} will now pray there.</p>}
+        {spotBusy === 'done' && <p className="mt-1 text-xs text-[#9FE3D6]">Thanks — every Safar trip visiting {inside?.title} will now pray there.</p>}
         {split ? (
           <div className="mt-1.5 space-y-1">
-            <p className="text-[11px] font-semibold text-[#161C23]">🚩 Everyone meets back at {inside?.short ? inside.title : where} at {meet}{g.picks.some((x) => x.meet && x.meet.kind !== 'prayer') ? ' (groups further away: see their box)' : ''}</p>
+            <p className="flex items-center gap-1 text-[11px] font-semibold text-white">
+              <Flag className="w-3 h-3 text-gold-soft shrink-0" /> Everyone meets back at {inside?.short ? inside.title : where} at {meet}{g.picks.some((x) => x.meet && x.meet.kind !== 'prayer') ? ' (groups further away: see their box)' : ''}</p>
             <div className="grid grid-cols-2 gap-1.5">
-              {box('pray', PRAYER_GROUP, '🕌 Praying', g.praying.map(g.name), where)}
-              {g.picks.map((x) => box(x.title, { main: x.color, soft: '#F5F7FB' }, x.meet && x.meet.kind !== 'prayer' ? `☕ Meet ${x.meet.kind === 'next' ? 'at' : 'halfway,'} ${x.meet.name} ${fmtClock(toMin(x.meet.at))}` : '☕ Meanwhile', x.names, x.title))}
+              {box('pray', PRAYER_GROUP, 'Praying', g.praying.map(g.name), where)}
+              {g.picks.map((x) => box(x.title, { main: x.color, soft: '#F5F7FB' }, x.meet && x.meet.kind !== 'prayer' ? `Meet ${x.meet.kind === 'next' ? 'at' : 'halfway,'} ${x.meet.name} ${fmtClock(toMin(x.meet.at))}` : 'Meanwhile', x.names, x.title))}
               {g.resting.length > 0 && box('rest', REST_GROUP, REST_GROUP.label, g.resting.map(g.name), 'Nearby')}
             </div>
           </div>
         ) : (
-          <p className="mt-0.5 text-xs text-[#6B5A2E] truncate">{g.praying.map(g.name).join(', ')}</p>
+          <p className="mt-0.5 text-xs text-white/75 truncate">{g.praying.map(g.name).join(', ')}</p>
         )}
         {!g.picks.length && p.fillerPlace && g.resting.length > 0 && (
-          <p className="mt-0.5 text-xs text-[#1D4E89] truncate">☕ Idea for the others: {p.fillerPlace.name} nearby</p>
+          <p className="mt-0.5 flex items-center gap-1 text-xs text-[#BFD7F2] truncate">
+            <Coffee className="w-3 h-3 shrink-0" /> Idea for the others: {p.fillerPlace.name} nearby
+          </p>
         )}
         {g.unsure.length > 0 && (
-          <p className="mt-0.5 text-[11px] text-[#6D7A77]">
+          <p className="mt-0.5 text-[11px] text-white/60">
             {g.unsure.length === 1 && g.unsure[0] === me
               ? "You haven't said whether you pray (Preferences) — free time by default; join the prayer or pick something."
               : `${g.unsure.map(g.name).join(', ')} haven't said whether they pray — free time by default; they can join the prayer or pick something.`}
           </p>
         )}
         {canPick && !row.provisional && (
-          <button type="button" onClick={onPick} className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-[#1D4E89] px-2.5 py-1 text-xs font-semibold text-white">
-            ☕ {myPick ? `You: ${myPick.title} — change` : iPray ? 'Not praying? Choose what to do' : 'Choose what to do meanwhile'}
+          <button type="button" onClick={onPick} className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-gold px-3 min-h-8 text-xs font-bold text-night hover:bg-gold-soft">
+            <Coffee className="w-3.5 h-3.5" /> {myPick ? `You: ${myPick.title} — change` : iPray ? 'Not praying? Choose what to do' : 'Choose what to do meanwhile'}
           </button>
         )}
       </div>
-      <span className="w-11 shrink-0 flex items-center justify-center" style={{ color: PRAYER_GROUP.main }} title="Prayer time — fixed like a booking; the place follows your plan">
+      <span className="relative w-12 shrink-0 flex flex-col items-center justify-center gap-0.5 text-gold-soft" title="Prayer time — fixed like a booking; the place follows your plan">
         <Lock className="w-4 h-4" />
+        <span className="text-[9px] font-bold uppercase tracking-wider">Fixed</span>
       </span>
     </Card>
-    {inside?.short && <p className="text-[11px] font-semibold text-[#8A6A1F] pb-1">↩ Back to {inside.title} until {fmtClock(inside.end)} — the others just stay there</p>}
+    {inside?.short && <p className="text-[11px] font-semibold text-gold-ink pb-1">↩ Back to {inside.title} until {fmtClock(inside.end)} — the others just stay there</p>}
     </div>
   );
 }

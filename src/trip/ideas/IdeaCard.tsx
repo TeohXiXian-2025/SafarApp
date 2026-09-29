@@ -38,7 +38,7 @@ import {
 } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useDoc } from '../../lib/firestore';
-import { Avatar, Badge, cx, ErrorBanner } from '../../ui';
+import { Avatar, Badge, confirmDialog, cx, ErrorBanner } from '../../ui';
 import { useTrip } from '../TripLayout';
 import { EVIDENCE_SOURCE, halalLabel, type Tone } from './halalLabel';
 import { PlaceThumb } from '../../components/live/PlaceThumb';
@@ -206,17 +206,17 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
                   Re-check halal & reviews
                 </MenuItem>
                 {isAdmin && idea.status === 'voting' && <MenuItem onClick={() => decide('close')}>Close voting now</MenuItem>}
-                {isAdmin && ['voting', 'backup', 'rejected'].includes(idea.status) && <MenuItem onClick={() => decide('backlog')}>Accept (move to backlog)</MenuItem>}
-                {isAdmin && ['voting', 'backlog', 'rejected'].includes(idea.status) && <MenuItem onClick={() => decide('backup')}>Keep as backup</MenuItem>}
+                {isAdmin && ['voting', 'backup', 'rejected'].includes(idea.status) && <MenuItem onClick={() => decide('backlog')}>Accept (move to Agreed)</MenuItem>}
+                {isAdmin && ['voting', 'backlog', 'rejected'].includes(idea.status) && <MenuItem onClick={() => decide('backup')}>Keep in reserve</MenuItem>}
                 {isAdmin && ['voting', 'backlog', 'backup'].includes(idea.status) && <MenuItem onClick={() => decide('reject')}>Reject</MenuItem>}
                 {isAdmin && ['backlog', 'backup', 'rejected', 'mixed'].includes(idea.status) && <MenuItem onClick={() => decide('reopen')}>Reopen voting</MenuItem>}
                 {canManage && (
                   <MenuItem
                     danger
                     icon={<Trash2 className="w-4 h-4" />}
-                    onClick={() => {
+                    onClick={async () => {
                       setMenu(false);
-                      if (confirm(`Remove ${idea.place.name} from the Idea Board?`)) void act('delete', () => api.post('ideas/delete', { ideaId: idea.id }, q));
+                      if (await confirmDialog({ title: `Remove ${idea.place.name}?`, body: 'It leaves Ideas for everyone, with its votes.', confirmLabel: 'Remove', danger: true })) void act('delete', () => api.post('ideas/delete', { ideaId: idea.id }, q));
                     }}
                   >
                     Remove idea
@@ -408,7 +408,7 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
             </p>
           )}
           {votingLeft !== null && votingLeft > 0 && <p className="text-[11px] text-[#6D7A77]">Voting closes in {votingLeft} h — anyone who hasn't voted by then abstains.</p>}
-          {idea.status === 'backup' && <p className="text-[11px] text-[#6D7A77]">Kept as a backup — the admin can bring it back any time.</p>}
+          {idea.status === 'backup' && <p className="text-[11px] text-[#6D7A77]">Kept in reserve — the admin can bring it back any time.</p>}
           {idea.status === 'scheduled' && scheduledDay && <p className="text-[11px] text-[#6D7A77]">On the timeline · {fmtDay(scheduledDay)}</p>}
           {closed && idea.decidedBy && <p className="text-[11px] text-[#6D7A77]">Decided by {byUid.get(idea.decidedBy)?.displayName ?? 'the admin'}.</p>}
         </div>

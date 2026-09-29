@@ -62,7 +62,7 @@ export function MealSheet({
           <>
             {!!opts.ideas.length && (
               <section className="space-y-2">
-                <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#6D7A77]">From your backlog</h3>
+                <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#6D7A77]">From Unplanned</h3>
                 {opts.ideas.map((i) => (
                   <button
                     key={i.ideaId}

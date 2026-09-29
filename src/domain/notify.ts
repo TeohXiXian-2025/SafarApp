@@ -5,10 +5,10 @@ import { Millis } from './common.js';
 export const NOTIFY_KINDS = {
   new_idea: { label: 'New ideas', hint: 'Someone adds a place (bundled — at most one every 10 min)' },
   vote: { label: 'Votes needed', hint: 'Reminder when voting closes in 12 h and you haven’t voted' },
-  choose: { label: 'Split votes', hint: 'Votes split and you can pick a middle ground' },
+  choose: { label: 'Needs a decision', hint: 'The group is divided and you can pick a middle ground' },
   decide: { label: 'Decisions to make (admin)', hint: 'Everyone has picked — your call' },
-  decision: { label: 'Results', hint: 'A place is accepted, kept as backup or rejected' },
-  timeline: { label: 'Timeline changes', hint: 'The plan was re-arranged' },
+  decision: { label: 'Results', hint: 'A place is agreed, kept in reserve or rejected' },
+  timeline: { label: 'Plan changes', hint: 'The plan was re-arranged' },
   comment: { label: 'Comments', hint: 'Someone comments on an idea you added, voted on or commented on' },
 } as const;
 export type NotifyKind = keyof typeof NOTIFY_KINDS;

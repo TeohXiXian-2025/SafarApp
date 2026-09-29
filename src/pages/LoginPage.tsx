@@ -1,6 +1,6 @@
-import { Compass } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
-import { Navigate, useSearchParams } from 'react-router';
+import { Link, Navigate, useSearchParams } from 'react-router';
 import {
   authErrorMessage,
   checkRedirectResult,
@@ -12,7 +12,7 @@ import {
 } from '../auth/auth';
 import { detectInAppBrowser } from '../auth/inAppBrowser';
 import { InAppBrowserNotice } from '../auth/InAppBrowserNotice';
-import { Button, Card, ErrorBanner, Field, Input, Spinner } from '../ui';
+import { Button, Card, ErrorBanner, Field, Input, SafarMark, Spinner } from '../ui';
 import { CONTACT_EMAIL } from '../config';
 
 type Mode = 'signIn' | 'signUp' | 'reset';
@@ -72,18 +72,32 @@ export function LoginPage() {
   const title = { signIn: 'Welcome back', signUp: 'Create your account', reset: 'Reset your password' }[mode];
 
   return (
-    <div className="min-h-dvh flex flex-col items-center justify-center px-4 py-10 bg-[#FAF8F5]">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center space-y-2">
-          <div className="mx-auto w-12 h-12 rounded-2xl bg-[#00685F] text-white flex items-center justify-center">
-            <Compass className="w-6 h-6" />
-          </div>
-          <h1 className="text-2xl font-extrabold text-[#161C23]">Safar</h1>
-          <p className="text-sm text-[#6D7A77]">Group trips that respect halal food and prayer times.</p>
+    <div className="min-h-dvh lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] bg-[#FAF8F5]">
+      {/* Brand panel: a strip on phones, the left half on laptops. */}
+      <aside className="relative overflow-hidden bg-night text-white px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] pb-8 lg:p-14 flex flex-col">
+        <div className="absolute inset-0 star-lattice opacity-60 [mask-image:radial-gradient(ellipse_at_70%_60%,#000_15%,transparent_75%)]" aria-hidden />
+        <Link to="/" className="relative flex items-center gap-2.5">
+          <SafarMark className="w-8 h-8" />
+          <span className="font-display text-2xl font-semibold">Safar</span>
+        </Link>
+        <div className="relative lg:mt-auto mt-6">
+          <h1 className="font-display text-3xl lg:text-5xl leading-[1.08] font-semibold">
+            Group trips where <i className="text-gold-soft font-medium">everyone's</i> plan fits.
+          </h1>
+          <ul className="hidden lg:block mt-8 space-y-3 text-white/80">
+            {['Prayer times fixed in every day', 'Halal labels that show their source', 'Something to do for friends while others pray'].map((t) => (
+              <li key={t} className="flex items-center gap-3">
+                <Check className="w-4 h-4 text-gold-soft" /> {t}
+              </li>
+            ))}
+          </ul>
         </div>
+      </aside>
+      <div className="flex flex-col items-center justify-center px-4 py-10">
+      <div className="w-full max-w-sm space-y-6">
 
         <Card className="p-5 space-y-4">
-          <h2 className="text-lg font-bold text-[#161C23]">{title}</h2>
+          <h2 className="font-display text-2xl font-semibold text-[#161C23]">{title}</h2>
           {next.startsWith('/join/') && (
             <p className="-mt-2 text-sm text-[#00685F] font-semibold">You've been invited to a trip — sign in or create an account to join.</p>
           )}
@@ -170,6 +184,7 @@ export function LoginPage() {
           </a>
           .
         </p>
+      </div>
       </div>
     </div>
   );

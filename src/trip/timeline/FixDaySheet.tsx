@@ -69,7 +69,7 @@ export function FixDaySheet({ day, tripId, rows, onClose }: { day: string; tripI
             </ul>
             {!!preview.removed.length && (
               <div className="rounded-xl border border-[#F2D8B0] bg-[#FFF8EC] p-3 space-y-1">
-                <p className="text-sm font-bold text-[#8A5A00]">Can't fit this day — back to the backlog:</p>
+                <p className="text-sm font-bold text-[#8A5A00]">Can't fit this day — back to Unplanned:</p>
                 {preview.removed.map((r) => (
                   <p key={r.id} className="text-xs text-[#8A5A00]">
                     <b>{title(r.id)}</b> — {UNFIT_TEXT[r.reason].replace('the free days', 'this day')}

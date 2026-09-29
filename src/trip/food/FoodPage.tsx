@@ -11,7 +11,7 @@ import { useSearchParams } from 'react-router';
 import { FOOD_TABS, fmtClock, foodVerdict, placeRule, Idea, nearestDestination, paths, planningDate, ScheduleItem, toMin, type FoodGuess, type FoodVerdict, type GeoPoint } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
-import { Badge, Button, Card, Chip, cx, ErrorBanner, Select, Spinner } from '../../ui';
+import { Badge, Button, Card, Chip, cx, ErrorBanner, PageHeader, Select, Spinner } from '../../ui';
 import { formatDay } from '../bookings/format';
 import { useTrip } from '../TripLayout';
 import { PlaceThumb } from '../../components/live/PlaceThumb';
@@ -207,11 +207,9 @@ export function FoodPage() {
   }, [photoKey]);
 
   return (
-    <div className="space-y-4 max-w-3xl">
-      <div>
-        <h1 className="text-xl font-extrabold text-[#161C23]">Food</h1>
-        <p className="text-sm text-[#6D7A77]">Halal Radar near you — every label says where it comes from.</p>
-      </div>
+    <div className="space-y-4 max-w-3xl mx-auto">
+      <PageHeader eyebrow="Halal Radar" title="Food" />
+      <p className="-mt-2 text-sm text-[#6D7A77]">Halal food near you — every label says where it comes from.</p>
 
       <div className="flex gap-2">
         <Select value={sourceKey} onChange={(e) => choose(e.target.value)} aria-label="Search near">
@@ -413,7 +411,7 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
           </Button>
         )}
         {i.ideaId ? (
-          <Badge tone="muted">On the Idea Board</Badge>
+          <Badge tone="muted">In Ideas</Badge>
         ) : (
           <Button
             variant="ghost"
@@ -424,7 +422,7 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
               onUpdate({ ideaId: r.id });
             })}
           >
-            <Plus className="w-4 h-4" /> Idea Board
+            <Plus className="w-4 h-4" /> Ideas
           </Button>
         )}
         {i.phone && (

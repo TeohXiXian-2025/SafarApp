@@ -1,4 +1,6 @@
 import { createBrowserRouter, Navigate, Outlet } from 'react-router';
+import { useAuth } from './auth/auth';
+import { LandingPage } from './pages/LandingPage';
 import { RequireAuth } from './auth/RequireAuth';
 import { JoinPage } from './pages/JoinPage';
 import { PrivacyPage, TermsPage } from './pages/LegalPages';
@@ -17,15 +19,24 @@ import { PreferencesPage } from './trip/PreferencesPage';
 import { OverviewPage } from './trip/OverviewPage';
 import { SettingsPage } from './trip/SettingsPage';
 import { TripLayout } from './trip/TripLayout';
+import { TripHubPage } from './trip/TripHubPage';
 import { GlobalBanners } from './pwa/GlobalBanners';
+import { ConfirmHost, Spinner } from './ui';
 
 function Root() {
   return (
     <>
       <GlobalBanners />
       <Outlet />
+      <ConfirmHost />
     </>
   );
+}
+
+function HomeGate() {
+  const status = useAuth((st) => st.status);
+  if (status === 'loading') return <Spinner />;
+  return status === 'signedIn' ? <Navigate to="/trips" replace /> : <LandingPage />;
 }
 
 // URL map (see docs/BUILD_PLAN.md). Later phases add tabs under /t/:tripId:
@@ -35,7 +46,8 @@ export const router = createBrowserRouter([
   {
     element: <Root />,
     children: [
-      { path: '/', element: <Navigate to="/trips" replace /> },
+      // Public landing for visitors; signed-in users go straight to their trips.
+      { path: '/', element: <HomeGate /> },
       { path: '/login', element: <LoginPage /> },
       // Public (no sign-in) — linked from the Google OAuth consent screen.
       { path: '/privacy', element: <PrivacyPage /> },
@@ -59,6 +71,8 @@ export const router = createBrowserRouter([
           { path: 'members', element: <MembersPage /> },
           { path: 'preferences', element: <PreferencesPage /> },
           { path: 'settings', element: <SettingsPage /> },
+          // Phone "Trip" tab: hub for bookings, money, people, settings.
+          { path: 'more', element: <TripHubPage /> },
         ],
       },
       // The original hackathon prototype (hardcoded demo data), kept for the pitch.

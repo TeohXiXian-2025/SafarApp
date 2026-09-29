@@ -220,7 +220,7 @@ export function ResyncSheet({ booking, incident, onClose }: { booking: Booking; 
                 loading={busy}
                 onClick={() =>
                   void run('resync/apply', (r: { moved: number; removed: number }) =>
-                    setDone(`Done. ${r.moved} stop${r.moved === 1 ? '' : 's'} moved, ${r.removed} back to the backlog. Everyone has been told.`),
+                    setDone(`Done. ${r.moved} stop${r.moved === 1 ? '' : 's'} moved, ${r.removed} back to Unplanned. Everyone has been told.`),
                   )
                 }
               >

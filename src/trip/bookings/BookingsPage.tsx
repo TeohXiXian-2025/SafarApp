@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Booking, paths, Stay, transportGaps } from '../../domain';
 import { useQuery } from '../../lib/firestore';
-import { Button, Card, cx, ErrorBanner, Spinner } from '../../ui';
+import { Button, Card, cx, ErrorBanner, PageHeader, Spinner } from '../../ui';
 import { useTrip } from '../TripLayout';
 import { AddBookingSheet } from './AddBookingSheet';
 import { BookingCard, EditBookingSheet } from './BookingCard';
@@ -42,20 +42,17 @@ export function BookingsPage() {
   }, [bookings.data]);
 
   return (
-    <div className="max-w-2xl space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-extrabold text-[#161C23]">Bookings</h1>
-          <p className="text-sm text-[#6D7A77]">Transport and hotels become fixed points on the timeline.</p>
-        </div>
+    <div className="max-w-3xl mx-auto space-y-4">
+      <PageHeader eyebrow="Tickets · stays · documents" title="Bookings">
         {tab !== 'documents' && (
           <Button onClick={() => setAdding(true)} className="shrink-0">
-            <Plus className="w-4 h-4" /> Add
+            <Plus className="w-4 h-4" /> Add ticket or hotel
           </Button>
         )}
-      </div>
+      </PageHeader>
+      <p className="-mt-2 text-sm text-[#6D7A77]">Transport and hotels become fixed points on the plan.</p>
 
-      <div className="grid grid-cols-3 rounded-xl bg-[#F3EFE9] p-1 text-sm font-semibold" role="tablist">
+      <div className="grid grid-cols-3 rounded-2xl bg-[#F1EDE7] p-1 text-sm font-semibold" role="tablist">
         {TABS.map(([t, label]) => (
           <button
             key={t}
@@ -63,7 +60,7 @@ export function BookingsPage() {
             aria-selected={tab === t}
             type="button"
             onClick={() => setParams(t === 'transport' ? {} : { tab: t }, { replace: true })}
-            className={cx('min-h-9 rounded-lg', tab === t ? 'bg-white text-[#00685F] shadow-xs' : 'text-[#6D7A77]')}
+            className={cx('min-h-10 rounded-xl transition-colors', tab === t ? 'bg-night text-white shadow-[0_6px_14px_rgba(11,59,54,.22)]' : 'text-[#45524F] hover:text-[#161C23]')}
           >
             {label}
           </button>

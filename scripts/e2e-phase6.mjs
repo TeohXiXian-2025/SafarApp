@@ -50,10 +50,24 @@ async function placeId(query) {
 
 const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
 const schedule = async (tripId) => (await db.collection(`trips/${tripId}/schedule`).get()).docs.map((d) => d.data());
+// Prayer places, travel legs and re-timing are worked out in the background after the API
+// answers: poll until `ready(items)` holds (or give up after `ms` and return the last read).
+const overlapFree = (items) => { try { noOverlap(items); return true; } catch { return false; } };
+const scheduleWhen = async (tripId, ready, ms = 30000) => {
+  const until = Date.now() + ms;
+  for (;;) {
+    const items = await schedule(tripId);
+    if (ready(items) || Date.now() > until) return items;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+};
 const ideaDoc = async (tripId, id) => (await db.doc(`trips/${tripId}/ideas/${id}`).get()).data();
+// Stops never overlap each other. A prayer may fall inside a visit (prayed there — a prayer space on
+// site or a short walk: A → pray → back to A), but no stop starts while a prayer is going on.
 const noOverlap = (items) => {
-  const main = items.filter((i) => !i.track.endsWith(':B')).sort((a, b) => a.start.localeCompare(b.start));
+  const main = items.filter((i) => !i.track.endsWith(':B') && !i.prayer).sort((a, b) => a.start.localeCompare(b.start));
   for (let i = 1; i < main.length; i++) assert.ok(toMin(main[i].start) >= toMin(main[i - 1].end), `${main[i - 1].id} ${main[i - 1].start}-${main[i - 1].end} overlaps ${main[i].id} ${main[i].start}`);
+  for (const p of items.filter((i) => i.prayer)) for (const m of main) assert.ok(!(toMin(m.start) > toMin(p.start) && toMin(m.start) < toMin(p.end)), `${m.id} starts ${m.start}, during ${p.id} ${p.start}-${p.end}`);
 };
 
 try {
@@ -131,7 +145,10 @@ try {
   console.log(`     “${split.explanation}”`);
 
   // ── AI Arrange ────────────────────────────────────────────────────────────
-  assert.equal((await bob.call('schedule/arrange', {}, q)).status, 403);
+  // Anyone may ask for a plan preview; only the admin applies it.
+  const bobPlan = await bob.call('schedule/arrange', {}, q);
+  assert.equal(bobPlan.status, 200, JSON.stringify(bobPlan.body));
+  assert.equal((await bob.call('schedule/apply', { jobId: bobPlan.body.id }, q)).status, 403);
   const t0 = Date.now();
   const ar = await alice.call('schedule/arrange', {}, q);
   assert.equal(ar.status, 200, JSON.stringify(ar.body));
@@ -141,8 +158,11 @@ try {
   assert.ok(!planned.includes(altId), 'the alternative is planned with its original');
   assert.ok(plan.days.some((d) => d.prayers.length), 'prayer breaks for Alice');
   for (const d of plan.days) {
-    const all = [...d.stops.map((s) => [s.start, s.end, s.ideaId]), ...d.prayers.map((p) => [p.start, p.end, p.key]), ...(d.meals ?? []).map((m) => [m.start, m.end, m.key])].sort();
+    // Stops and meals never overlap each other. A visit may hold a prayer (a prayer space on site /
+    // a short walk: A → pray → back to A, the visit lengthened to fit), but never starts inside one.
+    const all = [...d.stops.map((s) => [s.start, s.end, s.ideaId]), ...(d.meals ?? []).map((m) => [m.start, m.end, m.key])].sort();
     for (let i = 1; i < all.length; i++) assert.ok(toMin(all[i][0]) >= toMin(all[i - 1][1]), `${d.day}: ${all[i - 1]} overlaps ${all[i]}`);
+    for (const [s, , id] of all) for (const p of d.prayers) assert.ok(!(toMin(s) > toMin(p.start) && toMin(s) < toMin(p.end)), `${d.day}: ${id} starts during ${p.key} ${p.start}-${p.end}`);
   }
   ok(`preview in ${((Date.now() - t0) / 1000).toFixed(1)}s: ${plan.days.map((d) => `${d.day}: ${d.stops.length} stops + ${d.prayers.map((p) => `${p.key} ${p.start}`).join(', ')}${(d.meals ?? []).map((m) => ` + ${m.key} ${m.start} ${m.place?.name ?? '(no place)'}`).join('')}`).join(' | ')}; unplaced ${plan.unplaced.length}`);
   plan.days.forEach((d) => d.note && console.log(`     ${d.day}: ${d.note}`));
@@ -151,7 +171,7 @@ try {
 
   const ap = await alice.call('schedule/apply', { jobId: ar.body.id }, q);
   assert.equal(ap.status, 200, JSON.stringify(ap.body));
-  let items = await schedule(tripId);
+  let items = await scheduleWhen(tripId, (l) => l.some((i) => i.prayer?.facility) && l.filter((i) => i.transitFromPrev).length >= 2);
   const pair = items.filter((i) => i.track !== 'all');
   assert.equal(pair.length, split.tracks.length, 'split groups on the timeline');
   const a = pair.find((i) => i.track.endsWith(':A'));
@@ -175,8 +195,9 @@ try {
   ok(`applied: pair A ${a.start}–${a.end} / B ${b.start}–${b.end}; prayers ${prayers.map((p) => `${p.prayer.prayer} ${p.start} @ ${p.prayer.facility?.name ?? '?'} (${p.prayer.facility?.walkMin ?? '?'} min)`).join(', ')}`);
   const legs = items.filter((i) => i.transitFromPrev);
   assert.ok(legs.length >= 2);
-  assert.ok(!legs.some((i) => i.prayer || i.track.endsWith(':B')));
-  ok(`${legs.length} travel legs from the Routes API (none into prayer breaks or track B)`);
+  // Walks to prayer places are measured too (the prayer card shows them); track B walks with its pair.
+  assert.ok(!legs.some((i) => i.track.endsWith(':B')));
+  ok(`${legs.length} travel legs from the Routes API (${legs.filter((i) => i.prayer).length} to prayer places, none for track B)`);
 
   // ── Manual edits keep prayers + pairs consistent ──────────────────────────
   const pr = prayers[0];
@@ -188,7 +209,7 @@ try {
   const reversed = dayStops.map((i) => i.id).reverse();
   const ro = await alice.call('schedule/reorder', { day, order: reversed }, q);
   assert.equal(ro.status, 200, JSON.stringify(ro.body));
-  items = await schedule(tripId);
+  items = await scheduleWhen(tripId, (l) => overlapFree(l.filter((i) => i.day === day && !i.locked)));
   noOverlap(items.filter((i) => i.day === day && !i.locked));
   const a2 = items.find((i) => i.id === a.id);
   const b2 = items.find((i) => i.id === b.id);
@@ -197,7 +218,8 @@ try {
 
   const mv = await alice.call('schedule/update', { id: b.id, day: DAYS.find((d) => d !== day), start: '10:00' }, q);
   assert.equal(mv.status, 200, JSON.stringify(mv.body));
-  items = await schedule(tripId);
+  const toDay = DAYS.find((d) => d !== day);
+  items = await scheduleWhen(tripId, (l) => overlapFree(l.filter((i) => i.day === toDay && !i.locked)));
   assert.equal(items.find((i) => i.id === a.id).day, items.find((i) => i.id === b.id).day);
   // B asked for 10:00; on a busy day the pair may move later (it can't overlap the stop before it) — never earlier.
   const [a3, b3] = [items.find((i) => i.id === a.id), items.find((i) => i.id === b.id)];

@@ -6,7 +6,7 @@ import { countryName, paths, Readiness, VAULT_KINDS, type CheckLevel, type Ready
 import { api, ApiError } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { deleteFile, fileUrl, UPLOAD_ACCEPT, uploadTripFile } from '../../lib/storage';
-import { Avatar, Button, Card, Chip, cx, ErrorBanner, Field, Input, Sheet, Spinner, Toggle } from '../../ui';
+import { Avatar, Button, Card, Chip, confirmDialog, cx, ErrorBanner, Field, Input, Sheet, Spinner, Toggle } from '../../ui';
 import { useTrip } from '../TripLayout';
 
 interface VaultState {
@@ -105,8 +105,8 @@ export function VaultSection() {
         <button
           type="button"
           className="text-sm font-semibold text-[#B3261E]"
-          onClick={() => {
-            if (confirm('Delete every document and file in your vault for this trip? This cannot be undone.')) void api.post('vault/forget', {}, { tripId: trip.id }).then(load);
+          onClick={async () => {
+            if (await confirmDialog({ title: 'Delete your whole vault for this trip?', body: 'Every document and file goes. This cannot be undone.', confirmLabel: 'Delete everything', danger: true })) void api.post('vault/forget', {}, { tripId: trip.id }).then(load);
           }}
         >
           Delete my vault for this trip
@@ -239,7 +239,7 @@ function DocRow({ doc, onEdit, onChanged }: { doc: VaultDoc; onEdit: () => void;
     }
   };
   const remove = async () => {
-    if (!confirm(`Delete this ${VAULT_KINDS[doc.kind].slice(3).toLowerCase()}?`)) return;
+    if (!(await confirmDialog({ title: `Delete this ${VAULT_KINDS[doc.kind].slice(3).toLowerCase()}?`, confirmLabel: 'Delete', danger: true }))) return;
     setBusy(true);
     await api.post('vault/delete', { id: doc.id }, { tripId: trip.id }).catch(() => {});
     onChanged();

@@ -9,6 +9,16 @@
    ============================================================ */
 @theme {
   --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Display serif for page titles and big numbers (redesign v2) */
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+
+  /* Night emerald + gold: prayer moments, nav, hero cards */
+  --color-night: #0b3b36;
+  --color-night-2: #0e4a43;
+  --color-gold: #c8a15a;
+  --color-gold-soft: #e2c27e;
+  --color-gold-ink: #7a5a1e;
+  --color-sand: #f1ede7;
 
   /* Brand */
   --color-brand: #0d6955;
@@ -31,8 +41,8 @@
   --color-line: #e7dfd5;
   --color-line-strong: #c4bcb3;
 
-  /* Secondary accent */
-  --color-gold: #d97706;
+  /* Attention (amber) */
+  --color-amber: #c77700;
 
   /* Elevation hierarchy (small → medium → large) */
   --shadow-card: 0 1px 2px rgba(22, 28, 35, 0.04), 0 1px 3px rgba(22, 28, 35, 0.06);
@@ -81,6 +91,52 @@ html {
     user-select: none;
   }
 }
+
+/* ============================================================
+   Redesign v2 — motion + ornament. Everything here is visual only.
+   ============================================================ */
+.font-display {
+  letter-spacing: -0.015em;
+}
+/* 8-point star lattice (the only ornament): hero, prayer cards, CTAs. */
+.star-lattice {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Cg fill='none' stroke='%23C8A15A' stroke-opacity='.2'%3E%3Crect x='13' y='13' width='14' height='14'/%3E%3Crect x='13' y='13' width='14' height='14' transform='rotate(45 20 20)'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 40px 40px;
+}
+@keyframes safar-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes safar-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes safar-drawer-in { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes safar-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes safar-dialog { from { opacity: 0; transform: scale(0.95) translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes safar-pop { 0% { transform: scale(0.96); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes safar-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(179, 38, 30, 0.5); }
+  70%, 100% { box-shadow: 0 0 0 7px rgba(179, 38, 30, 0); }
+}
+@keyframes safar-bar { from { width: 100%; } to { width: 0; } }
+@keyframes safar-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.anim-rise { animation: safar-rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+/* Landing: sections rise in as they scroll into view (see useReveal). */
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.7s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.reveal.in { opacity: 1; transform: none; }
+@keyframes safar-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes safar-bob { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-12px) rotate(-3deg); } }
+@keyframes safar-draw { from { stroke-dashoffset: var(--len, 600); } to { stroke-dashoffset: 0; } }
+@keyframes safar-shine { 0% { transform: translateX(-120%); } 60%, 100% { transform: translateX(260%); } }
+.anim-float { animation: safar-float 5s ease-in-out infinite; }
+.anim-bob { animation: safar-bob 6s ease-in-out infinite; }
+.anim-draw { stroke-dasharray: var(--len, 600); stroke-dashoffset: var(--len, 600); animation: safar-draw 2.4s cubic-bezier(0.6, 0.1, 0.25, 1) 0.6s forwards; }
+.shine { position: relative; overflow: hidden; }
+.shine::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40%; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent); animation: safar-shine 3.5s ease-in-out 2s infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; }
+  .anim-draw { stroke-dashoffset: 0; }
+}
+.anim-pulse { animation: safar-pulse 1.8s ease-out infinite; }
+.anim-grow { transform-origin: left center; animation: safar-grow 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 
 /* Respect the user's motion preference (accessibility) */
 @media (prefers-reduced-motion: reduce) {

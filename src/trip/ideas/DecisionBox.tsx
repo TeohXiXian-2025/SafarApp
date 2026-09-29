@@ -202,7 +202,7 @@ export function DecisionBox({ idea, split, alts }: { idea: Idea; split: Split | 
                 Accept
               </Button>
               <Button variant="secondary" className="flex-1 min-h-9" loading={busy === 'backup'} disabled={!!busy} onClick={() => act('backup', () => api.post('ideas/decide', { ideaId: idea.id, action: 'backup' }, q))}>
-                Keep as backup
+                Keep in reserve
               </Button>
               <Button variant="ghost" className="flex-1 min-h-9" loading={busy === 'reject'} disabled={!!busy} onClick={() => act('reject', () => api.post('ideas/decide', { ideaId: idea.id, action: 'reject' }, q))}>
                 Reject
