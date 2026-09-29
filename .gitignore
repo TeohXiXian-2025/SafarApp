@@ -16,3 +16,5 @@ docs/TEST_GUIDE.md
 docs/test-kit/
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
+docs/REDESIGN_PLAN.md
+docs/REDESIGN_PLAN_V2.md
