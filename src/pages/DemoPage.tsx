@@ -65,10 +65,11 @@ export function DemoPage() {
             Sign in
           </Link>
         </div>
-        <section className="max-w-6xl mx-auto px-4 md:px-8 pt-8 pb-14 md:pt-14 md:pb-20 grid md:grid-cols-[1.1fr_.9fr] gap-10 items-center">
-          <div className="anim-rise">
+        {/* minmax(0, …): a column never grows wider than the screen to fit its content. */}
+        <section className="max-w-6xl mx-auto px-4 md:px-8 pt-8 pb-14 md:pt-14 md:pb-20 grid grid-cols-[minmax(0,1fr)] md:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)] gap-10 items-center">
+          <div className="anim-rise min-w-0">
             <p className="text-[12px] font-bold uppercase tracking-[.14em] text-gold-soft">Demo trip · no sign-up</p>
-            <h1 className="font-display text-[40px] md:text-[56px] leading-[1.05] font-semibold mt-3">
+            <h1 className="font-display text-[34px] sm:text-[40px] md:text-[56px] leading-[1.05] font-semibold mt-3">
               Plan a week in Japan <span className="text-gold-soft italic">for four very different people.</span>
             </h1>
             <p className="text-white/80 text-[16px] md:text-lg mt-4 max-w-xl leading-relaxed">
@@ -93,13 +94,13 @@ export function DemoPage() {
             <p className="mt-4 text-[13px] text-white/60">Your own private copy. It is deleted after 48 hours — unless you make an account to keep it.</p>
           </div>
 
-          <div className="anim-rise [animation-delay:.15s] rounded-3xl bg-white/[.06] border border-white/15 p-5 md:p-6 backdrop-blur">
+          <div className="anim-rise [animation-delay:.15s] min-w-0 rounded-3xl bg-white/[.06] border border-white/15 p-4 sm:p-5 md:p-6 backdrop-blur">
             <p className="text-[11px] font-bold uppercase tracking-[.12em] text-gold-soft">Japan in December · 7 – 13 Dec 2026</p>
-            <div className="mt-4 grid grid-cols-3 gap-2">
+            <div className="mt-4 grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2">
               {ROUTE.map((r) => (
-                <div key={r.text} className="rounded-2xl bg-white/[.07] p-3">
+                <div key={r.text} className="min-w-0 rounded-2xl bg-white/[.07] p-2.5 sm:p-3">
                   <r.icon className="w-4 h-4 text-gold-soft" />
-                  <p className="mt-2 text-[13px] font-bold leading-tight">{r.text}</p>
+                  <p className="mt-2 text-[12.5px] sm:text-[13px] font-bold leading-tight break-words">{r.text}</p>
                   <p className="text-[12px] text-white/60">{r.sub}</p>
                 </div>
               ))}
@@ -111,7 +112,7 @@ export function DemoPage() {
                     <Avatar name={c.name} size={36} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[14px] font-bold">
+                    <p className="text-[14px] font-bold truncate">
                       {c.name} <span className="font-normal text-white/60">· {c.role}</span>
                     </p>
                     <p className="text-[12px] text-white/70 truncate">{c.needs.join(' · ')}</p>
@@ -160,17 +161,25 @@ export function DemoPage() {
             Sample documents that all tell the same story — the same four names, dates and bookings. You can also download them from inside the demo trip, one step at a
             time.
           </p>
-          <div className="mt-6 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Phone: one compact row each; bigger screens: cards. */}
+          <div className="mt-6 grid grid-cols-[minmax(0,1fr)] sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
             {Object.values(DEMO_KIT).map((f) => (
-              <a key={f.file} href={demoKitUrl(f)} download={f.file} className="group rounded-2xl bg-white border border-[#E7DFD5] p-4 hover:border-gold transition-colors">
-                <span className="w-9 h-9 rounded-lg bg-night text-gold-soft flex items-center justify-center">
+              <a
+                key={f.file}
+                href={demoKitUrl(f)}
+                download={f.file}
+                className="group min-w-0 flex items-center gap-3 sm:block rounded-2xl bg-white border border-[#E7DFD5] px-3 py-2.5 sm:p-4 hover:border-gold transition-colors"
+              >
+                <span className="w-9 h-9 shrink-0 rounded-lg bg-night text-gold-soft flex items-center justify-center">
                   <FileText className="w-4 h-4" />
                 </span>
-                <p className="mt-3 font-bold text-[#161C23] text-[14px]">{f.label}</p>
-                <p className="text-[12.5px] text-[#6D7A77]">{f.what}</p>
-                <p className="mt-2 text-[12px] font-bold text-[#00685F] inline-flex items-center gap-1">
-                  <Download className="w-3.5 h-3.5" /> Download
-                </p>
+                <span className="block min-w-0 flex-1">
+                  <span className="block sm:mt-3 font-bold text-[#161C23] text-[14px] truncate sm:whitespace-normal">{f.label}</span>
+                  <span className="block text-[12.5px] text-[#6D7A77] truncate sm:whitespace-normal">{f.what}</span>
+                </span>
+                <span className="shrink-0 sm:mt-2 text-[12px] font-bold text-[#00685F] inline-flex items-center gap-1" aria-label={`Download ${f.label}`}>
+                  <Download className="w-4 h-4 sm:w-3.5 sm:h-3.5" /> <span className="hidden sm:inline">Download</span>
+                </span>
               </a>
             ))}
           </div>
