@@ -32,7 +32,8 @@ export interface QuestStep {
   done: (q: QuestInput) => boolean;
 }
 
-const splitIdea = (q: QuestInput) => q.ideas.find((i) => i.place.name.includes(DEMO_SPLIT_PLACE) && !i.splitId) ?? q.ideas.find((i) => i.place.name.includes(DEMO_SPLIT_PLACE));
+const isSplitPlace = (i: Idea) => i.place.name.toLowerCase().includes(DEMO_SPLIT_PLACE.toLowerCase()); // Google writes it "ICHIRAN"
+const splitIdea = (q: QuestInput) => q.ideas.find((i) => isSplitPlace(i) && !i.splitId) ?? q.ideas.find(isSplitPlace);
 
 export const QUEST: QuestStep[] = [
   {
@@ -80,8 +81,8 @@ export const QUEST: QuestStep[] = [
   {
     id: 'vote',
     title: "Vote on Daniel's ramen",
-    story: 'Daniel really wants Ichiran ramen in Shibuya. Mum and Farid already voted 👎 — the broth is pork.',
-    todo: ['Ideas → Vote now → vote on Ichiran.', 'A 👍 from you asks you to confirm, because it conflicts with your own needs.'],
+    story: 'Daniel really wants Ichiran ramen in Shibuya. Mum and Farid voted 👎 — the broth is pork. You don’t mind keeping Daniel company over a cup of tea.',
+    todo: ['Ideas → Vote now → vote 👍 on Ichiran.', 'Safar asks you to confirm, because it isn’t halal for you — write “I’ll keep Daniel company and just have tea.”'],
     why: 'Votes carry reasons. When some are in and some are out, Safar doesn’t just pick the majority — it looks for a way everyone gets a good meal.',
     where: '/ideas?filter=voting',
     done: (q) => !!splitIdea(q)?.votes[q.uid],
@@ -89,8 +90,8 @@ export const QUEST: QuestStep[] = [
   {
     id: 'split',
     title: 'Settle the split',
-    story: 'Votes are split, so it needs a decision. Halal ramen places a few minutes away are suggested for everyone who is not going.',
-    todo: ['Ideas → Needs a decision → open Ichiran.', 'If you voted 👎, pick where you will eat instead.', 'As the admin, accept it: Daniel gets his ramen, the rest eat halal nearby, and you meet back after.'],
+    story: 'Two for, two against: it needs a decision. Safar found halal places a few minutes away, and Mum and Farid each picked where they’ll eat instead.',
+    todo: ['Ideas → Needs a decision → open Ichiran.', 'See where Mum and Farid will eat instead.', 'As the admin, accept it: you and Daniel go to Ichiran, Mum and Farid eat halal nearby, and everyone meets back after.'],
     why: 'Mixed groups don’t have to choose one restaurant for everyone: Safar splits the group for an hour, times both meals and sets a meeting point.',
     where: '/ideas?filter=mixed',
     done: (q) => !!splitIdea(q)?.decidedBy,

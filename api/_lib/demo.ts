@@ -62,7 +62,7 @@ const PERSONAS: Persona[] = [
   {
     uid: DEMO_MATES.aminah,
     name: 'Aminah',
-    prefs: { halalRequired: true, halalTier: 'certified', prayerReminders: true, pace: 'relaxed', interests: ['temples', 'gardens', 'mosques'], hotelPriorities: ['prayer_space_nearby', 'halal_food_nearby'], dailyBudget: 250, hotelBudget: { min: 250, max: 600 } },
+    prefs: { halalRequired: true, halalTier: 'certified', prayerReminders: true, pace: 'moderate', interests: ['temples', 'gardens', 'mosques'], hotelPriorities: ['prayer_space_nearby', 'halal_food_nearby'], dailyBudget: 250, hotelBudget: { min: 250, max: 600 } },
     cantEat: 'Mak only eats at certified halal places — this one serves pork.',
     okAnyway: "I'll come along and only eat at the halal places.",
   },
@@ -86,13 +86,15 @@ const PLAYER_PREFS: MemberPrefs = { halalRequired: true, halalTier: 'muslim_owne
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** A mate's vote: 👍, or 👎 when a restaurant is off limits for them; a smaller concern is confirmed and still 👍. */
-async function voteAs(p: Persona, tripId: string, idea: Idea): Promise<void> {
+async function voteAs(p: Persona, tripId: string, idea: Idea): Promise<string> {
   const up = await callAs(p.uid, 'ideas/vote', { ideaId: idea.id, value: 1 }, tripId);
-  if (up.status !== 409 || up.body?.code !== 'confirm') return;
-  const conflicts = (up.body?.conflicts ?? []) as Conflict[];
-  const offLimits = idea.place.category === 'food' && conflicts.some((c) => c.kind === 'pork' || (c.kind === 'halal' && c.severity === 'blocker'));
+  if (up.status !== 409) return `${up.status}`;
+  const conflicts = ((up.body?.details?.conflicts ?? up.body?.conflicts) ?? []) as Conflict[];
+  // A restaurant they can't eat at (pork, not halal enough, marked not halal): any blocker.
+  const offLimits = idea.place.category === 'food' && conflicts.some((c) => c.severity === 'blocker');
   if (offLimits) await callAs(p.uid, 'ideas/vote', { ideaId: idea.id, value: -1, tag: 'halal', reason: p.cantEat }, tripId);
   else await callAs(p.uid, 'ideas/vote', { ideaId: idea.id, value: 1, ack: p.okAnyway }, tripId);
+  return `409 ${conflicts.map((c) => `${c.kind}/${c.severity}`).join(',')} → ${offLimits ? '👎' : '👍'}`;
 }
 
 /**
@@ -295,7 +297,7 @@ async function fillTemplate(tripId: string, people: { uid: string; prefs: Member
       if (t.agreed) {
         const up = await callAs(p.uid, 'ideas/vote', { ideaId, value: 1 }, tripId);
         if (up.status === 409) await callAs(p.uid, 'ideas/vote', { ideaId, value: 1, ack: p.okAnyway }, tripId);
-      } else await voteAs(p, tripId, idea);
+      } else log(`    ${p.name} on ${idea.place.name} (${idea.place.category}): ${await voteAs(p, tripId, idea)}`);
     }
     const after = Idea.parse((await db.doc(`${paths.ideas(tripId)}/${ideaId}`).get()).data());
     // The story needs the real checks: a place without its halal check would get the wrong votes.

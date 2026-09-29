@@ -76,7 +76,7 @@ try {
   const members = (await db.collection(`trips/${tripId}/members`).get()).docs.map((d) => d.data());
   assert.deepEqual(members.map((m) => m.displayName).sort(), ['Aisyah', 'Aminah', 'Daniel', 'Farid']);
   const ideas0 = (await db.collection(`trips/${tripId}/ideas`).get()).docs.map((d) => d.data());
-  const ichiran = ideas0.find((i) => i.place.name.includes('Ichiran'));
+  const ichiran = ideas0.find((i) => /ichiran/i.test(i.place.name));
   assert.equal(ichiran?.status, 'voting');
   assert.ok(ichiran.votingEndsAt > Date.now(), 'the vote is open (times moved to now)');
   ok(`guest ${guest} + own copy ${tripId}: 4 people, ${ideas0.length} ideas, Ichiran waiting for Aisyah's vote`);
@@ -139,21 +139,23 @@ try {
   ok(`post → ${found.join(', ')}; the mates voted: ${voted.map((i) => `${i.place.name} ${Object.values(i.votes).map((v) => (v.value > 0 ? '👍' : '👎')).join('')}`).join(' · ')}`);
 
   // ── Ichiran: vote, split, decide ─────────────────────────────────────────
-  const v = await call('ideas/vote', { ideaId: ichiran.id, value: -1, tag: 'halal', reason: 'Pork broth — not halal for me.' });
+  // Aisyah keeps Daniel company: a 👍 despite the conflict has to be confirmed.
+  const first = await call('ideas/vote', { ideaId: ichiran.id, value: 1 });
+  assert.equal(first.status, 409, 'a 👍 on a place that isn’t halal for you asks for a confirmation');
+  const v = await call('ideas/vote', { ideaId: ichiran.id, value: 1, ack: "I'll keep Daniel company and just have tea." });
   assert.equal(v.status, 200, JSON.stringify(v.body));
-  if (v.body.status === 'mixed') {
+  assert.equal(v.body.status, 'mixed', '2 for, 2 against → needs a decision');
+  {
     const opts = await until('middle grounds', async () => (await db.doc(`trips/${tripId}/ideas/${ichiran.id}`).get()).data(), (i) => i.options?.length > 0, 90000);
-    const alt = opts.options.find((o) => o.type === 'alternative') ?? opts.options[0];
-    assert.equal((await call('ideas/choose', { ideaId: ichiran.id, optionId: alt.id })).status, 200);
-    // Every mate who isn't going (voted 👎) picks a middle ground too.
+    // Every mate who isn't going (voted 👎) picks a middle ground.
     const notGoing = Object.entries(opts.votes).filter(([u, x]) => u.startsWith('safar-demo-') && x.value === -1).map(([u]) => u);
     await until('the mates to choose', async () => (await db.doc(`trips/${tripId}/ideas/${ichiran.id}`).get()).data(), (i) => notGoing.every((u) => i.choices[u]), 60000);
-    note(`not going: Aisyah${notGoing.map((u) => `, ${u.replace('safar-demo-', '')}`).join('')}`);
+    assert.deepEqual(notGoing.sort(), ['safar-demo-aminah', 'safar-demo-farid']);
+    const chosen = (await db.doc(`trips/${tripId}/ideas/${ichiran.id}`).get()).data();
+    const picks = notGoing.map((u) => opts.options.find((o) => o.id === chosen.choices[u].optionId)?.title);
     const d = await call('ideas/decide', { ideaId: ichiran.id, action: 'accept' });
     assert.equal(d.status, 200, JSON.stringify(d.body));
-    ok(`Ichiran: votes split → everyone not going picked “${alt.title}” → accepted as a split`);
-  } else {
-    note(`Ichiran went to “${v.body.status}” (its halal check didn't flag pork in this template — rebuild it when Google answers)`);
+    ok(`Ichiran: 2 for, 2 against → Mum and Farid picked ${[...new Set(picks)].join(' / ')} (options: ${opts.options.map((o) => o.title).join(' · ')}) → accepted as a split`);
   }
 
   // ── Auto-plan ─────────────────────────────────────────────────────────────
@@ -162,7 +164,9 @@ try {
   const ap = await call('schedule/apply', { jobId: ar.body.id });
   assert.equal(ap.status, 200, JSON.stringify(ap.body));
   const plan = ar.body.plan;
-  console.log('  unplaced:', JSON.stringify(plan.unplaced).slice(0, 600));
+  const names = Object.fromEntries((await db.collection(`trips/${tripId}/ideas`).get()).docs.map((d) => [d.id, d.get('place.name')]));
+  for (const d of plan.days) console.log(`     ${d.day}: ${d.stops.map((x) => `${x.start} ${names[x.ideaId]}`).join(' → ') || '—'}${(d.meals ?? []).map((m) => ` | ${m.key} ${m.start} ${m.place?.name ?? ''}`).join('')}`);
+  console.log('     unplaced:', plan.unplaced.map((u) => `${names[u.ideaId]} (${u.reason})`).join(', '));
   plan.days.forEach((d) => d.note && console.log(`     ${d.day}: ${d.note}`));
   ok(`auto-plan applied: ${plan.days.map((d) => `${d.day.slice(8)}: ${d.stops.length} stops${d.prayers.length ? ` + ${d.prayers.length} prayers` : ''}`).join(' | ')}; unplaced ${plan.unplaced.length}`);
 

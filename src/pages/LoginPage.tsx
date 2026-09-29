@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react';
+import { ArrowRight, Check, Gamepad2 } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import {
@@ -169,6 +169,22 @@ export function LoginPage() {
             )}
           </div>
         </Card>
+        {/* The demo: also the way in for people who installed the app before having an account. */}
+        {!next.startsWith('/join/') && mode !== 'reset' && (
+          <Link
+            to="/demo"
+            className="group flex items-center gap-3 rounded-2xl bg-night text-white px-4 py-3.5 shadow-[0_10px_30px_rgba(11,59,54,.18)] hover:bg-night-2 transition-colors"
+          >
+            <span className="w-10 h-10 rounded-xl bg-gold text-night flex items-center justify-center shrink-0">
+              <Gamepad2 className="w-5 h-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[14px] font-bold">Try the demo trip first</span>
+              <span className="block text-[12.5px] text-white/70">A week in Japan for 4 very different people · no account</span>
+            </span>
+            <ArrowRight className="w-4 h-4 text-gold-soft shrink-0 transition-transform group-hover:translate-x-0.5" />
+          </Link>
+        )}
         <p className="text-center text-xs text-[#6D7A77]">
           By continuing you agree to our{' '}
           <a href="/terms" className="underline">

@@ -14,7 +14,7 @@ import { Avatar, Button, confirmDialog, SafarMark } from '../ui';
 
 const CAST = [
   { name: 'Aisyah', role: 'You · the planner', needs: ['Halal (Muslim-owned ok)', 'Prays', 'Loves food & photos'] },
-  { name: 'Aminah', role: 'Your mum', needs: ['Certified halal only', 'Prays', 'Relaxed pace'] },
+  { name: 'Aminah', role: 'Your mum', needs: ['Certified halal only', 'Prays', 'Temples & gardens'] },
   { name: 'Farid', role: 'Your brother', needs: ['Halal', 'Prays', 'Anime, views, fast pace'] },
   { name: 'Daniel', role: "Farid's friend", needs: ['No food rules', 'Ramen fan', 'Night views'] },
 ];
