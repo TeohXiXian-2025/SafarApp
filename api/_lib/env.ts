@@ -23,6 +23,8 @@ const SERVER_KEYS = [
   'GEOAPIFY_API_KEY',
   'OPENROUTESERVICE_API_KEY',
   'MAPILLARY_TOKEN',
+  // New demo trips per day for everyone together (default 150).
+  'DEMO_PER_DAY',
 ] as const;
 
 export type ServerKey = (typeof SERVER_KEYS)[number];

@@ -93,7 +93,8 @@ const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', '
 export function toIsoDate(v: string): string | undefined {
   const s = v.trim().toUpperCase();
   let y: number, m: number, d: number;
-  let r = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  // A leading ISO date counts even with junk after it (AI models sometimes run on past the value).
+  let r = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/);
   if (r) [y, m, d] = [+r[1], +r[2], +r[3]];
   else if ((r = s.match(/^(\d{1,2})[\s./-]*([A-Z]{3})[A-Z]*(?:\/[A-Z]{3,})?[\s./-]*(\d{4})$/))) [d, m, y] = [+r[1], MONTHS.indexOf(r[2]) + 1, +r[3]];
   else if ((r = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/))) [d, m, y] = [+r[1], +r[2], +r[3]];

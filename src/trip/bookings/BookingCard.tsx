@@ -97,7 +97,7 @@ export function BookingCard({ booking: b, canEdit, isMine, onEdit }: { booking: 
         </div>
         <div className="flex gap-1 shrink-0">
           {b.kind !== 'hotel' && (canEdit || b.travellerUids.includes(me.uid)) && (
-            <IconBtn label="Delayed or cancelled?" onClick={() => setResync(true)}>
+            <IconBtn label="Delayed or cancelled?" onClick={() => setResync(true)} quest={`resync-${b.kind}`}>
               <Siren className="w-4 h-4" />
             </IconBtn>
           )}
@@ -174,10 +174,11 @@ export function EditBookingSheet({ booking, onClose }: { booking: Booking; onClo
   );
 }
 
-export function IconBtn({ label, onClick, disabled, danger, children }: { label: string; onClick: () => void; disabled?: boolean; danger?: boolean; children: React.ReactNode }) {
+export function IconBtn({ label, onClick, disabled, danger, quest, children }: { label: string; onClick: () => void; disabled?: boolean; danger?: boolean; quest?: string; children: React.ReactNode }) {
   return (
     <button
       type="button"
+      data-quest={quest}
       aria-label={label}
       title={label}
       onClick={onClick}

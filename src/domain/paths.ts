@@ -7,6 +7,9 @@ export const paths = {
   inbox: (uid: string) => `users/${uid}/inbox`,
   inboxState: (uid: string) => `users/${uid}/private/inbox`,
 
+  /** Where the demo trip template lives (written by scripts/demo-template.mjs). */
+  demoConfig: () => 'config/demo',
+
   trips: () => 'trips',
   trip: (tripId: string) => `trips/${tripId}`,
   members: (tripId: string) => `trips/${tripId}/members`,

@@ -3,6 +3,7 @@ import { GoogleGenAI, type Part, type Schema } from '@google/genai';
 import type { z } from 'zod';
 import { optionalEnv } from './env.js';
 import { countAi, downModels, markDown, retryAfterFrom } from './aiHealth.js';
+import { demoAnswer, recordDemoAnswer } from './demoKit.js';
 import { groqJson } from './groq.js';
 import { HttpError } from './http.js';
 
@@ -167,6 +168,12 @@ export async function extractJson<S extends z.ZodType>(opts: {
   /** Extra parts (e.g. OCR text) computed only if Gemini fails and Groq takes over. */
   beforeGroq?: () => Promise<Part[]>;
 }): Promise<z.infer<S>> {
+  // A demo kit file: what the AI read from it before (see demoKit.ts).
+  const known = demoAnswer(opts.system, opts.parts);
+  if (known !== undefined) {
+    const parsed = opts.validate.safeParse(known);
+    if (parsed.success) return parsed.data;
+  }
   let attempt: Attempt;
   try {
     attempt = await generate(opts);
@@ -187,5 +194,6 @@ export async function extractJson<S extends z.ZodType>(opts: {
     console.error(`[ai] unexpected output from ${attempt.provider}`, parsed.error.issues.slice(0, 5), JSON.stringify(raw)?.slice(0, 400));
     throw new HttpError(502, "The AI couldn't read this reliably. Please enter the details manually.");
   }
+  await recordDemoAnswer(opts.system, opts.parts, raw);
   return parsed.data;
 }

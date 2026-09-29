@@ -22,3 +22,4 @@ export * from './journeyPrayer.js';
 export * from './weather.js';
 export * from './cities.js';
 export * from './halalSignals.js';
+export * from './demo.js';

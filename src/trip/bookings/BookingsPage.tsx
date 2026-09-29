@@ -45,7 +45,7 @@ export function BookingsPage() {
     <div className="max-w-3xl mx-auto space-y-4">
       <PageHeader eyebrow="Tickets · stays · documents" title="Bookings">
         {tab !== 'documents' && (
-          <Button onClick={() => setAdding(true)} className="shrink-0">
+          <Button onClick={() => setAdding(true)} className="shrink-0" data-quest="add-booking">
             <Plus className="w-4 h-4" /> Add ticket or hotel
           </Button>
         )}

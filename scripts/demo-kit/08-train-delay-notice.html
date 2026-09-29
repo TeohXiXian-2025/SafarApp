@@ -1,0 +1,48 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Delay notice</title>
+<style>
+  body { margin: 0; width: 390px; height: 844px; font: 14px/1.4 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #eef2f6; color: #13202e; }
+  .status { height: 44px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; font-weight: 600; font-size: 14px; }
+  .bar { background: #0a5aa8; color: #fff; padding: 14px 18px; font-weight: 700; font-size: 17px; display: flex; gap: 10px; align-items: center; }
+  .bar span { font-size: 12px; font-weight: 500; opacity: .85; margin-left: auto; }
+  .card { background: #fff; margin: 14px; border-radius: 14px; box-shadow: 0 2px 10px rgba(10,40,80,.08); overflow: hidden; }
+  .head { background: #f3f7fb; padding: 12px 16px; display: flex; justify-content: space-between; font-size: 12px; color: #4b5b6d; }
+  .train { font-size: 22px; font-weight: 800; color: #0a5aa8; padding: 14px 16px 0; }
+  .date { padding: 2px 16px 0; color: #4b5b6d; }
+  .route { display: flex; align-items: center; justify-content: space-between; padding: 16px; }
+  .st { text-align: center; }
+  .st b { display: block; font-size: 26px; }
+  .st small { color: #4b5b6d; }
+  .arrow { flex: 1; height: 2px; background: #0a5aa8; margin: 0 12px; position: relative; }
+  .arrow:after { content: ''; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left-color: #0a5aa8; }
+  .rows div { display: flex; justify-content: space-between; padding: 10px 16px; border-top: 1px solid #edf1f5; }
+  .rows div span:first-child { color: #4b5b6d; }
+  .qr { margin: 6px auto 12px; width: 120px; height: 120px; background:
+      conic-gradient(from 90deg at 25% 25%, #13202e 25%, #fff 0) 0 0/24px 24px; border: 8px solid #fff; outline: 1px solid #dfe5ec; }
+  .note { font-size: 11.5px; color: #4b5b6d; padding: 0 18px; }
+  .demo { margin: 10px 14px; padding: 6px 8px; background: #fff4d6; border: 1px dashed #c8a15a; font-size: 10.5px; color: #6b5310; border-radius: 6px; }
+</style>
+<style>
+  .mail { background:#fff; margin: 0; padding: 16px 18px; }
+  .from { display:flex; gap:10px; align-items:center; }
+  .av { width:38px; height:38px; border-radius:50%; background:#f28c00; color:#fff; display:grid; place-items:center; font-weight:800; }
+  .subj { font-size:18px; font-weight:700; margin:14px 0 6px; }
+  .alert { background:#fff1e6; border-left:4px solid #f28c00; padding:10px 12px; border-radius:6px; margin:12px 0; }
+  .alert b { display:block; font-size:15px; }
+  p { margin: 8px 0; }
+</style></head>
+<body>
+  <div class="status"><span>09:12</span><span>5G ▮▮▮ 64%</span></div>
+  <div class="mail">
+    <div class="from"><div class="av">JR</div><div><b>JR Central · smartEX</b><br><small style="color:#4b5b6d">to aisyah.rahman · Thu 10 Dec 2026, 09:10</small></div></div>
+    <div class="subj">Delay: Nozomi 21 (Tokyo 09:00 → Kyoto)</div>
+    <p>Dear RAHMAN AISYAH,</p>
+    <p>Because of heavy snow in the Sekigahara area, trains on the Tokaido Shinkansen between Nagoya and Kyoto are running at reduced speed.</p>
+    <div class="alert"><b>Nozomi 21 · Reservation 2412-7085</b>
+      Departed Tokyo on time at 09:00.<br>
+      Expected arrival at <b style="display:inline">Kyoto: 12:45</b> (about 90 minutes late, original 11:15).</div>
+    <p>Your reserved seats (car 7, seats 12A–12D) stay valid. If you arrive at your destination 2 hours or more late, your limited express fee is refunded.</p>
+    <p>We apologise for the inconvenience.<br>Central Japan Railway Company</p>
+  </div>
+  <div class="demo">SAMPLE for the Safar demo trip — not a real message.</div>
+</body></html>

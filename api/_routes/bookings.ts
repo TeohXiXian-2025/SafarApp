@@ -135,7 +135,11 @@ async function toDraft(e: Extracted, members: Member[], uploaderUid: string): Pr
   const flight = e.kind === 'flight';
   const [from, to] = await Promise.all([
     hotel ? null : ((flight && airportByCode(e.fromCode)) || (fromQuery ? findPlace(fromQuery) : null)),
-    (flight && airportByCode(e.toCode)) || findPlace(toQuery),
+    (flight && airportByCode(e.toCode)) ||
+      findPlace(toQuery).then(async (p) =>
+        // Hotels: the backup map search often misses "name, full address" but finds the name alone.
+        p ?? (hotel && e.toName?.trim() && toQuery !== e.toName.trim() ? findPlace([e.toName.trim(), e.toCity?.trim()].filter(Boolean).join(', ')) : null),
+      ),
   ]);
   if (!hotel && !from) warnings.push(`Couldn't find "${fromQuery}" on the map — please pick it.`);
   if (!to) warnings.push(`Couldn't find "${toQuery}" on the map — please pick it.`);

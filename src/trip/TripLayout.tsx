@@ -31,6 +31,7 @@ import { AddBookingSheet } from './bookings/AddBookingSheet';
 import { ExpenseSheet } from './expenses/ExpenseSheet';
 import { AddIdeaSheet } from './ideas/AddIdeaSheet';
 import { useNeeds } from './ideas/NeedsYou';
+import { DemoLayer } from './demo/DemoLayer';
 
 export interface TripCtx {
   trip: Trip;
@@ -228,6 +229,7 @@ export function TripLayout() {
               </span>
             </div>
           </header>
+          {ctx?.trip.demo && <DemoLayer trip={ctx.trip} uid={ctx.me.uid} />}
 
           <main className="flex-1 w-full max-w-[1440px] mx-auto px-4 md:px-6 lg:px-8 py-5 md:py-6 pb-[calc(env(safe-area-inset-bottom)+6rem)] md:pb-10">
             {ctx && <KeepTripLive tripId={ctx.trip.id} />}

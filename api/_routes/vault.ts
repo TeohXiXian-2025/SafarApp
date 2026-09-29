@@ -24,6 +24,7 @@ Return only what is printed. Dates as YYYY-MM-DD. Countries as ISO 3166-1 alpha-
 - passport: fullName (given names + surname as printed), number, nationality, issuingCountry, dateOfBirth, validUntil (expiry).
 - visa: fullName, number, country (the country the visa is FOR), validFrom, validUntil, provider (visa type, e.g. "Tourist, single entry").
 - insurance: fullName (insured person), number (policy number), provider (insurer), validFrom, validUntil (cover period).
+Fill every field: use an empty string for anything the document does not print (never guess).
 kind: what the document is. confidence 0..1. If it isn't one of these, kind "other" and confidence 0.`;
 
 const str = (description: string) => ({ type: Type.STRING, description });
@@ -43,7 +44,9 @@ const schema = {
     provider: str('Insurance: the insurer. Visa: the visa type. Passports: empty'),
     confidence: { type: Type.NUMBER },
   },
-  required: ['kind', 'confidence'],
+  // Every field required (empty when not printed): with optional fields the model often skips
+  // ones that ARE printed — nationality and date of birth on passports.
+  required: ['kind', 'fullName', 'number', 'nationality', 'issuingCountry', 'dateOfBirth', 'country', 'validFrom', 'validUntil', 'provider', 'confidence'],
 };
 const Read = z.object({ kind: z.string(), confidence: z.number().catch(0) }).catchall(z.unknown());
 

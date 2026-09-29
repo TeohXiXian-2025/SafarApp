@@ -60,8 +60,8 @@ const pwa = VitePWA({
     // Push notification handlers (public/push-sw.js).
     importScripts: ['push-sw.js'],
     // The pitch deck is a separate page with big images — don't ship it to every phone.
-    // Pitch-deck screenshots and the /demo prototype's code load on demand instead.
-    globIgnores: ['pitch.html', 'assets/pitch-*', 'assets/*.png', 'assets/*.jpg', 'images/**', 'assets/App-*', 'assets/pdf-*', 'assets/motion-*'],
+    // Pitch-deck screenshots and the demo trip's sample files load on demand instead.
+    globIgnores: ['pitch.html', 'assets/pitch-*', 'assets/*.png', 'assets/*.jpg', 'images/**', 'demo-kit/**'],
     maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
     navigateFallback: '/index.html',
     // Server routes and Firebase's auth handler must always hit the network.
@@ -147,7 +147,6 @@ export default defineConfig(() => {
             if (!id.includes('node_modules')) return;
             if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler'))
               return 'react-vendor';
-            if (id.includes('motion')) return 'motion';
             if (id.includes('@sentry')) return 'sentry';
             if (id.includes('react-router')) return 'router';
             if (id.includes('lucide-react')) return 'icons';

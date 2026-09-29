@@ -7,6 +7,7 @@ import type { Destination, IdeaSource, PlaceRef } from '../../src/domain/index.j
 import { extractJson } from './gemini.js';
 import { ocrImages } from './ocr.js';
 import { HttpError } from './http.js';
+import { photonPlace } from './google.js';
 import { categorize, distanceKm, searchPlace } from './places.js';
 
 export type SocialType = Extract<IdeaSource['type'], 'tiktok' | 'instagram' | 'xiaohongshu' | 'youtube'>;
@@ -237,6 +238,9 @@ export interface Candidate {
   nearest: string;
 }
 
+/** Google place id, else the OpenStreetMap id, else the name (backup-source places have no Google id). */
+export const candidateKey = (p: { placeId?: string; osmId?: string; name: string }) => p.placeId ?? p.osmId ?? p.name;
+
 export async function extractCandidates(
   parts: Part[],
   destinations: Destination[],
@@ -278,7 +282,11 @@ ${t}` }] : []));
       const lower = where.toLowerCase();
       // Bias the search to the destination the post mentions, else the first one.
       const dest = destinations.find((d) => lower.includes(d.name.toLowerCase())) ?? destinations[0];
-      const hit = await searchPlace(`${p.name}${where ? `, ${where}` : ''}`, dest.location);
+      const query = `${p.name}${where ? `, ${where}` : ''}`;
+      // Google first; when it won't answer (daily limit), OpenStreetMap near the destination — never far away.
+      const hit =
+        (await searchPlace(query, dest.location)) ??
+        (await photonPlace(p.name, dest.location).then((o) => (o && distanceKm(o.location, dest.location) <= 60 ? { ...o, types: [] as string[] } : null)));
       if (!hit) {
         unresolved.push(p.name);
         return null;
@@ -289,7 +297,7 @@ ${t}` }] : []));
       }
       const nearestDest = destinations.map((d) => ({ d, km: distanceKm(d.location, hit.location) })).sort((a, b) => a.km - b.km)[0];
       const candidate: Candidate = {
-        place: { placeId: hit.placeId, name: hit.name, ...(hit.address ? { address: hit.address } : {}), location: hit.location },
+        place: { ...(hit.placeId ? { placeId: hit.placeId } : {}), ...(hit.osmId ? { osmId: hit.osmId } : {}), name: hit.name, ...(hit.address ? { address: hit.address } : {}), location: hit.location },
         category: categorize(hit.types ?? []),
         ...(p.what ? { what: p.what.slice(0, 120) } : {}),
         distanceKm: Math.round(nearestDest.km),
@@ -302,8 +310,9 @@ ${t}` }] : []));
   // Same place found twice (e.g. name + romanised name) → keep one.
   const seen = new Set<string>();
   const candidates = found.filter((c): c is Candidate => {
-    if (!c || seen.has(c.place.placeId!)) return false;
-    seen.add(c.place.placeId!);
+    const key = c && candidateKey(c.place);
+    if (!c || seen.has(key!)) return false;
+    seen.add(key!);
     return true;
   });
   return { candidates, unresolved, skippedRegions };

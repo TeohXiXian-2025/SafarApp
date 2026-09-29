@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Passport specimen</title>
+<style>
+  body { margin:0; width:900px; height:620px; background:#d8d2c4; display:grid; place-items:center; font-family: Arial, Helvetica, sans-serif; }
+  .page { width:840px; height:560px; border-radius:18px; position:relative; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,.25);
+     background: repeating-linear-gradient(45deg, #efe3d0 0 6px, #eadcc6 6px 12px); color:#1d2433; }
+  .band { position:absolute; top:0; left:0; right:0; height:64px; background: linear-gradient(90deg,#1a2e5a,#243f78); color:#f4e7c3; display:flex; align-items:center; padding:0 26px; gap:16px; }
+  .band b { font-size:22px; letter-spacing:1px; }
+  .band span { font-size:12px; opacity:.9; }
+  .photo { position:absolute; left:34px; top:96px; width:190px; height:240px; border-radius:6px; background: linear-gradient(180deg,#cfd8e3,#aebccc); overflow:hidden; }
+  .photo:before { content:''; position:absolute; left:58px; top:70px; width:74px; height:92px; border-radius:50%; background:#c69c7b; z-index:2; }
+  .photo:after { content:''; position:absolute; left:22px; top:40px; width:146px; height:220px; border-radius:50% 50% 12px 12px; background:#2f4858; }
+  .fields { position:absolute; left:250px; top:92px; right:30px; display:grid; grid-template-columns: 1fr 1fr; gap:10px 26px; }
+  .f small { display:block; font-size:10px; color:#5b4a2e; text-transform:uppercase; letter-spacing:.4px; }
+  .f b { font-size:17px; letter-spacing:.5px; }
+  .wide { grid-column: 1 / -1; }
+  .mrz { position:absolute; left:30px; right:30px; bottom:26px; font: 600 24px/1.35 "OCR B", "Courier New", monospace; letter-spacing:2.2px; }
+  .spec { position:absolute; top:230px; left:-40px; right:-40px; text-align:center; transform: rotate(-14deg); font-size:92px; font-weight:900; color: rgba(200,16,46,.25); letter-spacing:14px; }
+  .demo { position:absolute; right:22px; top:74px; font-size:11px; color:#6b5310; background:#fff4d6; border:1px dashed #c8a15a; padding:3px 8px; border-radius:4px; }
+</style></head>
+<body><div class="page">
+  <div class="band"><b>MALAYSIA</b><span>PASPORT · PASSPORT</span></div>
+  <div class="photo"></div>
+  <div class="fields">
+    <div class="f"><small>Jenis / Type</small><b>P</b></div>
+    <div class="f"><small>Kod negara / Country code</small><b>MYS</b></div>
+    <div class="f wide"><small>Nama / Name</small><b>AISYAH BINTI RAHMAN</b></div>
+    <div class="f"><small>No. pasport / Passport no.</small><b>A98765432</b></div>
+    <div class="f"><small>Warganegara / Nationality</small><b>MALAYSIA</b></div>
+    <div class="f"><small>Tarikh lahir / Date of birth</small><b>12 APR 1998</b></div>
+    <div class="f"><small>Jantina / Sex</small><b>F</b></div>
+    <div class="f"><small>Tempat lahir / Place of birth</small><b>KUALA LUMPUR</b></div>
+    <div class="f"><small>Pihak berkuasa / Authority</small><b>IMIGRESEN MALAYSIA</b></div>
+    <div class="f"><small>Tarikh dikeluarkan / Date of issue</small><b>20 APR 2022</b></div>
+    <div class="f"><small>Tarikh tamat / Date of expiry</small><b>20 APR 2027</b></div>
+  </div>
+  <div class="spec">SPECIMEN</div>
+  <div class="demo">Sample for the Safar demo — not a real passport</div>
+  <div class="mrz">P&lt;MYSAISYAH&lt;BINTI&lt;RAHMAN&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;<br>A987654326MYS9804120F2704209&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;08</div>
+</div></body></html>

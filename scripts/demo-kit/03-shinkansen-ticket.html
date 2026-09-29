@@ -1,0 +1,47 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Nozomi 21</title>
+<style>
+  body { margin: 0; width: 390px; height: 844px; font: 14px/1.4 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #eef2f6; color: #13202e; }
+  .status { height: 44px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; font-weight: 600; font-size: 14px; }
+  .bar { background: #0a5aa8; color: #fff; padding: 14px 18px; font-weight: 700; font-size: 17px; display: flex; gap: 10px; align-items: center; }
+  .bar span { font-size: 12px; font-weight: 500; opacity: .85; margin-left: auto; }
+  .card { background: #fff; margin: 14px; border-radius: 14px; box-shadow: 0 2px 10px rgba(10,40,80,.08); overflow: hidden; }
+  .head { background: #f3f7fb; padding: 12px 16px; display: flex; justify-content: space-between; font-size: 12px; color: #4b5b6d; }
+  .train { font-size: 22px; font-weight: 800; color: #0a5aa8; padding: 14px 16px 0; }
+  .date { padding: 2px 16px 0; color: #4b5b6d; }
+  .route { display: flex; align-items: center; justify-content: space-between; padding: 16px; }
+  .st { text-align: center; }
+  .st b { display: block; font-size: 26px; }
+  .st small { color: #4b5b6d; }
+  .arrow { flex: 1; height: 2px; background: #0a5aa8; margin: 0 12px; position: relative; }
+  .arrow:after { content: ''; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left-color: #0a5aa8; }
+  .rows div { display: flex; justify-content: space-between; padding: 10px 16px; border-top: 1px solid #edf1f5; }
+  .rows div span:first-child { color: #4b5b6d; }
+  .qr { margin: 6px auto 12px; width: 120px; height: 120px; background:
+      conic-gradient(from 90deg at 25% 25%, #13202e 25%, #fff 0) 0 0/24px 24px; border: 8px solid #fff; outline: 1px solid #dfe5ec; }
+  .note { font-size: 11.5px; color: #4b5b6d; padding: 0 18px; }
+  .demo { margin: 10px 14px; padding: 6px 8px; background: #fff4d6; border: 1px dashed #c8a15a; font-size: 10.5px; color: #6b5310; border-radius: 6px; }
+</style></head>
+<body>
+  <div class="status"><span>21:04</span><span>5G ▮▮▮ 82%</span></div>
+  <div class="bar">smartEX · Reservation <span>No. 2412-7085</span></div>
+  <div class="card">
+    <div class="head"><span>Tokaido Shinkansen</span><span>Reserved seat · Ordinary car</span></div>
+    <div class="train">Nozomi 21</div>
+    <div class="date">Thursday, 10 December 2026</div>
+    <div class="route">
+      <div class="st"><b>09:00</b>Tokyo<br><small>Platform 16</small></div>
+      <div class="arrow"></div>
+      <div class="st"><b>11:15</b>Kyoto<br><small>2 h 15 min</small></div>
+    </div>
+    <div class="rows">
+      <div><span>Car</span><b>7</b></div>
+      <div><span>Seats</span><b>12A · 12B · 12C · 12D</b></div>
+      <div><span>Passengers</span><b style="text-align:right">RAHMAN AISYAH · YUSOF AMINAH<br>RAHMAN FARID · TAN DANIEL</b></div>
+      <div><span>Fare (4 adults)</span><b>¥ 56,680</b></div>
+    </div>
+    <div class="qr"></div>
+  </div>
+  <div class="note">Tap your IC card or show this QR code at the Shinkansen gate. Luggage over 160 cm needs an oversized baggage seat.</div>
+  <div class="demo">SAMPLE for the Safar demo trip — not a real ticket.</div>
+</body></html>

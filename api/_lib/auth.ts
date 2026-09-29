@@ -1,5 +1,6 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import { Member, paths } from '../../src/domain/index.js';
+import { isDemoMate, Member, paths } from '../../src/domain/index.js';
 import { adminAuth, adminDb } from './firebaseAdmin.js';
 import { handle, HttpError } from './http.js';
 import { rateLimit } from './rateLimit.js';
@@ -13,9 +14,25 @@ export interface TripContext extends AuthContext {
   member: Member;
 }
 
+/**
+ * The demo trip's travel mates act through the same routes as people do (see
+ * _lib/demo.ts), called from inside this process with a key made at start-up.
+ * The key never leaves the process, and it only works for the mates' ids.
+ */
+const INTERNAL_KEY = randomBytes(32).toString('hex');
+export const internalAuth = (uid: string) => `Internal ${INTERNAL_KEY} ${uid}`;
+
+function internalUser(header: string): DecodedIdToken | null {
+  const [, key = '', uid = ''] = header.split(' ');
+  const ok = key.length === INTERNAL_KEY.length && timingSafeEqual(Buffer.from(key), Buffer.from(INTERNAL_KEY));
+  if (!ok || !isDemoMate(uid)) throw new HttpError(401, 'Sign in required');
+  return { uid } as DecodedIdToken;
+}
+
 /** Verifies the `Authorization: Bearer <Firebase ID token>` header. */
 export async function requireUser(req: Request): Promise<DecodedIdToken> {
   const header = req.headers.get('authorization') ?? '';
+  if (header.startsWith('Internal ')) return internalUser(header)!;
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
   if (!token) throw new HttpError(401, 'Sign in required');
   try {
@@ -43,7 +60,8 @@ interface AuthOptions {
 export function withAuth(fn: (req: Request, ctx: AuthContext) => Promise<Response>, opts: AuthOptions = {}) {
   return handle(async (req) => {
     const user = await requireUser(req);
-    await rateLimit(`${user.uid}:${new URL(req.url).pathname}`, opts.perMinute ?? 60, 60);
+    // The demo mates are shared by every demo trip: no per-user limit for them.
+    if (!isDemoMate(user.uid)) await rateLimit(`${user.uid}:${new URL(req.url).pathname}`, opts.perMinute ?? 60, 60);
     return fn(req, { user });
   });
 }

@@ -73,6 +73,10 @@ describe('toIsoDate', () => {
     expect(['2027-02-01', '01 FEB 2027', '1 Feb 2027', '01/02/2027', '14 MAR/MAC 1999'].map(toIsoDate)).toEqual(['2027-02-01', '2027-02-01', '2027-02-01', '2027-02-01', '1999-03-14']);
     expect(toIsoDate('31/02/2027')).toBeUndefined();
   });
+  it('keeps a leading ISO date when the model ran on past it', () => {
+    expect(toIsoDate('2027-04-20ATED_IN_INPUT_FILE')).toBe('2027-04-20');
+    expect(toIsoDate('2027-04-201')).toBeUndefined();
+  });
 });
 
 describe('journey and dates', () => {

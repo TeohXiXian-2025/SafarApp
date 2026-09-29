@@ -22,6 +22,8 @@ import { isMobileDevice } from '../pwa/pwa';
 interface AuthState {
   status: 'loading' | 'signedOut' | 'signedIn';
   user: User | null;
+  /** Signed out by pressing "Sign out" (not a session that ended): leave to the landing page. */
+  leftOnPurpose?: boolean;
 }
 
 export const useAuth = create<AuthState>(() => ({ status: 'loading', user: null }));
@@ -47,7 +49,7 @@ onAuthStateChanged(auth, (user) => {
     void fbSignOut(auth);
     return;
   }
-  useAuth.setState({ status: user ? 'signedIn' : 'signedOut', user });
+  useAuth.setState((st) => ({ status: user ? 'signedIn' : 'signedOut', user, leftOnPurpose: !user && st.leftOnPurpose }));
   if (user) void ensureProfile(user);
 });
 
@@ -100,7 +102,10 @@ export const checkRedirectResult = () => getRedirectResult(auth);
 // After resetting, the "Continue" button brings people back to our login page.
 export const resetPassword = (email: string) =>
   sendPasswordResetEmail(auth, email, { url: `${import.meta.env.DEV ? window.location.origin : PUBLIC_ORIGIN}/login` });
-export const signOut = () => fbSignOut(auth);
+export const signOut = () => {
+  useAuth.setState({ leftOnPurpose: true });
+  return fbSignOut(auth);
+};
 
 /** Maps Firebase auth error codes to messages people understand. */
 export function authErrorMessage(err: unknown): string {

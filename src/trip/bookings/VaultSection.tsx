@@ -68,7 +68,7 @@ export function VaultSection() {
           <h2 className="font-bold text-[#161C23] flex items-center gap-2">
             <Lock className="w-4 h-4 text-[#00685F]" /> My documents
           </h2>
-          <Button className="!min-h-9" onClick={() => setEditing('new')}>
+          <Button className="!min-h-9" onClick={() => setEditing('new')} data-quest="vault-upload">
             <Plus className="w-4 h-4" /> Add
           </Button>
         </div>
@@ -155,7 +155,7 @@ function Consent({ onDone }: { onDone: () => void }) {
       </ul>
       <Toggle checked={share} onChange={setShare} label="Share my status with the group" hint="Only lines like “Passport ✓”. You can change this later." />
       <ErrorBanner>{error}</ErrorBanner>
-      <Button className="w-full" loading={busy} onClick={() => void agree()}>
+      <Button className="w-full" loading={busy} onClick={() => void agree()} data-quest="vault-upload">
         I understand — open my vault
       </Button>
     </Card>

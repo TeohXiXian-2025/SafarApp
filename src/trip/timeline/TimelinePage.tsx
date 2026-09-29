@@ -1190,7 +1190,7 @@ export function TimelinePage() {
             </div>
             {/* One control, two scopes: Auto-plan this day or the whole trip (a shared preview the admin applies). */}
             <div className="flex items-stretch gap-2 sm:shrink-0">
-              <div role="group" aria-label="Auto-plan" className="flex flex-1 sm:flex-none min-h-10 rounded-xl border border-[#DDD5CA] bg-white overflow-hidden text-[13px] font-bold">
+              <div role="group" aria-label="Auto-plan" data-quest="auto-plan" className="flex flex-1 sm:flex-none min-h-10 rounded-xl border border-[#DDD5CA] bg-white overflow-hidden text-[13px] font-bold">
                 <span className="flex items-center gap-1.5 pl-3 pr-2.5 text-[#161C23]">
                   <Sparkles className="w-4 h-4 text-gold" /> <span className="whitespace-nowrap hidden sm:inline">Auto-plan</span>
                 </span>

@@ -15,6 +15,10 @@ import { expenseRoutes } from './_routes/expenses.js';
 import { stayRoutes } from './_routes/stays.js';
 import { vaultRoutes } from './_routes/vault.js';
 import { resyncRoutes } from './_routes/resync.js';
+import { demoRoutes } from './_routes/demo.js';
+import { inBackground } from './_lib/background.js';
+import { matesReact } from './_lib/demo.js';
+import { isDemoTrip } from '../src/domain/index.js';
 
 const table: RouteTable = {
   ...systemRoutes,
@@ -31,13 +35,23 @@ const table: RouteTable = {
   ...stayRoutes,
   ...vaultRoutes,
   ...resyncRoutes,
+  ...demoRoutes,
 };
 
 export async function dispatch(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = (url.searchParams.get('__path') ?? url.pathname.replace(/^\/api\/?/, '')).replace(/^\/+|\/+$/g, '');
   const handler = table[`${req.method} ${path}`];
-  if (handler) return handler(req);
+  if (handler) {
+    const res = await handler(req);
+    // Demo trip: after the visitor does something on the Idea Board, the travel mates answer
+    // (also after a failed request — e.g. a halal check that couldn't run still ends the wait).
+    const tripId = url.searchParams.get('tripId');
+    if (tripId && isDemoTrip(tripId) && path.startsWith('ideas/') && !req.headers.get('authorization')?.startsWith('Internal ')) {
+      inBackground(`demo:${tripId}`, () => matesReact(tripId));
+    }
+    return res;
+  }
 
   const pathExists = Object.keys(table).some((k) => k.endsWith(` ${path}`));
   return pathExists

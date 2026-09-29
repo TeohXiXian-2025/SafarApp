@@ -4,7 +4,7 @@
 // throttled so a burst of new ideas is one alert. Never throws — a failed
 // notification must not fail the action that caused it.
 import webpush from 'web-push';
-import { NotifyPrefs, paths, PushSub, shouldSend, type NotifyKind } from '../../src/domain/index.js';
+import { isDemoMate, NotifyPrefs, paths, PushSub, shouldSend, type NotifyKind } from '../../src/domain/index.js';
 import { optionalEnv } from './env.js';
 import { adminDb } from './firebaseAdmin.js';
 
@@ -90,7 +90,8 @@ export async function notify(
   note: Note,
   opts: { timeZone: string; except?: string; throttleKey?: string; throttle?: number; /** Ignore choices, quiet hours and throttling (test alerts). */ force?: boolean },
 ): Promise<number> {
-  const targets = [...new Set(uids)].filter((u) => u !== opts.except);
+  // The demo trip's travel mates aren't people: nothing to deliver (their inbox would only grow).
+  const targets = [...new Set(uids)].filter((u) => u !== opts.except && !isDemoMate(u));
   if (!opts.force) await toInbox(targets, note);
   if (!ready() || !targets.length) return 0;
   const db = adminDb();

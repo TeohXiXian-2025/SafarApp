@@ -5,7 +5,8 @@
 // It also checks flights leaving within 6 h for delays (Emergency Resync).
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { NotifyPrefs, readyForAdmin, REMIND_BEFORE_MS } from '../../src/domain/index.js';
+import { isDemoTrip, NotifyPrefs, readyForAdmin, REMIND_BEFORE_MS } from '../../src/domain/index.js';
+import { deleteExpired } from '../_lib/demo.js';
 import { withAuth } from '../_lib/auth.js';
 import { optionalEnv } from '../_lib/env.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
@@ -34,7 +35,10 @@ async function reminders(req: Request): Promise<Response> {
   let reminded = 0;
   let flights = 0;
   let weather = 0;
+  // Demo trips: nobody waits on reminders there (the mates answer at once); old ones are deleted.
+  const demos = await deleteExpired(now).catch((e) => (console.error('[reminders] demo cleanup', e), 0));
   for (const t of trips.docs) {
+    if (isDemoTrip(t.id)) continue;
     try {
       closed += await closeOverdue(t.id);
       const data = await loadTripData(t.id);
@@ -62,7 +66,7 @@ async function reminders(req: Request): Promise<Response> {
       console.error('[reminders] trip', t.id, err);
     }
   }
-  return json({ trips: trips.size, closed, reminded, flights, weather });
+  return json({ trips: trips.size, closed, reminded, flights, weather, demosDeleted: demos });
 }
 
 export const notificationRoutes: RouteTable = {

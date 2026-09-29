@@ -60,8 +60,10 @@ export function airportByCode(code?: string): PlaceRef | null {
 }
 
 /** Photon (OpenStreetMap search, no key) — the backup when Google's text search is out. */
-async function photonPlace(query: string): Promise<PlaceRef | null> {
-  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query.slice(0, 200))}&limit=1&lang=en`;
+/** OpenStreetMap (Photon) search — the backup when Google won't answer. `near` ranks nearby matches first. */
+export async function photonPlace(query: string, near?: GeoPoint): Promise<PlaceRef | null> {
+  const bias = near ? `&lat=${near.lat}&lon=${near.lng}` : '';
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query.slice(0, 200))}&limit=1&lang=en${bias}`;
   const res = await fetch(url, { headers: { 'user-agent': 'Safar/1.0 (group travel planner)' }, signal: AbortSignal.timeout(6000) }).catch(() => null);
   if (!res?.ok) return null;
   const f = ((await res.json().catch(() => null)) as { features?: { geometry?: { coordinates?: [number, number] }; properties?: { name?: string; street?: string; city?: string; country?: string; osm_type?: string; osm_id?: number } }[] } | null)?.features?.[0];

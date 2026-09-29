@@ -57,7 +57,7 @@ export function ExpensesPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <PageHeader eyebrow={`Everything in ${trip.currency}`} title="Money">
-        <Button onClick={() => setEditing('new')} className="shrink-0">
+        <Button onClick={() => setEditing('new')} className="shrink-0" data-quest="add-expense">
           <Plus className="w-4 h-4" /> Add expense
         </Button>
       </PageHeader>

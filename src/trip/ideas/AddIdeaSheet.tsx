@@ -27,6 +27,9 @@ interface ImportResponse {
 
 type Tab = 'link' | 'media' | 'search';
 
+/** Candidates from the backup map (OpenStreetMap) have no Google id. */
+const keyOf = (p: { placeId?: string; osmId?: string; name: string }) => p.placeId ?? p.osmId ?? p.name;
+
 /** Screenshots + recording frames sent per import (the AI reads them in batches). */
 const MAX_IMAGES = 8;
 const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
@@ -138,7 +141,7 @@ export function AddIdeaSheet({ open, onClose, initialText }: { open: boolean; on
       );
       if (res.candidates.length) {
         setResult(res);
-        setPicked(new Set(res.candidates.map((c) => c.place.placeId!)));
+        setPicked(new Set(res.candidates.map((c) => keyOf(c.place))));
       } else if (res.needsScreenshot) {
         setNotice([res.used?.skipped, res.message ?? 'Upload a screen recording or screenshots of the post instead.'].filter(Boolean).join(' — '));
         setTab('media');
@@ -156,7 +159,13 @@ export function AddIdeaSheet({ open, onClose, initialText }: { open: boolean; on
     if (!result) return;
     setWorking('Adding to Ideas…');
     try {
-      const items = result.candidates.filter((c) => picked.has(c.place.placeId!)).map((c) => ({ placeId: c.place.placeId!, source: result.source }));
+      const items = result.candidates
+        .filter((c) => picked.has(keyOf(c.place)))
+        .map((c) =>
+          c.place.placeId
+            ? { placeId: c.place.placeId, source: result.source }
+            : { place: { name: c.place.name, location: c.place.location, ...(c.place.osmId ? { osmId: c.place.osmId } : {}), ...(c.place.address ? { address: c.place.address } : {}) }, source: result.source },
+        );
       const r = await addIdeas(trip.id, items);
       setUploaded([]); // keep the uploads: they're the ideas' source
       reset();
@@ -233,7 +242,7 @@ export function AddIdeaSheet({ open, onClose, initialText }: { open: boolean; on
           </p>
           <ul className="space-y-2">
             {result.candidates.map((c) => {
-              const id = c.place.placeId!;
+              const id = keyOf(c.place);
               const on = picked.has(id);
               const far = c.distanceKm > 80;
               return (

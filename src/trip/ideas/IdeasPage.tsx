@@ -137,7 +137,7 @@ export function IdeasPage() {
         eyebrow={needsMyVote ? `${needsMyVote} waiting for your vote` : 'Suggest · vote · agree'}
         title="Ideas"
       >
-        <Button onClick={() => setAdding(true)} className="shrink-0">
+        <Button onClick={() => setAdding(true)} className="shrink-0" data-quest="add-idea">
           <Plus className="w-4 h-4" /> Add place or link
         </Button>
       </PageHeader>

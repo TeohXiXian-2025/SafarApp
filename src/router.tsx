@@ -4,6 +4,7 @@ import { LandingPage } from './pages/LandingPage';
 import { RequireAuth } from './auth/RequireAuth';
 import { JoinPage } from './pages/JoinPage';
 import { PrivacyPage, TermsPage } from './pages/LegalPages';
+import { DemoPage } from './pages/DemoPage';
 import { LoginPage } from './pages/LoginPage';
 import { NewTripPage } from './pages/NewTripPage';
 import { SharePage } from './pages/SharePage';
@@ -21,6 +22,7 @@ import { SettingsPage } from './trip/SettingsPage';
 import { TripLayout } from './trip/TripLayout';
 import { TripHubPage } from './trip/TripHubPage';
 import { GlobalBanners } from './pwa/GlobalBanners';
+import { isStandalone } from './pwa/pwa';
 import { ConfirmHost, Spinner } from './ui';
 
 function Root() {
@@ -36,7 +38,9 @@ function Root() {
 function HomeGate() {
   const status = useAuth((st) => st.status);
   if (status === 'loading') return <Spinner />;
-  return status === 'signedIn' ? <Navigate to="/trips" replace /> : <LandingPage />;
+  if (status === 'signedIn') return <Navigate to="/trips" replace />;
+  // The installed app is for people who already use Safar: straight to sign-in, no sales page.
+  return isStandalone() ? <Navigate to="/login" replace /> : <LandingPage />;
 }
 
 // URL map (see docs/BUILD_PLAN.md). Later phases add tabs under /t/:tripId:
@@ -75,9 +79,8 @@ export const router = createBrowserRouter([
           { path: 'more', element: <TripHubPage /> },
         ],
       },
-      // The original hackathon prototype (hardcoded demo data), kept for the pitch.
-      // Loaded on demand so the live app doesn't ship the prototype's code.
-      { path: '/demo/*', lazy: async () => ({ Component: (await import('./App')).default }) },
+      // Try Safar without an account: a guest + a private copy of the demo trip (see src/trip/demo).
+      { path: '/demo', element: <DemoPage /> },
       { path: '*', element: <Navigate to="/trips" replace /> },
     ],
   },
