@@ -1,0 +1,25 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Safar preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;1,9..144,500&family=Plus+Jakarta+Sans:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #0B3B36; color: #fff; font-family: 'Plus Jakarta Sans', sans-serif; position: relative; }
+  .lattice { position: absolute; inset: 0; opacity: .55;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cg fill='none' stroke='%23C8A15A' stroke-opacity='.22'%3E%3Crect x='18' y='18' width='20' height='20'/%3E%3Crect x='18' y='18' width='20' height='20' transform='rotate(45 28 28)'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-image: radial-gradient(ellipse at 78% 45%, #000 10%, transparent 70%); }
+  .wrap { position: absolute; inset: 0; padding: 70px 80px; display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 16px; font-family: 'Fraunces', serif; font-size: 40px; font-weight: 600; }
+  h1 { font-family: 'Fraunces', serif; font-weight: 600; font-size: 76px; line-height: 1.04; margin: auto 0 0; max-width: 800px; letter-spacing: -.5px; }
+  h1 i { color: #E2C27E; font-weight: 500; }
+  .chips { display: flex; gap: 12px; margin-top: 34px; }
+  .chip { border: 1.5px solid rgba(226,194,126,.45); color: #F3E3BD; border-radius: 999px; padding: 10px 20px; font-size: 21px; font-weight: 700; }
+  .star { position: absolute; right: 90px; top: 150px; width: 250px; height: 250px; opacity: .95; }
+</style></head>
+<body>
+  <div class="lattice"></div>
+  <svg class="star" viewBox="0 0 24 24"><g fill="#C8A15A"><rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="6" y="6" width="12" height="12" rx="1.5" transform="rotate(45 12 12)"/></g><circle cx="12" cy="12" r="3.2" fill="#0B3B36"/></svg>
+  <div class="wrap">
+    <div class="brand"><svg width="48" height="48" viewBox="0 0 24 24"><g fill="#C8A15A"><rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="6" y="6" width="12" height="12" rx="1.5" transform="rotate(45 12 12)"/></g><circle cx="12" cy="12" r="3.2" fill="#0B3B36"/></svg>Safar</div>
+    <h1>Group trips where <i>everyone's</i> plan fits.</h1>
+    <div class="chips"><span class="chip">Prayer times in every day</span><span class="chip">Halal labels with sources</span><span class="chip">Fair votes &amp; split plans</span></div>
+  </div>
+</body></html>

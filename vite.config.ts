@@ -37,14 +37,14 @@ const pwa = VitePWA({
   includeAssets: ['favicon.svg', 'favicon-32.png', 'icons/apple-touch-icon.png'],
   manifest: {
     id: '/',
-    name: 'Safar — Halal Group Travel',
+    name: 'Safar — Group trips for Muslim and mixed groups',
     short_name: 'Safar',
     description: 'Plan group trips around halal food and prayer times — together.',
     lang: 'en',
     start_url: '/trips',
     scope: '/',
     display: 'standalone',
-    theme_color: '#00685F',
+    theme_color: '#0B3B36',
     background_color: '#FAF8F5',
     categories: ['travel', 'lifestyle'],
     // Android: "Share → Safar" from TikTok / Instagram / Xiaohongshu (not supported on iOS).
@@ -61,7 +61,7 @@ const pwa = VitePWA({
     importScripts: ['push-sw.js'],
     // The pitch deck is a separate page with big images — don't ship it to every phone.
     // Pitch-deck screenshots and the demo trip's sample files load on demand instead.
-    globIgnores: ['pitch.html', 'assets/pitch-*', 'assets/*.png', 'assets/*.jpg', 'images/**', 'demo-kit/**'],
+    globIgnores: ['pitch.html', 'assets/pitch-*', 'assets/*.png', 'assets/*.jpg', 'images/**', 'demo-kit/**', 'og-image.png'],
     maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
     navigateFallback: '/index.html',
     // Server routes and Firebase's auth handler must always hit the network.
