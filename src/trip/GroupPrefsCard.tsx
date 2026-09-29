@@ -13,7 +13,7 @@ export function GroupPrefsCard() {
   const money = (n: number) => `${trip.currency} ${n.toLocaleString()}`;
 
   return (
-    <Card className="p-5 space-y-4">
+    <Card className="p-5 space-y-4" reveal="group-rules">
       <div className="flex items-center justify-between gap-3">
         <h2 className="font-bold text-[#161C23]">Group preferences</h2>
         <span className="text-xs text-[#6D7A77]">

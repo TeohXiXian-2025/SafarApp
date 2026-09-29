@@ -12,8 +12,8 @@ export interface QuestInput {
   jobs: ArrangeJob[];
   expenses: Expense[];
   incidents: Incident[];
-  /** The plan's prayer breaks. */
-  prayers: ScheduleItem[];
+  /** Everything on the plan (stops, prayer breaks, booking moments). */
+  schedule: ScheduleItem[];
   /** Pages this visitor opened in this trip (for "have a look" steps). */
   seen: Set<string>;
   /** Your Document Vault has a passport (asked from the server; null = not known yet). */
@@ -53,7 +53,27 @@ export interface QuestStep {
   blocked?: (q: QuestInput) => string | null;
   /** Not part of the six (shown as a bonus). */
   bonus?: boolean;
+  /** Once done: where the result is on screen, to jump to and point at (null = not there yet). */
+  reveal?: (q: QuestInput) => Reveal | null;
 }
+
+/** "See what changed": a page (path inside the trip, with its query), the element to outline, and what to say. */
+export interface Reveal {
+  path: string;
+  /** The element's data-reveal value. */
+  target: string;
+  text: string;
+}
+
+/** The Ideas tab an idea is on. */
+const TAB: Partial<Record<Idea['status'], string>> = { voting: 'voting', backlog: 'backlog', scheduled: 'backlog', mixed: 'mixed', split_pending: 'mixed', backup: 'backup', rejected: 'rejected' };
+const ideaReveal = (i: Idea | undefined, text: string): Reveal | null => (i ? { path: `/ideas?filter=${TAB[i.status] ?? 'backlog'}`, target: `idea-${i.id}`, text } : null);
+const planReveal = (it: ScheduleItem | undefined, text: string): Reveal | null => (it ? { path: `/timeline?day=${it.day}`, target: `item-${it.id}`, text } : null);
+const clock = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+};
+const bookingOf = (it: ScheduleItem, q: QuestInput) => (it.ref.kind === 'booking' ? q.bookings.find((b) => it.ref.kind === 'booking' && b.id === it.ref.bookingId) : undefined);
 
 const isSplitPlace = (i: Idea) => i.place.name.toLowerCase().includes(DEMO_SPLIT_PLACE.toLowerCase()); // Google writes it "ICHIRAN"
 const splitIdea = (q: QuestInput) => q.ideas.find((i) => isSplitPlace(i) && !i.splitId) ?? q.ideas.find(isSplitPlace);
@@ -81,6 +101,7 @@ export const QUEST: QuestStep[] = [
     why: 'Safar merges everyone into one set of group rules — the strictest halal level for shared meals, prayer breaks only for the people who pray, the slowest pace — so nobody has to give up what they need.',
     where: '/members',
     done: (q) => q.seen.has('members'),
+    reveal: () => ({ path: '/members', target: 'group-rules', text: 'Four people, one set of rules: certified halal for shared meals (Mum’s level), prayer breaks for the three who pray, and a pace everyone can keep.' }),
   },
   {
     id: 'flight',
@@ -93,6 +114,11 @@ export const QUEST: QuestStep[] = [
     target: 'add-booking',
     files: [DEMO_KIT.flight],
     done: (q) => q.bookings.filter((b) => b.kind === 'flight').length >= 2,
+    reveal: (q) =>
+      planReveal(
+        q.schedule.find((i) => bookingOf(i, q)?.kind === 'flight' && i.ref.kind === 'booking' && i.ref.event === 'depart' && i.day === '2026-12-07'),
+        'The e-ticket is now on everyone’s plan, in each airport’s own time — with the prayers during the flight worked out: Zuhur and Asar on board, Maghrib combined after landing.',
+      ),
   },
   {
     id: 'stays',
@@ -105,6 +131,11 @@ export const QUEST: QuestStep[] = [
     target: 'add-booking',
     files: [DEMO_KIT.hotelTokyo, DEMO_KIT.train, DEMO_KIT.hotelKyoto],
     done: (q) => q.bookings.filter((b) => b.kind === 'hotel').length >= 2 && q.bookings.some((b) => b.kind === 'train'),
+    reveal: (q) => {
+      const out = q.schedule.find((i) => i.day === '2026-12-10' && i.ref.kind === 'booking' && i.ref.event === 'checkout');
+      if (!out || out.start >= '09:00') return null; // moved before the train in a moment
+      return planReveal(out, `The hotel says check-out by 11:00 — but the Shinkansen leaves at 9:00, so Safar moved check-out to ${clock(out.start)}. Thursday starts in Tokyo and is planned in Kyoto.`);
+    },
   },
   {
     id: 'passport',
@@ -117,6 +148,11 @@ export const QUEST: QuestStep[] = [
     target: 'vault-upload',
     files: [DEMO_KIT.passport],
     done: (q) => q.hasPassport === true,
+    reveal: () => ({
+      path: '/bookings?tab=documents',
+      target: 'check-passport',
+      text: 'Caught weeks before the airport: many countries want 6 months left on a passport after you travel — Aisyah’s has less. Only she sees the details.',
+    }),
   },
   {
     id: 'post',
@@ -129,6 +165,11 @@ export const QUEST: QuestStep[] = [
     target: 'add-idea',
     link: { url: DEMO_POST_URL, label: 'Instagram reel · Kyoto: Arashiyama, Kinkaku-ji, Nishiki market' },
     done: (q) => q.ideas.some((i) => i.createdBy === q.uid && ['instagram', 'tiktok', 'xiaohongshu', 'youtube', 'link', 'screenshot'].includes(i.source.type)),
+    reveal: (q) =>
+      ideaReveal(
+        q.ideas.filter((i) => i.createdBy === q.uid && ['instagram', 'tiktok', 'xiaohongshu', 'youtube', 'link', 'screenshot'].includes(i.source.type)).sort((a, b) => a.createdAt - b.createdAt)[0],
+        'From one link: each place found on the map, checked for halal, alcohol and the nearest place to pray — and the group has already voted.',
+      ),
   },
   {
     id: 'vote',
@@ -139,6 +180,7 @@ export const QUEST: QuestStep[] = [
     why: 'Votes carry reasons, and a 👍 on something that clashes with your own rules has to be confirmed. With two for and two against, Safar doesn’t just take the majority — it looks for a way everyone gets a good meal.',
     where: '/ideas?filter=voting',
     done: (q) => !!splitIdea(q)?.votes[q.uid],
+    reveal: (q) => ideaReveal(splitIdea(q), 'Two for, two against — each vote with its reason. No majority wins here: the ones not going are offered middle grounds nearby.'),
   },
   {
     id: 'split',
@@ -150,6 +192,13 @@ export const QUEST: QuestStep[] = [
     where: '/ideas?filter=mixed',
     done: (q) => !!splitIdea(q)?.decidedBy,
     blocked: noSplit,
+    reveal: (q) => {
+      const i = splitIdea(q);
+      const onPlan = i && q.schedule.find((x) => x.ref.kind === 'idea' && x.ref.ideaId === i.id && x.track.endsWith(':A'));
+      return onPlan
+        ? planReveal(onPlan, 'The split on the plan: you and Daniel at Ichiran, Mum and Farid at a halal place nearby — both meals end together and everyone meets at the same pin.')
+        : ideaReveal(i, 'Agreed as a split: you and Daniel go to Ichiran, Mum and Farid eat halal nearby, and everyone meets again after. Auto-plan puts both in the same hour.');
+    },
   },
   {
     id: 'plan',
@@ -164,6 +213,14 @@ export const QUEST: QuestStep[] = [
     where: '/timeline',
     target: 'auto-plan',
     done: (q) => q.jobs.some((j) => j.status === 'applied'),
+    reveal: (q) => {
+      const days = [...new Set(q.schedule.filter((i) => i.ref.kind === 'idea').map((i) => i.day))].sort();
+      const p = q.schedule.filter((i) => i.prayer && i.prayer.prayer !== 'Fajr' && i.day === days[0] && i.prayer.facility).sort((a, b) => a.start.localeCompare(b.start))[0];
+      return planReveal(
+        p,
+        `A prayer time, fixed like a booking: you, Mum and Farid pray at ${p?.prayer?.facility?.name ?? 'a prayer room'} on your route, with the walk counted — Daniel has free time nearby instead of waiting.`,
+      );
+    },
   },
   {
     id: 'whilePraying',
@@ -177,7 +234,13 @@ export const QUEST: QuestStep[] = [
     ],
     why: 'Mixed groups don’t stall at prayer times: the ones who pray mark places the others would enjoy, the others pick what to do — their own time, no vote — and Safar checks it fits the break and sets where everyone meets again.',
     where: '/ideas?filter=backup',
-    done: (q) => q.prayers.some((i) => !!i.prayer?.fillerPicks?.[DEMO_MATES.daniel]),
+    done: (q) => q.schedule.some((i) => !!i.prayer?.fillerPicks?.[DEMO_MATES.daniel]),
+    reveal: (q) => {
+      const p = q.schedule.find((i) => !!i.prayer?.fillerPicks?.[DEMO_MATES.daniel]);
+      const pick = p?.prayer?.fillerPicks?.[DEMO_MATES.daniel];
+      const meet = pick?.meet ? `at ${pick.meet.kind === 'prayer' ? 'the prayer place' : pick.meet.name} at ${clock(pick.meet.at)}` : 'at the same time';
+      return planReveal(p, `One prayer time, two plans: you, Mum and Farid pray at ${p?.prayer?.facility?.name ?? 'the prayer room'} while Daniel is at ${pick?.title ?? 'Tower Records'} — and everyone meets back ${meet}.`);
+    },
     blocked: (q) =>
       !q.jobs.some((j) => j.status === 'applied')
         ? 'Do “Auto-plan around five prayers” first — Daniel picks something for one of the prayer breaks on the plan.'
@@ -195,6 +258,11 @@ export const QUEST: QuestStep[] = [
     where: `/food?lat=${KYOTO_STATION.lat}&lng=${KYOTO_STATION.lng}&near=${encodeURIComponent('Kyoto Station')}`,
     target: 'radar-add',
     done: (q) => q.ideas.some((i) => i.createdBy === q.uid && i.source.type === 'radar'),
+    reveal: (q) =>
+      ideaReveal(
+        q.ideas.filter((i) => i.createdBy === q.uid && i.source.type === 'radar').sort((a, b) => b.createdAt - a.createdAt)[0],
+        'From the radar to the group: the halal level and where it comes from travel with it, so Mum can see it’s right for her before she votes.',
+      ),
   },
   {
     id: 'delay',
@@ -207,6 +275,11 @@ export const QUEST: QuestStep[] = [
     target: 'resync-train',
     files: [DEMO_KIT.delay],
     done: (q) => q.incidents.some((i) => i.status === 'applied') || q.bookings.some((b) => b.kind === 'train' && b.endLocal !== '2026-12-10T11:15'),
+    reveal: (q) => {
+      const train = q.schedule.find((i) => bookingOf(i, q)?.kind === 'train' && i.ref.kind === 'booking' && (i.ref.event === 'span' || i.ref.event === 'depart'));
+      const arrives = q.bookings.find((b) => b.kind === 'train')?.endLocal.slice(11);
+      return planReveal(train, `The train now arrives ${arrives ? clock(arrives) : 'later'} (was 11:15 AM). The rest of Thursday moved with it — prayer times and hotel check-in included — and everyone was told.`);
+    },
   },
   {
     id: 'receipt',
@@ -219,6 +292,7 @@ export const QUEST: QuestStep[] = [
     target: 'add-expense',
     files: [DEMO_KIT.receipt],
     done: (q) => q.expenses.length > 0,
+    reveal: () => ({ path: '/money', target: 'balances', text: '¥38,720 turned into ringgit and split four ways — Safar keeps the tally of who owes whom.' }),
   },
 ];
 

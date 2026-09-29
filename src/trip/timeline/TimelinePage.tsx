@@ -1443,6 +1443,7 @@ export function TimelinePage() {
                         {before && <GapSlot gap={before} titleOf={titleOf} hovered={hoverGap === before.key} onHover={setHoverGap} onPick={place} />}
                         {i > 0 && !moving && travelRow}
                         {moving && i > 0 && !after && !gaps.some((g) => g.afterId === rows[i - 1].item.id) && <div className="h-1.5" />}
+                        <div data-reveal={`item-${r.item.id}`} className="rounded-2xl">
                         {r.prayer ? (
                           <PrayerRow
                             row={r}
@@ -1484,6 +1485,7 @@ export function TimelinePage() {
                             onEdit={() => setEditing(r)}
                           />
                         )}
+                        </div>
                         {after && <GapSlot gap={after} titleOf={titleOf} hovered={hoverGap === after.key} onHover={setHoverGap} onPick={place} />}
                       </div>
                     );

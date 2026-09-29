@@ -95,8 +95,12 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} className={cx(inputClass, 'pr-8', props.className)} />;
 }
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx('bg-white rounded-2xl border border-[#E7DFD5] shadow-xs', className)}>{children}</div>;
+export function Card({ className, children, reveal }: { className?: string; children: ReactNode; /** A spot the demo guide can point at (data-reveal). */ reveal?: string }) {
+  return (
+    <div className={cx('bg-white rounded-2xl border border-[#E7DFD5] shadow-xs', className)} {...(reveal ? { 'data-reveal': reveal } : {})}>
+      {children}
+    </div>
+  );
 }
 
 export function Spinner({ label }: { label?: string }) {

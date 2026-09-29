@@ -3,7 +3,7 @@
 //   QuestPanel the guide — a floating card on laptops (the page stays usable), a sheet on phones
 //   spotlight  a pulsing ring around the button the current step needs
 import { collection, limit, orderBy, query } from 'firebase/firestore';
-import { Check, ChevronDown, ChevronRight, Copy, Download, FileText, Gamepad2, Info, Lightbulb, Link2, MapPin, PartyPopper, SkipForward, Sparkles, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy, Download, Eye, FileText, Gamepad2, Info, Lightbulb, Link2, MapPin, PartyPopper, SkipForward, Sparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ArrangeJob, Booking, DEMO_KIT, demoKitUrl, Expense, Idea, Incident, paths, ScheduleItem, type DemoFile, type Trip } from '../../domain';
@@ -12,6 +12,7 @@ import { api } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Button, cx, Sheet } from '../../ui';
 import { KeepTripSheet } from './KeepTripSheet';
+import { RevealLayer } from './RevealLayer';
 import { FEATURES, QUEST, questProgress, type QuestInput, type QuestStep } from './quest';
 
 const store = {
@@ -43,7 +44,7 @@ function useIsLaptop() {
 }
 
 /** The trip data the quest looks at (the same shared listeners the pages use). */
-function useQuestInput(trip: Trip, uid: string, currentId: string | undefined): QuestInput & { ready: boolean } {
+function useQuestInput(trip: Trip, uid: string): QuestInput & { ready: boolean } {
   const id = trip.id;
   const b = useQuery(`bookings:${id}`, () => paths.bookings(id), Booking);
   const i = useQuery(`ideas:${id}`, () => paths.ideas(id), Idea);
@@ -53,9 +54,8 @@ function useQuestInput(trip: Trip, uid: string, currentId: string | undefined): 
   // The same shared listener the Plan uses.
   const s = useQuery(`schedule:${id}`, () => paths.schedule(id), ScheduleItem);
   const [bookings, ideas, jobs, expenses, incidents] = [b.data, i.data, j.data, e.data, n.data];
-  const prayers = useMemo(() => s.data.filter((x) => x.prayer), [s.data]);
   // Everything has arrived once: only after that does a step count as "just done".
-  const ready = ![b, i, j, e, n, s].some((q) => q.loading);
+  const loaded = ![b, i, j, e, n, s].some((q) => q.loading);
   const { pathname } = useLocation();
 
   // Pages seen (for "have a look" steps), remembered on this device.
@@ -72,26 +72,30 @@ function useQuestInput(trip: Trip, uid: string, currentId: string | undefined): 
   // The vault is private (no live listener): ask while the passport step is the one being done.
   const [hasPassport, setHasPassport] = useState<boolean | null>(null);
   const onBookings = pathname.includes('/bookings');
+  // Asked once when the trip opens (so a saved passport counts after a reload), then every few
+  // seconds on Bookings until there is one.
+  const known = hasPassport !== null;
   useEffect(() => {
-    if (currentId !== 'passport' || !onBookings) return;
+    if (hasPassport || (known && !onBookings)) return;
     let stop = false;
     const check = () =>
       document.visibilityState === 'visible' &&
       api
         .post<{ docs?: { kind: string }[] }>('vault/list', {}, { tripId: id })
         .then((r) => !stop && setHasPassport(!!r.docs?.some((d) => d.kind === 'passport')))
-        .catch(() => {});
+        .catch(() => !stop && setHasPassport((v) => v ?? false));
     void check();
-    const t = setInterval(check, 7000);
+    const t = onBookings ? setInterval(check, 7000) : undefined;
     return () => {
       stop = true;
       clearInterval(t);
     };
-  }, [currentId, onBookings, id]);
+  }, [hasPassport, known, onBookings, id]);
 
+  const ready = loaded && hasPassport !== null;
   return useMemo(
-    () => ({ uid, bookings, ideas, jobs, expenses, incidents, prayers, seen, hasPassport, ready }),
-    [uid, bookings, ideas, jobs, expenses, incidents, prayers, seen, hasPassport, ready],
+    () => ({ uid, bookings, ideas, jobs, expenses, incidents, schedule: s.data, seen, hasPassport, ready }),
+    [uid, bookings, ideas, jobs, expenses, incidents, s.data, seen, hasPassport, ready],
   );
 }
 
@@ -249,14 +253,14 @@ function Finished({ onKeep, onClose }: { onKeep: () => void; onClose: () => void
   );
 }
 
-function StepList({ done, skipped, currentId, onPick }: { done: Set<string>; skipped: Set<string>; currentId?: string; onPick: (id: string) => void }) {
+function StepList({ done, skipped, currentId, onPick, onShow }: { done: Set<string>; skipped: Set<string>; currentId?: string; onPick: (id: string) => void; onShow: (id: string) => void }) {
   return (
     <ol className="space-y-1">
       {QUEST.map((s, i) => {
         const ok = done.has(s.id);
         const skip = !ok && skipped.has(s.id);
         return (
-          <li key={s.id}>
+          <li key={s.id} className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => onPick(s.id)}
@@ -273,6 +277,16 @@ function StepList({ done, skipped, currentId, onPick }: { done: Set<string>; ski
               <span className={cx('flex-1 truncate', ok ? 'text-[#6D7A77] line-through' : 'text-[#161C23] font-semibold')}>{s.title}</span>
               {skip && <span className="text-[11px] text-[#6D7A77]">skipped</span>}
             </button>
+            {ok && s.reveal && (
+              <button
+                type="button"
+                onClick={() => onShow(s.id)}
+                className="shrink-0 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11.5px] font-bold text-[#00685F] hover:bg-[#00685F]/10"
+                title="Show me again what this step changed"
+              >
+                <Eye className="w-3.5 h-3.5" /> Show
+              </button>
+            )}
           </li>
         );
       })}
@@ -302,10 +316,11 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const [kit, setKit] = useState(false);
   const [keep, setKeep] = useState(false);
   const [cheer, setCheer] = useState<string | null>(null);
+  // "See what changed": a step waiting to be shown (until any open form closes), and the one being shown.
+  const [pending, setPending] = useState<string | null>(null);
+  const [revealing, setRevealing] = useState<string | null>(null);
 
-  // Two passes: the input needs the current step (for the vault check), the step needs the input.
-  const [currentId, setCurrentId] = useState<string | undefined>();
-  const input = useQuestInput(trip, uid, currentId);
+  const input = useQuestInput(trip, uid);
   const progress = useMemo(() => questProgress(input), [input]);
   const finishedOrSkipped = (id: string) => progress.done.has(id) || skipped.has(id);
   // Steps can be done in any order: carry on after the furthest one done, then come back for any missed.
@@ -315,7 +330,6 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const nextStep =
     QUEST.find((s, i) => i > furthest && left(s) && !s.bonus) ?? QUEST.find((s) => left(s) && !s.bonus) ?? QUEST.find(left) ?? null;
   const step = (picked ? QUEST.find((s) => s.id === picked) : null) ?? nextStep;
-  useEffect(() => setCurrentId(nextStep?.id), [nextStep?.id]);
 
   // A step just got done: a short cheer, then the next one.
   const prevDone = useRef<Set<string> | null>(null);
@@ -329,10 +343,57 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
     const s = QUEST.find((x) => x.id === fresh)!;
     setCheer(s.title);
     setPicked(null);
+    if (s.reveal) {
+      // Jump to what changed; the guide comes back with the next step afterwards.
+      setPending(s.id);
+      setOpen(false);
+      return;
+    }
     setOpen(true); // show the next step
     const t = setTimeout(() => setCheer(null), 3500);
     return () => clearTimeout(t);
   }, [progress.done, input.ready]);
+
+  // Waits a moment — and for any open sheet, dialog or half-typed field to be done with — then shows it.
+  useEffect(() => {
+    if (!pending) return;
+    let t: ReturnType<typeof setTimeout>;
+    const busy = () => {
+      if (document.querySelector('[role="dialog"]:not([data-reveal-layer]), [role="alertdialog"]')) return true;
+      const a = document.activeElement;
+      return !!a && ['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName);
+    };
+    const check = () => {
+      if (busy()) {
+        t = setTimeout(check, 600);
+        return;
+      }
+      setRevealing(pending);
+      setPending(null);
+      setCheer(null);
+    };
+    // Already showing one: go straight to the new one.
+    t = setTimeout(check, revealing ? 0 : 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending]);
+
+  const stayHere = () => {
+    setPending(null);
+    setCheer(null);
+    setOpen(true);
+  };
+  const showAgain = (id: string) => {
+    setShowList(false);
+    setOpen(false);
+    setPending(null);
+    setRevealing(id);
+  };
+  const endReveal = useCallback((next: boolean) => {
+    setRevealing(null);
+    if (next) setOpen(true);
+  }, []);
+  const revealStep = revealing ? QUEST.find((s) => s.id === revealing) : undefined;
 
   const base = step?.where.split(/[?#]/)[0] ?? '';
   const onStepPage = !!step && (base ? pathname.startsWith(`/t/${trip.id}${base}`) : pathname === `/t/${trip.id}`);
@@ -381,7 +442,7 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
         </button>
         {showList && (
           <div className="mt-2">
-            <StepList done={progress.done} skipped={skipped} currentId={step?.id} onPick={(id) => (setPicked(id), setShowList(false))} />
+            <StepList done={progress.done} skipped={skipped} currentId={step?.id} onPick={(id) => (setPicked(id), setShowList(false))} onShow={showAgain} />
           </div>
         )}
       </div>
@@ -393,7 +454,7 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   return (
     <>
       {/* The demo bar (all sizes), right under the top bar. */}
-      <div className="sticky top-[calc(env(safe-area-inset-top)+3.5rem)] z-20 bg-night text-white border-b border-gold/30">
+      <div data-demo-bar className="sticky top-[calc(env(safe-area-inset-top)+3.5rem)] z-20 bg-night text-white border-b border-gold/30">
         <div className="px-3 md:px-6 py-2 flex items-center gap-2 md:gap-3">
           <button type="button" onClick={() => setOpen((o) => !o)} className="min-w-0 flex-1 flex items-center gap-2.5 text-left group" aria-expanded={open}>
             <span className="w-8 h-8 rounded-lg bg-gold text-night flex items-center justify-center shrink-0">
@@ -425,10 +486,22 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
 
       {/* A step just got done. */}
       {cheer && (
-        <div className="fixed z-50 left-1/2 -translate-x-1/2 top-[calc(env(safe-area-inset-top)+7.5rem)] anim-pop">
+        <div className="fixed z-[70] left-1/2 -translate-x-1/2 top-[calc(env(safe-area-inset-top)+7.5rem)] anim-pop">
           <div className="flex items-center gap-2.5 rounded-2xl bg-gold text-night px-4 py-2.5 shadow-[0_16px_40px_rgba(11,59,54,.35)] text-sm font-bold">
             <Sparkles className="w-4 h-4" /> Done: {cheer}
-            {nextStep && <span className="font-semibold opacity-80 hidden sm:inline">· Next: {nextStep.title}</span>}
+            {pending ? (
+              <>
+                <span className="font-semibold opacity-80 hidden sm:inline">· showing you what changed…</span>
+                <button type="button" onClick={() => showAgain(pending)} className="ml-1 rounded-lg bg-night text-white px-2.5 py-1 text-[12px] font-bold hover:bg-night-2">
+                  Show now
+                </button>
+                <button type="button" onClick={stayHere} className="rounded-lg px-2 py-1 text-[12px] font-bold hover:bg-night/10">
+                  Stay here
+                </button>
+              </>
+            ) : (
+              nextStep && <span className="font-semibold opacity-80 hidden sm:inline">· Next: {nextStep.title}</span>
+            )}
           </div>
         </div>
       )}
@@ -488,6 +561,8 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
       </Sheet>
 
       <KeepTripSheet open={keep} onClose={() => setKeep(false)} tripId={trip.id} />
+
+      {revealStep && <RevealLayer key={revealStep.id} step={revealStep} tripId={trip.id} input={input} laptop={laptop} onDone={endReveal} />}
     </>
   );
 }

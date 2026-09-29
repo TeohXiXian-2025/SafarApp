@@ -173,7 +173,7 @@ function MyChecks({ checks }: { checks: ReadyCheck[] }) {
         {sorted.map((c) => {
           const L = LEVEL[c.level];
           return (
-            <li key={c.key} className="flex gap-2.5 text-sm">
+            <li key={c.key} data-reveal={`check-${c.key}`} className="flex gap-2.5 text-sm rounded-lg">
               <L.icon className={cx('w-4 h-4 mt-0.5 shrink-0', L.cls)} />
               <span className="text-[#161C23]">
                 {c.text}

@@ -144,7 +144,7 @@ function SettleUp({ owed, nameOf, money }: { owed: Owed[]; nameOf: (uid: string)
   const mine = (p: { from: string; to: string }) => +[p.from, p.to].includes(me.uid);
   const sorted = [...pairs.values()].sort((a, b) => mine(b) - mine(a) || b.total - a.total);
   return (
-    <Card className="p-4 space-y-3">
+    <Card className="p-4 space-y-3" reveal="balances">
       <div>
         <h2 className="font-bold text-[#161C23]">Settle up</h2>
         <p className="text-xs text-[#6D7A77]">

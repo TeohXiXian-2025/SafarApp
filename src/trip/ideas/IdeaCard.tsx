@@ -159,7 +159,7 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
   const price = idea.place.priceLevel ? '$'.repeat(idea.place.priceLevel) : null;
 
   return (
-    <article className="bg-white rounded-2xl border border-[#E7DFD5] shadow-xs overflow-hidden flex flex-col">
+    <article data-reveal={`idea-${idea.id}`} className="bg-white rounded-2xl border border-[#E7DFD5] shadow-xs overflow-hidden flex flex-col">
       {/* Its photo (Google / Wikipedia / Mapillary, credited) or a map of the spot — never Google's per-view photo endpoint. */}
       <PlaceThumb photoUrl={idea.place.photoUrl} attribution={idea.place.photoAttribution} at={idea.place.location} className="h-40" />
 
