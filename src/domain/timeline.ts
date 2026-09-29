@@ -73,7 +73,9 @@ export const WALK_MAX_M = 1500;
 /** Rough door-to-door minutes before the real route is known (straight line × detour). */
 export function estimateTravelMin(a: GeoPoint, b: GeoPoint): number {
   const m = metersBetween(a, b) * 1.3;
-  return m <= WALK_MAX_M ? Math.round(m / 80) : Math.round(10 + m / 333); // walk 4.8 km/h; transit ~20 km/h + waiting
+  if (m <= WALK_MAX_M) return Math.round(m / 80); // walk 4.8 km/h
+  // Transit ~20 km/h + waiting in town; beyond 25 km an express train / highway (~80 km/h).
+  return Math.round(10 + Math.min(m, 25_000) / 333 + Math.max(0, m - 25_000) / 1333);
 }
 
 // ─── Warnings ───────────────────────────────────────────────────────────────
@@ -81,6 +83,9 @@ export function estimateTravelMin(a: GeoPoint, b: GeoPoint): number {
 /** Two timeline moments of the same journey (departs → arrives): no travel between them — you're on it. */
 export const sameJourney = (a?: Pick<ScheduleItem, 'ref'>, b?: Pick<ScheduleItem, 'ref'>) =>
   a?.ref.kind === 'booking' && b?.ref.kind === 'booking' && a.ref.bookingId === b.ref.bookingId;
+
+/** A hotel check-in / check-out: a moment you drop or pick up bags, not a stop that holds the group. */
+export const isHotelMoment = (it: Pick<ScheduleItem, 'ref'>) => it.ref.kind === 'booking' && (it.ref.event === 'checkin' || it.ref.event === 'checkout');
 
 /** Minutes kept free on top of the travel time (finding the entrance, parking, queues). */
 export const BUFFER_MIN = 10;
@@ -134,17 +139,32 @@ const warn = (itemId: string, kind: WarningKind, text: string): DayWarning => ({
  */
 export function dayWarnings(
   day: string,
-  items: (Pick<ScheduleItem, 'id' | 'start' | 'end' | 'orderIndex'> & { transitMin?: number; kind?: 'prayer' | 'side'; label?: string; locked?: boolean; checkin?: boolean; prayInside?: boolean })[],
+  items: (Pick<ScheduleItem, 'id' | 'start' | 'end' | 'orderIndex'> & {
+    transitMin?: number;
+    kind?: 'prayer' | 'side';
+    label?: string;
+    locked?: boolean;
+    checkin?: boolean;
+    /** A hotel check-in / check-out: a moment, not a stop — bags can be dropped any time, so nothing overlaps it. */
+    soft?: boolean;
+    prayInside?: boolean;
+  })[],
   hours: (id: string) => string[] | undefined,
 ): DayWarning[] {
   const out: DayWarning[] = [];
   const sorted = [...items].sort(byTime);
   const prayers = sorted.filter((i) => i.kind === 'prayer');
-  const chain = sorted.filter((i) => !i.kind);
+  const chain = sorted.filter((i) => !i.kind && !i.soft);
   for (const it of sorted) {
     if (it.kind === 'prayer') continue;
     const s = toMin(it.start);
     const e = toMin(it.end);
+    if (it.soft) {
+      // Prayer comes before the hotel: a check-in during a prayer time waits until after it.
+      const p = it.checkin && prayers.find((x) => toMin(x.start) <= s && s < toMin(x.end));
+      if (p) out.push(warn(it.id, 'checkin', `Check-in falls in ${p.label ?? 'a prayer'} (${toClock(toMin(p.start))}–${toClock(toMin(p.end))}) — pray first, then check in from ${toClock(toMin(p.end))}.`));
+      continue;
+    }
     const i = chain.indexOf(it);
     const prev = i > 0 ? chain[i - 1] : undefined;
     if (prev && s < toMin(prev.end)) out.push(warn(it.id, 'overlap', 'Overlaps the stop or booking before it.'));
@@ -221,7 +241,10 @@ export interface ChainRow {
   /** Minutes after midnight. */
   start: number;
   end: number;
+  /** Where you arrive for it. */
   loc?: GeoPoint;
+  /** Where you leave it from, when that isn't where you arrived (a train or flight ends somewhere else). */
+  out?: GeoPoint;
   /** Can't move: bookings and prayer times. */
   fixed: boolean;
   /** A prayer time (a stop may run through it — you pray during the visit — but not start inside it). */
@@ -283,7 +306,7 @@ export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) =
         cur = { ...cur, end: Math.max(cur.end, r.end) };
         continue;
       }
-      cur = { id: r.id, start: r.start, end: Math.max(r.end, r.start), loc: r.loc ?? cur?.loc, long: false, prayer: !!r.prayer };
+      cur = { id: r.id, start: r.start, end: Math.max(r.end, r.start), loc: r.out ?? r.loc ?? cur?.loc, long: false, prayer: !!r.prayer };
       if (!r.prayer) anchored = true;
       continue;
     }
@@ -314,7 +337,8 @@ export function planChain(rows: ChainRow[], travel: (a: GeoPoint, b: GeoPoint) =
             : !long && f.start < start + dur && f.end > start),
       );
       if (!hit) break;
-      start = ceil5(hit.end + (hit.prayer ? afterPrayer(move(hit.loc, r.loc)) : move(hit.loc, r.loc) + (r.loc && hit.loc ? buffer : 0)));
+      const from = hit.out ?? hit.loc;
+      start = ceil5(hit.end + (hit.prayer ? afterPrayer(move(from, r.loc)) : move(from, r.loc) + (r.loc && from ? buffer : 0)));
     }
     starts.set(r.id, start);
     if (cur) legs.set(r.id, { fromId: cur.id, minutes: leg });

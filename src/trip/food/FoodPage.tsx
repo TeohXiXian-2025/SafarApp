@@ -416,6 +416,7 @@ function FoodCard({ item: i, tripId, onUpdate }: { item: FoodItem; tripId: strin
           <Button
             variant="ghost"
             className="min-h-9"
+            data-quest="radar-add"
             loading={busy === 'add'}
             onClick={() => act('add', async () => {
               const r = await api.post<{ id: string }>('ideas/add', { placeId: i.placeId, source: { type: 'radar' } }, q);

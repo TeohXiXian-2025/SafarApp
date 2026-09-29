@@ -16,6 +16,10 @@ import {
   estimateTravelMin,
   Idea,
   metersBetween,
+  isHotelMoment,
+  PRAY_NEAR_STOP_MIN,
+  leaveBeforeMin,
+  BUFFER_MIN,
   sameJourney,
   ideaItemId,
   Member,
@@ -158,10 +162,29 @@ export const isAltOfSplit = (data: TripData, idea: Idea) => {
   return !!s && s.tracks.some((t) => t.key !== 'A' && t.ideaId === idea.id);
 };
 
+/**
+ * A stop you can pray at (A → pray → back to A): a place with prayer space on
+ * site or a few minutes away (unknown counts as yes, like AI Arrange), and a
+ * lunch / dinner — you step out to pray, then carry on with the meal.
+ */
+export function holdsPrayer(data: TripData, it: ScheduleItem): boolean {
+  if (it.ref.kind === 'custom') return !!it.ref.meal;
+  const idea = it.ref.kind === 'idea' ? data.ideas.get(it.ref.ideaId) : undefined;
+  return !!idea && praysInside(prayerWalk(idea));
+}
+
 export function prayerWalk(idea: Idea): number | undefined {
   const p = idea.halal?.prayer;
   if (!p) return undefined;
   return p.access === 'onsite' ? 0 : p.places[0]?.walkMin;
+}
+
+/** unitFor with the idea's approved split: the split's other places have to be open at the same time. */
+export function unitOf(data: TripData, idea: Idea, destinations?: Trip['destinations']): Unit {
+  const split = approvedSplit(data, idea);
+  const unit = unitFor(idea, split, destinations);
+  const also = (split?.tracks ?? []).flatMap((t) => (t.key !== 'A' && t.ideaId && t.ideaId !== idea.id ? [data.ideas.get(t.ideaId)?.place.openingHours ?? []] : [])).filter((h) => h.length);
+  return also.length ? { ...unit, alsoHours: also } : unit;
 }
 
 /** One stop for the engine; a split pair is one unit (the original place, until everyone meets again). */
@@ -288,6 +311,17 @@ const facilityType = (name: string): NonNullable<PrayerPairing['facility']>['typ
 type Facility = NonNullable<PrayerPairing['facility']>;
 
 /**
+ * Map data sometimes files a shrine, a temple or a whole city under "mosque"
+ * (e.g. 豊国廟, a Shinto mausoleum, or just "Kyoto"): not somewhere to send
+ * people to pray. A name that says mosque / prayer room always passes.
+ */
+export function isPrayerPlaceName(name: string, data: Pick<TripData, 'trip'>): boolean {
+  if (/mosque|masjid|mesjid|camii|musall?a|mushol+a|surau|pray|islam|muslim|モスク|ジャーミ|礼拝|清真|이슬람|기도/i.test(name)) return true;
+  if (/shrine|temple|church|cathedral|chapel|jinja|taisha|神社|神宮|大社|寺|院|廟|教会|聖堂/i.test(name)) return false;
+  return !data.trip.destinations.some((d) => d.name.trim().toLowerCase() === name.trim().toLowerCase());
+}
+
+/**
  * Where to pray for one break. The time is fixed; the place follows the plan:
  * the prayer space that adds the least detour between the stop before the
  * prayer and the stop after it (inside a long visit: at / next to that place).
@@ -297,12 +331,15 @@ type Facility = NonNullable<PrayerPairing['facility']>;
 async function facilityFor(data: TripData, slot: PrayerSlot, stops: ScheduleItem[], ends: Map<string, Ends>, previous: ScheduleItem[], lookups: { n: number }): Promise<Facility | undefined> {
   const before = stops.find((i) => i.id === slot.afterId);
   const inside = !!before && toMin(before.start) <= slot.start && toMin(before.end) > slot.start;
-  const after = inside ? before : stops.find((i) => toMin(i.start) >= slot.end && i.id !== before?.id);
+  // The next stop, if the group heads there soon after praying (not hours later, from the hotel).
+  const next = stops.find((i) => toMin(i.start) >= slot.end && i.id !== before?.id);
+  const after = inside ? before : next && (next.ref.kind === 'booking' || toMin(next.start) - slot.end <= PRAY_NEAR_STOP_MIN) ? next : undefined;
   const from = (before && ends.get(before.id)?.out) ?? slot.at;
   const to = after ? ends.get(after.id)?.in : undefined;
 
   const cands: Facility[] = [];
   const add = (f: Omit<Facility, 'walkMin'>) => {
+    if (!isPrayerPlaceName(f.name, data)) return;
     if (!cands.some((c) => c.name === f.name && metersBetween(c.location, f.location) < 50)) cands.push({ ...f, walkMin: 0 });
   };
   // A prayer during a long visit (theme park, festival, hike, market…): pray at the venue if at all
@@ -393,7 +430,8 @@ function prayerBasis(data: TripData, slot: PrayerSlot, stops: ScheduleItem[], ba
     const inside = toMin(before.start) <= slot.start && toMin(before.end) > slot.start;
     return { basis: kindOf(before) ?? (inside ? 'inside' : 'before'), basisName: stopName(data, before) };
   }
-  const after = stops.filter((i) => toMin(i.start) >= slot.start).sort(byTimeAndPriority)[0];
+  const next = stops.filter((i) => toMin(i.start) >= slot.start).sort(byTimeAndPriority)[0];
+  const after = next && (next.ref.kind === 'booking' || toMin(next.start) - slot.end <= PRAY_NEAR_STOP_MIN) ? next : undefined;
   if (after) return { basis: kindOf(after) ?? 'after', basisName: stopName(data, after) };
   const hotel = [...data.bookings.values()].find((b) => b.kind === 'hotel' && metersBetween(b.to.location, slot.at) < 300);
   if (hotel) return { basis: 'hotel', basisName: hotel.to.name };
@@ -441,7 +479,7 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
   };
   const { prayers } = prayerBreaks(
     frame.prayers,
-    stops.map((i) => ({ id: i.id, start: toMin(i.start), end: Math.max(toMin(i.end), toMin(i.start)), loc: ends.get(i.id)?.out, prayerWalkMin: walkOf(i) })),
+    stops.map((i) => ({ id: i.id, start: toMin(i.start), end: Math.max(toMin(i.end), toMin(i.start)), loc: ends.get(i.id)?.out, prayerWalkMin: walkOf(i), ...(i.ref.kind === 'booking' ? { anchor: true } : {}) })),
     frame.base,
     journeysOf(data, stops),
     frame.inTrip,
@@ -470,7 +508,13 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
     if (facility && !chosen && !facility.via) remember.push(facility);
     const filler = fillerFor(data, facility?.location ?? slot.at, used, onDay, slot, day);
     if (filler) used.add(filler.id);
-    const why = chosen ? { basis: 'chosen' as const, basisName: chosen.name } : prayerBasis(data, slot, stops, frame.baseKnown);
+    let why = chosen ? { basis: 'chosen' as const, basisName: chosen.name } : prayerBasis(data, slot, stops, frame.baseKnown);
+    // Picked on the way to the next stop, right by it: say so ("near the next stop"), not "near the stop before".
+    const next = stops.find((i) => toMin(i.start) >= slot.end && !i.locked);
+    const nextAt = next && ends.get(next.id)?.in;
+    if (facility && why.basis === 'before' && nextAt && metersBetween(facility.location, nextAt) < metersBetween(facility.location, slot.at)) {
+      why = { basis: 'after', basisName: stopName(data, next) };
+    }
     writes.set(
       id,
       ScheduleItem.parse({
@@ -515,11 +559,14 @@ export async function refreshPrayers(tripId: string, day: string, data: TripData
 
 // ─── Travel legs ────────────────────────────────────────────────────────────
 
+/** Two places, ~10 m apart at most, as one key. */
+const legPair = (a: GeoPoint, b: GeoPoint) => [a.lat, a.lng, b.lat, b.lng].map((x) => x.toFixed(4)).join(',');
+
 /**
  * The travel leg into each block of a day (stops and prayer places), from
  * the block before it. Track-B stops are skipped (the group continues from
- * where it meets again). A leg is reused while it starts from the same block
- * and is under 30 days old; Routes results are cached per pair of places.
+ * where it meets again). A leg is reused while it runs between the same two
+ * places and is under 30 days old; Routes results are cached per pair of places.
  */
 export async function refreshLegs(tripId: string, day: string, data: TripData) {
   const all = (await dayItems(tripId, day)).sort(byTimeAndPriority);
@@ -548,7 +595,7 @@ export async function refreshLegs(tripId: string, day: string, data: TripData) {
       }
       continue;
     }
-    if (leg && leg.fromId === prev.id && leg.at && Date.now() - leg.at < LEG_TTL) continue;
+    if (leg && leg.fromId === prev.id && leg.pair === legPair(a, b) && leg.at && Date.now() - leg.at < LEG_TTL) continue;
     if (calls++ >= MAX_NEW_LEGS) break;
     todo.push({ id: it.id, fromId: prev.id, a, b });
   }
@@ -557,7 +604,7 @@ export async function refreshLegs(tripId: string, day: string, data: TripData) {
     await Promise.all(
       todo.slice(k, k + 6).map(async (t) => {
         const fresh = await cachedLeg(t.a, t.b).catch(() => null);
-        batch.update(itemRef(tripId, t.id), { transitFromPrev: fresh ? { ...fresh, fromId: t.fromId, at: Date.now() } : FieldValue.delete() });
+        batch.update(itemRef(tripId, t.id), { transitFromPrev: fresh ? { ...fresh, fromId: t.fromId, pair: legPair(t.a, t.b), at: Date.now() } : FieldValue.delete() });
         writes++;
       }),
     );
@@ -587,7 +634,9 @@ export function dayChain(data: TripData, items: ScheduleItem[]): { rows: ChainRo
       ...(isPrayerItem(it) ? { prayer: true } : {}),
       ...(it.ref.kind === 'booking' && (it.ref.event === 'checkin' || it.ref.event === 'checkout') ? { soft: true } : {}),
       ...((it.prayer?.facility?.location ?? ends.get(it.id)?.in) ? { loc: it.prayer?.facility?.location ?? ends.get(it.id)!.in } : {}),
-      ...(idea && praysInside(prayerWalk(idea)) ? { prayInside: true } : {}),
+      // A train or flight: you leave it at the other end.
+      ...(!it.prayer && ends.get(it.id) && metersBetween(ends.get(it.id)!.in, ends.get(it.id)!.out) > 0 ? { out: ends.get(it.id)!.out } : {}),
+      ...(holdsPrayer(data, it) ? { prayInside: true } : {}),
     };
   });
   // Measured legs by the pair of places (several blocks can share a place — e.g. every prayer at one mosque).
@@ -648,12 +697,45 @@ export async function retimeDay(tripId: string, day: string, data: TripData): Pr
 }
 
 /**
+ * A hotel's check-out time is the latest you can leave. On a day you leave
+ * town earlier (a train or flight from somewhere else), you check out before
+ * heading to the station: departure − time to be there early − the trip there
+ * − a buffer. Otherwise it's the hotel's time. Idempotent.
+ */
+export async function alignCheckouts(tripId: string, day: string, data: TripData) {
+  const items = await dayItems(tripId, day);
+  const batch = adminDb().batch();
+  let writes = 0;
+  for (const it of items) {
+    if (it.ref.kind !== 'booking' || it.ref.event !== 'checkout') continue;
+    const hotel = data.bookings.get(it.ref.bookingId);
+    if (!hotel || hotel.endLocal.slice(0, 10) !== day) continue;
+    const latest = toMin(hotel.endLocal.slice(11));
+    const guests = new Set(hotel.travellerUids);
+    let at = latest;
+    for (const j of items) {
+      if (j.ref.kind !== 'booking' || (j.ref.event !== 'depart' && j.ref.event !== 'span')) continue;
+      const b = data.bookings.get(j.ref.bookingId);
+      if (!b || b.kind === 'hotel' || !b.travellerUids.some((u) => guests.has(u)) || toMin(j.start) > latest) continue;
+      const station = b.from?.location ?? b.to.location;
+      at = Math.min(at, Math.floor((toMin(j.start) - leaveBeforeMin(b.kind) - estimateTravelMin(hotel.to.location, station) - BUFFER_MIN) / 5) * 5);
+    }
+    at = Math.max(0, at);
+    if (toMin(it.start) === at) continue;
+    batch.update(itemRef(tripId, it.id), { start: toClock(at), end: toClock(at), updatedAt: Date.now() });
+    writes++;
+  }
+  if (writes) await batch.commit();
+}
+
+/**
  * After any change to a day: prayer breaks (they don't move stops), travel
  * legs, then stops that can't be reached in time move later (and the prayer
  * places / legs follow once more).
  */
 export async function refreshDay(tripId: string, day: string, data?: TripData) {
   const d = data ?? (await loadTripData(tripId));
+  await alignCheckouts(tripId, day, d);
   await refreshPrayers(tripId, day, d);
   await refreshLegs(tripId, day, d);
   if (await retimeDay(tripId, day, d)) {
@@ -676,7 +758,7 @@ export async function refreshDaysQuietly(tripId: string, days: Iterable<string>)
 
 /** The same 🔴 / 🟡 problems the timeline shows for a day. */
 export function dayProblems(data: TripData, day: string, items: ScheduleItem[]) {
-  const chain = items.filter((i) => !isPrayerItem(i) && !isTrackB(i)).sort(byTimeAndPriority);
+  const chain = items.filter((i) => !isPrayerItem(i) && !isTrackB(i) && !isHotelMoment(i)).sort(byTimeAndPriority);
   const ends = itemEnds(data, chain);
   const ideaOf = (i: ScheduleItem) => (i.ref.kind === 'idea' ? data.ideas.get(i.ref.ideaId) : undefined);
   return dayWarnings(
@@ -689,11 +771,14 @@ export function dayProblems(data: TripData, day: string, items: ScheduleItem[]) 
       const a = prev && ends.get(prev.id)?.out;
       const b = ends.get(it.id)?.in;
       const checkin = it.ref.kind === 'booking' && it.ref.event === 'checkin';
-      const idea = ideaOf(it);
-      const inside = idea && praysInside(prayerWalk(idea)) ? { prayInside: true } : {};
-      if (sameJourney(prev, it)) return { ...it, checkin, ...inside };
-      const known = it.transitFromPrev?.fromId === prev?.id ? it.transitFromPrev?.minutes : undefined;
-      return { ...it, checkin, ...inside, transitMin: known ?? (a && b ? estimateTravelMin(a, b) : undefined) };
+      const inside = holdsPrayer(data, it) ? { prayInside: true } : {};
+      const soft = isHotelMoment(it) ? { soft: true } : {};
+      if (sameJourney(prev, it)) return { ...it, checkin, ...inside, ...soft };
+      const leg = it.transitFromPrev;
+      // The measured trip from the stop before — or from a prayer place between the two.
+      const viaPrayer = !!leg && !!prev && items.some((p) => isPrayerItem(p) && p.id === leg.fromId && p.start >= prev.end && p.end <= it.start);
+      const known = leg && (leg.fromId === prev?.id || viaPrayer) ? leg.minutes : undefined;
+      return { ...it, checkin, ...inside, ...soft, transitMin: known ?? (a && b ? estimateTravelMin(a, b) : undefined) };
     }),
     (id) => {
       const it = items.find((i) => i.id === id);
@@ -720,7 +805,7 @@ export function planFixDay(data: TripData, day: string, items: ScheduleItem[]): 
   const ends = itemEnds(data, items);
   const units: Unit[] = movable.flatMap((it) => {
     const idea = it.ref.kind === 'idea' ? data.ideas.get(it.ref.ideaId) : undefined;
-    if (idea) return [{ ...unitFor(idea, approvedSplit(data, idea)), id: it.id, loc: ends.get(it.id)?.in ?? idea.place.location }];
+    if (idea) return [{ ...unitOf(data, idea), id: it.id, loc: ends.get(it.id)?.in ?? idea.place.location }];
     // A lunch / dinner stop stays within its meal time.
     if (it.ref.kind === 'custom' && it.ref.meal && it.ref.place) {
       return [{ id: it.id, loc: it.ref.place.location, duration: Math.max(30, toMin(it.end) - toMin(it.start)), food: true, window: MEAL_WINDOW[it.ref.meal] }];

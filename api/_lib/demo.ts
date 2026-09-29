@@ -1,8 +1,9 @@
 // The demo trip (see src/domain/demo.ts).
 //
 //   startDemo()        a guest account + a fresh copy of the template trip
-//   matesReact()       the travel mates vote and pick middle grounds, through
-//                      the same routes (and rules) as people
+//   matesReact()       the travel mates vote and pick middle grounds — and Daniel,
+//                      who doesn't pray, picks something to do during a prayer
+//                      break — through the same routes (and rules) as people
 //   buildTemplate()    (re)builds the template trip, all through those routes
 //   deleteExpired()    demo trips (and guest accounts) older than DEMO_TTL_MS
 import { randomBytes } from 'node:crypto';
@@ -14,6 +15,9 @@ import {
   DEMO_TTL_MS,
   Idea,
   isDemoMate,
+  goodForWhilePraying,
+  metersBetween,
+  ScheduleItem,
   type GeoPoint,
   nonGoers,
   paths,
@@ -56,6 +60,8 @@ interface Persona {
   cantEat: string;
   /** 👍 despite a smaller concern (e.g. alcohol sold at a market). */
   okAnyway: string;
+  /** 👎 on Daniel's record-shop idea. */
+  notForMe: string;
 }
 
 const PERSONAS: Persona[] = [
@@ -65,6 +71,7 @@ const PERSONAS: Persona[] = [
     prefs: { halalRequired: true, halalTier: 'certified', prayerReminders: true, pace: 'moderate', interests: ['temples', 'gardens', 'mosques'], hotelPriorities: ['prayer_space_nearby', 'halal_food_nearby'], dailyBudget: 250, hotelBudget: { min: 250, max: 600 } },
     cantEat: 'Mak only eats at certified halal places — this one serves pork.',
     okAnyway: "I'll come along and only eat at the halal places.",
+    notForMe: 'Not for me — Daniel can go while we pray.',
   },
   {
     uid: DEMO_MATES.farid,
@@ -72,6 +79,7 @@ const PERSONAS: Persona[] = [
     prefs: { halalRequired: true, halalTier: 'muslim_owned', prayerReminders: true, pace: 'fast', interests: ['anime', 'museums', 'views'], hotelPriorities: ['near_transit'], dailyBudget: 300, hotelBudget: { min: 200, max: 700 } },
     cantEat: 'Pork broth — not halal for me.',
     okAnyway: "Fine for me, I'll skip anything not halal.",
+    notForMe: "Not my thing — I'd rather pray at the mosque.",
   },
   {
     uid: DEMO_MATES.daniel,
@@ -79,6 +87,7 @@ const PERSONAS: Persona[] = [
     prefs: { halalRequired: false, halalTier: 'certified', prayerReminders: false, pace: 'fast', interests: ['ramen', 'views', 'nightlife'], hotelPriorities: ['near_transit', 'rating_first'], dailyBudget: 350, hotelBudget: { min: 200, max: 700 } },
     cantEat: 'Not for me.',
     okAnyway: 'Sounds good to me!',
+    notForMe: 'Not for me.',
   },
 ];
 const PLAYER_PREFS: MemberPrefs = { halalRequired: true, halalTier: 'muslim_owned', prayerReminders: true, pace: 'moderate', interests: ['food', 'temples', 'photography'], hotelPriorities: ['near_transit', 'halal_food_nearby'], dailyBudget: 300, hotelBudget: { min: 250, max: 700 } };
@@ -97,11 +106,42 @@ async function voteAs(p: Persona, tripId: string, idea: Idea): Promise<string> {
   return `409 ${conflicts.map((c) => `${c.kind}/${c.severity}`).join(',')} → ${offLimits ? '👎' : '👍'}`;
 }
 
+/** How far a prayer place may be from an idea for Daniel to try it for that break (the pick route checks the real fit). */
+const WHILE_PRAYING_M = 1500;
+
+/**
+ * Daniel doesn't pray: when someone who does marks an idea "good for the
+ * others while we pray", he picks it for a prayer break near it (the first
+ * one it fits, through prayer/pick — same rules as a person). One pick per
+ * marked idea; his own picks are never changed.
+ */
+async function danielWhilePraying(tripId: string, ideas: Idea[]): Promise<void> {
+  const daniel = DEMO_MATES.daniel;
+  const marked = ideas.filter((i) => i.goodWhilePraying.some((u) => u !== daniel) && goodForWhilePraying(i, [daniel]));
+  if (!marked.length) return;
+  const items = (await adminDb().collection(paths.schedule(tripId)).get()).docs.flatMap((d) => {
+    const r = ScheduleItem.safeParse(d.data());
+    return r.success && r.data.prayer && r.data.prayer.prayer !== 'Fajr' ? [r.data] : [];
+  });
+  const picked = new Set(items.flatMap((i) => (i.prayer?.fillerPicks?.[daniel]?.kind === 'idea' ? [i.prayer.fillerPicks[daniel].ideaId] : [])));
+  for (const idea of marked.filter((i) => !picked.has(i.id))) {
+    const near = items
+      .filter((i) => !i.prayer?.fillerPicks?.[daniel] && i.ref.kind === 'custom' && i.ref.place && metersBetween(i.ref.place.location, idea.place.location) <= WHILE_PRAYING_M)
+      .sort((a, b) => (a.day + a.start).localeCompare(b.day + b.start));
+    for (const it of near) {
+      await sleep(1200);
+      const r = await callAs(daniel, 'prayer/pick', { itemId: it.id, pick: { kind: 'idea', ideaId: idea.id } }, tripId);
+      if (r.status === 200) break;
+    }
+  }
+}
+
 /**
  * After the visitor does something on a demo trip: every mate who still has
- * to vote does (once the place's halal check is back), and every mate not
- * going to a split idea picks a middle ground (a halal alternative if there
- * is one). Safe to run any number of times.
+ * to vote does (once the place's halal check is back), every mate not going
+ * to a split idea picks a middle ground (a halal alternative if there is
+ * one), and Daniel picks an idea marked for him for a prayer break. Safe to
+ * run any number of times.
  */
 export async function matesReact(tripId: string): Promise<void> {
   const db = adminDb();
@@ -127,6 +167,7 @@ export async function matesReact(tripId: string): Promise<void> {
       }
     }
   }
+  if (memberIds.includes(DEMO_MATES.daniel)) await danielWhilePraying(tripId, ideaSnap.docs.flatMap((d) => (Idea.safeParse(d.data()).success ? [Idea.parse(d.data())] : [])));
 }
 
 // ── A visitor's own copy ──────────────────────────────────────────────────
@@ -226,7 +267,7 @@ export async function deleteExpired(now = Date.now()): Promise<number> {
  * `name`/`at` are used only when Google won't answer (daily limit): the place
  * then comes from the backup sources, still under its Google key.
  */
-const TEMPLATE_IDEAS: { q: string; name: string; at: GeoPoint; placeId?: string; near: 'tokyo' | 'kyoto'; by: string; agreed: boolean }[] = [
+const TEMPLATE_IDEAS: { q: string; name: string; at: GeoPoint; placeId?: string; near: 'tokyo' | 'kyoto'; by: string; agreed: boolean; reserve?: boolean }[] = [
   { q: 'Senso-ji Temple Asakusa', name: 'Sensō-ji', at: { lat: 35.7134, lng: 139.79553 }, placeId: 'ChIJ8T1GpMGOGGARDYGSgpooDWw', near: 'tokyo', by: DEMO_MATES.aminah, agreed: true },
   { q: 'teamLab Planets TOKYO', name: 'teamLab Planets TOKYO', at: { lat: 35.64938, lng: 139.78973 }, placeId: 'ChIJSeco5wiJGGARItbTS8lQ5G0', near: 'tokyo', by: DEMO_MATES.farid, agreed: true },
   { q: 'Tokyo Camii & Diyanet Turkish Culture Center', name: 'Tokyo Camii', at: { lat: 35.66817, lng: 139.67655 }, placeId: 'ChIJFUO-WUfzGGARhzhX4px1Jsc', near: 'tokyo', by: DEMO_MATES.aminah, agreed: true },
@@ -234,6 +275,8 @@ const TEMPLATE_IDEAS: { q: string; name: string; at: GeoPoint; placeId?: string;
   { q: 'Halal Wagyu Yakiniku Panga Asakusa', name: 'Halal Wagyu Yakiniku Panga', at: { lat: 35.70485, lng: 139.781 }, placeId: 'ChIJdzczsDuPGGARHhw2tyh5Dt0', near: 'tokyo', by: TEMPLATE_PLAYER, agreed: true },
   { q: 'Fushimi Inari Taisha', name: 'Fushimi Inari Taisha', at: { lat: 34.96752, lng: 135.77971 }, placeId: 'ChIJIW0uPRUPAWAR6eI6dRzKGns', near: 'kyoto', by: DEMO_MATES.farid, agreed: true },
   { q: 'Kiyomizu-dera', name: 'Kiyomizu-dera', at: { lat: 34.9943, lng: 135.78444 }, placeId: 'ChIJB_vchdMIAWARujTEUIZlr2I', near: 'kyoto', by: DEMO_MATES.aminah, agreed: true },
+  // Daniel's pick nobody else wanted: in the Reserve — for him while the others pray.
+  { q: 'Tower Records Shibuya', name: 'Tower Records Shibuya', at: { lat: 35.66163, lng: 139.70103 }, near: 'tokyo', by: DEMO_MATES.daniel, agreed: false, reserve: true },
   // Daniel's pick: the others can't eat there — waiting for the visitor's vote.
   { q: 'Ichiran Shibuya', name: 'Ichiran Shibuya', at: { lat: 35.66113, lng: 139.70099 }, placeId: 'ChIJOWucdKiMGGARbppa4b4CKA8', near: 'tokyo', by: DEMO_MATES.daniel, agreed: false },
 ];
@@ -281,17 +324,30 @@ async function fillTemplate(tripId: string, people: { uid: string; prefs: Member
   }
   for (const p of people) await db.doc(paths.member(tripId, p.uid)).update({ prefs: p.prefs });
 
-  const player: Persona = { uid: TEMPLATE_PLAYER, name: DEMO_PLAYER, prefs: PLAYER_PREFS, cantEat: 'Not halal for me.', okAnyway: "I'll only eat at the halal places." };
+  const player: Persona = { uid: TEMPLATE_PLAYER, name: DEMO_PLAYER, prefs: PLAYER_PREFS, cantEat: 'Not halal for me.', okAnyway: "I'll only eat at the halal places.", notForMe: 'Not for me — but good for Daniel while we pray.' };
   let ideas = 0;
   for (const t of TEMPLATE_IDEAS) {
     const placeId = t.placeId ?? (await searchPlace(t.q, t.near === 'tokyo' ? TOKYO : KYOTO))?.placeId;
-    if (!placeId) throw new HttpError(502, `Not found on the map: ${t.q} (Google's daily search limit may be used up — try after it resets)`);
-    if (!t.placeId) log(`  ${t.q} → placeId ${placeId}`);
-    const added = await callAs(t.by, 'ideas/add', { placeId, place: { name: t.name, location: t.at } }, tripId);
+    // The Reserve idea needs no halal check: without Google it's added by name and map point (backup sources).
+    if (!placeId && !t.reserve) throw new HttpError(502, `Not found on the map: ${t.q} (Google's daily search limit may be used up — try after it resets)`);
+    if (!t.placeId) log(`  ${t.q} → ${placeId ? `placeId ${placeId}` : 'no Google place — added by name and map point'}`);
+    const added = await callAs(t.by, 'ideas/add', { ...(placeId ? { placeId } : {}), place: { name: t.name, location: t.at } }, tripId);
     if (added.status >= 300) throw new HttpError(502, `ideas/add ${t.q}: ${JSON.stringify(added.body)}`);
     const ideaId = added.body.id as string;
     await callAs(t.by, 'ideas/analyze', { ideaId }, tripId);
     const idea = Idea.parse((await db.doc(`${paths.ideas(tripId)}/${ideaId}`).get()).data());
+    if (t.reserve) {
+      // Only Daniel wants it: 1 for, 3 against → the Reserve.
+      for (const p of [player, ...PERSONAS]) {
+        const up = p.uid === DEMO_MATES.daniel;
+        await callAs(p.uid, 'ideas/vote', up ? { ideaId, value: 1 } : { ideaId, value: -1, tag: 'not_interested', reason: p.notForMe }, tripId);
+      }
+      const after = Idea.parse((await db.doc(`${paths.ideas(tripId)}/${ideaId}`).get()).data());
+      if (after.status !== 'backup') throw new HttpError(502, `${after.place.name}: expected the Reserve, got ${after.status}`);
+      log(`  ${after.place.name}: ${after.status}`);
+      ideas++;
+      continue;
+    }
     // Everyone agreed (the player too); Ichiran waits for the player, the mates vote as themselves.
     for (const p of t.agreed ? [player, ...PERSONAS] : PERSONAS) {
       if (t.agreed) {

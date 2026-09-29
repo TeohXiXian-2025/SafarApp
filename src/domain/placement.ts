@@ -183,7 +183,8 @@ export function placeAt(day: string, rows: ChainRow[], cand: Candidate, want: nu
 
 /** How long it takes to get from one block to the next (prayer blocks already include a short walk). */
 function need(prev: ChainRow, loc: GeoPoint | undefined, travel: Travel) {
-  const leg = prev.loc && loc ? travel(prev.loc, loc) : 0;
+  const from = prev.out ?? prev.loc;
+  const leg = from && loc ? travel(from, loc) : 0;
   return prev.prayer ? leg : leg + (leg > 0 ? BUFFER_MIN : 0);
 }
 

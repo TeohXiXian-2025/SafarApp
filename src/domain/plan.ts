@@ -120,6 +120,8 @@ export const TransitLeg = z.object({
   source: z.enum(['google', 'ors']).optional(),
   /** The item this leg starts from — recomputed only when that changes (or after 30 days). */
   fromId: Id.optional(),
+  /** The two places it was measured between (a prayer break keeps its id when its place changes). */
+  pair: z.string().max(80).optional(),
   at: Millis.optional(),
 });
 export type TransitLeg = z.infer<typeof TransitLeg>;

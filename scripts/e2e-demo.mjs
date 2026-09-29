@@ -79,7 +79,7 @@ try {
   const ichiran = ideas0.find((i) => /ichiran/i.test(i.place.name));
   assert.equal(ichiran?.status, 'voting');
   assert.ok(ichiran.votingEndsAt > Date.now(), 'the vote is open (times moved to now)');
-  ok(`guest ${guest} + own copy ${tripId}: 4 people, ${ideas0.length} ideas, Ichiran waiting for Aisyah's vote`);
+  ok(`guest ${guest} + own copy ${tripId}: 4 people, ${ideas0.length} ideas (Tower Records in the Reserve), Ichiran waiting for Aisyah's vote`);
 
   // ── Bookings: flight e-ticket, two hotels, the Shinkansen ─────────────────
   const addBooking = async (file) => {
@@ -112,9 +112,8 @@ try {
   assert.equal(train.endLocal, '2026-12-10T11:15');
   ok('2 hotels + Nozomi 21 (09:00→11:15) saved as fixed times');
 
-  // ── The Instagram post → ideas; the mates vote ────────────────────────────
-  const post = await upload('05-instagram-Kyoto-post.png', 'ideas');
-  const imported = await call('ideas/import', { storagePaths: [post] });
+  // ── The Instagram reel (a real link) → ideas; the mates vote ─────────────
+  const imported = await call('ideas/import', { url: 'https://www.instagram.com/morgane_bblt/reel/C7bkjq_xL5M/?igsh=demo' });
   assert.equal(imported.status, 200, JSON.stringify(imported.body));
   const found = imported.body.candidates.map((c) => c.place.name);
   if (!found.length) console.log('  import:', JSON.stringify(imported.body).slice(0, 1500));
@@ -136,7 +135,8 @@ try {
     const up = await call('ideas/vote', { ideaId: id, value: 1 });
     if (up.status === 409) await call('ideas/vote', { ideaId: id, value: 1, ack: "I'll only eat at the halal stalls." });
   }
-  ok(`post → ${found.join(', ')}; the mates voted: ${voted.map((i) => `${i.place.name} ${Object.values(i.votes).map((v) => (v.value > 0 ? '👍' : '👎')).join('')}`).join(' · ')}`);
+  assert.equal(imported.body.source.type, 'instagram');
+  ok(`reel → ${found.join(', ')}; the mates voted: ${voted.map((i) => `${i.place.name} ${Object.values(i.votes).map((v) => (v.value > 0 ? '👍' : '👎')).join('')}`).join(' · ')}`);
 
   // ── Ichiran: vote, split, decide ─────────────────────────────────────────
   // Aisyah keeps Daniel company: a 👍 despite the conflict has to be confirmed.
@@ -169,6 +169,20 @@ try {
   console.log('     unplaced:', plan.unplaced.map((u) => `${names[u.ideaId]} (${u.reason})`).join(', '));
   plan.days.forEach((d) => d.note && console.log(`     ${d.day}: ${d.note}`));
   ok(`auto-plan applied: ${plan.days.map((d) => `${d.day.slice(8)}: ${d.stops.length} stops${d.prayers.length ? ` + ${d.prayers.length} prayers` : ''}`).join(' | ')}; unplaced ${plan.unplaced.length}`);
+
+  // ── While the others pray: Daniel picks the record shop Aisyah marked ────
+  const tower = (await db.collection(`trips/${tripId}/ideas`).get()).docs.map((d) => d.data()).find((i) => /tower records/i.test(i.place.name));
+  assert.equal(tower?.status, 'backup', 'Tower Records waits in the Reserve');
+  assert.equal((await call('ideas/while-praying', { ideaId: tower.id, on: true })).status, 200);
+  const breakWithPick = await until(
+    'Daniel to pick Tower Records for a prayer break',
+    async () => (await db.collection(`trips/${tripId}/schedule`).get()).docs.map((d) => d.data()).find((i) => i.prayer?.fillerPicks?.['safar-demo-daniel']),
+    (x) => !!x,
+    90000,
+  );
+  const dPick = breakWithPick.prayer.fillerPicks['safar-demo-daniel'];
+  assert.equal(dPick.ideaId, tower.id);
+  ok(`${breakWithPick.day} ${breakWithPick.prayer.prayer} ${breakWithPick.start}: you, Mum and Farid pray at ${breakWithPick.prayer.facility?.name ?? 'the prayer spot'} · Daniel → ${dPick.title}${dPick.meet ? `, meets back ${dPick.meet.kind === 'prayer' ? 'at the prayer place' : `at ${dPick.meet.name}`} ${dPick.meet.at}` : ''}`);
 
   // ── Passport ─────────────────────────────────────────────────────────────
   assert.equal((await call('vault/consent', { share: false })).status, 200);
@@ -207,6 +221,18 @@ try {
   const trainAfter = (await db.doc(`trips/${tripId}/bookings/${train.id}`).get()).data();
   assert.equal(trainAfter.endLocal, '2026-12-10T12:45');
   ok(`delay message read (${delay.body.startLocal} → ${delay.body.endLocal}) and applied: the train now arrives 12:45`);
+  // The day follows the train: after the re-plan settles, every stop that day is after arriving and before midnight.
+  const dec10 = await until(
+    'Thursday to be re-planned',
+    async () => (await db.collection(`trips/${tripId}/schedule`).where('day', '==', '2026-12-10').get()).docs.map((d) => d.data()),
+    (items) => items.filter((i) => i.ref.kind === 'idea' || i.ref.meal).every((i) => i.start >= '12:45'),
+    60000,
+  );
+  const stops = dec10.filter((i) => i.ref.kind === 'idea' || i.ref.meal).sort((a, b) => a.start.localeCompare(b.start));
+  assert.ok(stops.every((i) => i.end > i.start), `a stop runs past midnight: ${JSON.stringify(stops.map((i) => [i.start, i.end]))}`);
+  const checkout = dec10.find((i) => i.ref.event === 'checkout');
+  assert.ok(!checkout || checkout.start < '09:00', `check-out ${checkout?.start} is after the 09:00 train`);
+  ok(`Thursday after the delay: check-out ${checkout?.start ?? '—'}, ${stops.map((i) => `${i.start}–${i.end}`).join(', ') || 'no stops'}`);
 
   console.log(`\n${passed} checks passed.\n`);
 } catch (err) {

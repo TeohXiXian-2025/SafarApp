@@ -126,31 +126,6 @@ export const DEMO_ANSWERS: Record<string, unknown> = {
     ],
     "confidence": 1
   },
-  "799a647a8c566817:1fcf0a9f44baa9dad45c1b57bc9644f5ab69f6a133130581962787254078deeb": {
-    "places": [
-      {
-        "name": "Kinkaku-ji",
-        "area": "Kyoto",
-        "city": "Kyoto",
-        "country": "Japan",
-        "what": "Golden Pavilion, magical if it snows"
-      },
-      {
-        "name": "Nishiki Market",
-        "area": "Kyoto",
-        "city": "Kyoto",
-        "country": "Japan",
-        "what": "Halal-certified stalls"
-      },
-      {
-        "name": "Arashiyama Bamboo Grove",
-        "area": "Arashiyama",
-        "city": "Kyoto",
-        "country": "Japan",
-        "what": "Scenic bamboo grove for photos"
-      }
-    ]
-  },
   "67941d944b08a0ff:7b9530099bbb37c81ed752ce2b7fccdfcc3f7b1c3b1fc0b9b0807f0676997e09": {
     "title": "HALAL WAGYU YAKINIKU PANGA",
     "total": 38720,

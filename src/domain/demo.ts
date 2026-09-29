@@ -35,11 +35,16 @@ export const DEMO_KIT: Record<string, DemoFile> = {
   hotelTokyo: { file: '02-hotel-Richmond-Asakusa.pdf', label: 'Tokyo hotel', what: 'Richmond Asakusa, 7–10 Dec' },
   train: { file: '03-shinkansen-Nozomi-21.png', label: 'Shinkansen ticket', what: 'Nozomi 21 Tokyo → Kyoto, 10 Dec' },
   hotelKyoto: { file: '04-hotel-Granvia-Kyoto.pdf', label: 'Kyoto hotel', what: 'Hotel Granvia Kyoto, 10–13 Dec' },
-  post: { file: '05-instagram-Kyoto-post.png', label: 'Instagram post', what: '3 Kyoto must-sees' },
   passport: { file: '06-passport-SPECIMEN-Aisyah.png', label: 'Passport (specimen)', what: "Aisyah's passport" },
   receipt: { file: '07-receipt-Panga-dinner.png', label: 'Dinner receipt', what: 'Halal wagyu dinner, ¥38,720' },
   delay: { file: '08-train-delay-notice.png', label: 'Delay message', what: 'Nozomi 21 running 90 min late' },
 };
+/**
+ * The Instagram reel Farid shares in the quest — a real public post
+ * (Arashiyama, Kinkaku-ji, Nishiki Market). Pasted as a link into Ideas.
+ */
+export const DEMO_POST_URL = 'https://www.instagram.com/morgane_bblt/reel/C7bkjq_xL5M/';
+
 export const demoKitUrl = (f: DemoFile) => `/demo-kit/${f.file}`;
 
 /** The idea already waiting for the visitor's vote (Daniel's pick; the others can't eat there). */

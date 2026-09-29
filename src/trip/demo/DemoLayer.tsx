@@ -3,16 +3,16 @@
 //   QuestPanel the guide — a floating card on laptops (the page stays usable), a sheet on phones
 //   spotlight  a pulsing ring around the button the current step needs
 import { collection, limit, orderBy, query } from 'firebase/firestore';
-import { Check, ChevronDown, ChevronRight, Download, FileText, Gamepad2, Lightbulb, MapPin, PartyPopper, SkipForward, Sparkles, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy, Download, FileText, Gamepad2, Info, Lightbulb, Link2, MapPin, PartyPopper, SkipForward, Sparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { ArrangeJob, Booking, DEMO_KIT, demoKitUrl, Expense, Idea, Incident, paths, type DemoFile, type Trip } from '../../domain';
+import { ArrangeJob, Booking, DEMO_KIT, demoKitUrl, Expense, Idea, Incident, paths, ScheduleItem, type DemoFile, type Trip } from '../../domain';
 import { db } from '../../firebase/config';
 import { api } from '../../lib/api';
 import { useQuery } from '../../lib/firestore';
 import { Button, cx, Sheet } from '../../ui';
 import { KeepTripSheet } from './KeepTripSheet';
-import { QUEST, questProgress, type QuestInput, type QuestStep } from './quest';
+import { FEATURES, QUEST, questProgress, type QuestInput, type QuestStep } from './quest';
 
 const store = {
   get: (k: string): string[] => {
@@ -50,9 +50,12 @@ function useQuestInput(trip: Trip, uid: string, currentId: string | undefined): 
   const j = useQuery(`jobs:${id}`, () => query(collection(db, paths.jobs(id)), orderBy('at', 'desc'), limit(5)), ArrangeJob);
   const e = useQuery(`expenses:${id}`, () => paths.expenses(id), Expense);
   const n = useQuery(`incidents:${id}`, () => paths.incidents(id), Incident);
+  // The same shared listener the Plan uses.
+  const s = useQuery(`schedule:${id}`, () => paths.schedule(id), ScheduleItem);
   const [bookings, ideas, jobs, expenses, incidents] = [b.data, i.data, j.data, e.data, n.data];
+  const prayers = useMemo(() => s.data.filter((x) => x.prayer), [s.data]);
   // Everything has arrived once: only after that does a step count as "just done".
-  const ready = ![b, i, j, e, n].some((q) => q.loading);
+  const ready = ![b, i, j, e, n, s].some((q) => q.loading);
   const { pathname } = useLocation();
 
   // Pages seen (for "have a look" steps), remembered on this device.
@@ -86,7 +89,10 @@ function useQuestInput(trip: Trip, uid: string, currentId: string | undefined): 
     };
   }, [currentId, onBookings, id]);
 
-  return useMemo(() => ({ uid, bookings, ideas, jobs, expenses, incidents, seen, hasPassport, ready }), [uid, bookings, ideas, jobs, expenses, incidents, seen, hasPassport, ready]);
+  return useMemo(
+    () => ({ uid, bookings, ideas, jobs, expenses, incidents, prayers, seen, hasPassport, ready }),
+    [uid, bookings, ideas, jobs, expenses, incidents, prayers, seen, hasPassport, ready],
+  );
 }
 
 /** Pulses the element the current step needs (it may render late, so keep looking). */
@@ -129,9 +135,56 @@ function FileLink({ f }: { f: DemoFile }) {
   );
 }
 
-function StepBody({ step, onGo, onSkip }: { step: QuestStep; onGo: () => void; onSkip: () => void }) {
+function LinkBox({ url, label }: { url: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt('Copy this link:', url);
+    }
+  };
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#6D7A77]">Link for this step</p>
+      <div className="flex items-center gap-3 rounded-xl border border-[#E7DFD5] bg-white px-3 py-2.5">
+        <span className="w-9 h-9 rounded-lg bg-night text-gold-soft flex items-center justify-center shrink-0">
+          <Link2 className="w-4 h-4" />
+        </span>
+        <a href={url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 hover:underline">
+          <span className="block text-[13px] font-bold text-[#161C23] truncate">{label}</span>
+          <span className="block text-[12px] text-[#6D7A77] truncate">{url.replace(/^https:\/\/(www\.)?/, '')}</span>
+        </a>
+        <Button variant="secondary" className="!min-h-9 !px-3 shrink-0" onClick={() => void copy()}>
+          {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function FeatureTag({ step }: { step: QuestStep }) {
+  const f = step.feature && FEATURES[step.feature];
+  if (!f && !step.bonus) return null;
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-gold/15 text-[#7A5A12] px-2.5 py-1 text-[11.5px] font-bold">
+      {f ? `${f.icon} ${f.name}` : '✨ Bonus'}
+    </span>
+  );
+}
+
+function StepBody({ step, blocked, onGo, onSkip }: { step: QuestStep; blocked: string | null; onGo: () => void; onSkip: () => void }) {
   return (
     <div className="space-y-3.5">
+      <FeatureTag step={step} />
+      {blocked && (
+        <div className="rounded-xl border border-[#F2D8B0] bg-[#FFF8EC] p-3 text-[13px] leading-relaxed text-[#6B3F06] flex gap-2.5">
+          <Info className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{blocked}</span>
+        </div>
+      )}
       <p className="text-[14px] leading-relaxed text-[#2B3437]">{step.story}</p>
       <ol className="space-y-1.5">
         {step.todo.map((t, i) => (
@@ -141,6 +194,7 @@ function StepBody({ step, onGo, onSkip }: { step: QuestStep; onGo: () => void; o
           </li>
         ))}
       </ol>
+      {step.link && <LinkBox url={step.link.url} label={step.link.label} />}
       {step.files && (
         <div className="space-y-2">
           <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#6D7A77]">Files for this step</p>
@@ -175,10 +229,14 @@ function Finished({ onKeep, onClose }: { onKeep: () => void; onClose: () => void
         <PartyPopper className="w-8 h-8" />
       </span>
       <h3 className="font-display text-2xl font-semibold text-[#161C23]">The trip is planned</h3>
-      <p className="text-[14px] text-[#45524F] leading-relaxed">
-        Flights, train and hotels fixed · a split settled without leaving anyone out · every day planned around five prayers · documents checked · the bill shared · a
-        delay absorbed. That’s Safar.
-      </p>
+      <p className="text-[14px] text-[#45524F] leading-relaxed">One week, four very different people, nobody left out. You’ve seen all six:</p>
+      <ul className="text-left space-y-1.5 text-[13.5px] text-[#161C23]">
+        {Object.values(FEATURES).map((f) => (
+          <li key={f.name} className="flex items-center gap-2 rounded-lg bg-white border border-[#EFE8DE] px-3 py-2">
+            <span>{f.icon}</span> <b>{f.name}</b>
+          </li>
+        ))}
+      </ul>
       <div className="flex flex-col gap-2 pt-1">
         <Button variant="gold" onClick={onKeep}>
           Keep this trip — make my account
@@ -250,7 +308,12 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const input = useQuestInput(trip, uid, currentId);
   const progress = useMemo(() => questProgress(input), [input]);
   const finishedOrSkipped = (id: string) => progress.done.has(id) || skipped.has(id);
-  const nextStep = QUEST.find((s) => !finishedOrSkipped(s.id)) ?? null;
+  // Steps can be done in any order: carry on after the furthest one done, then come back for any missed.
+  const furthest = QUEST.reduce((m, s, i) => (progress.done.has(s.id) ? i : m), -1);
+  // The six features before the bonus.
+  const left = (s: QuestStep) => !finishedOrSkipped(s.id);
+  const nextStep =
+    QUEST.find((s, i) => i > furthest && left(s) && !s.bonus) ?? QUEST.find((s) => left(s) && !s.bonus) ?? QUEST.find(left) ?? null;
   const step = (picked ? QUEST.find((s) => s.id === picked) : null) ?? nextStep;
   useEffect(() => setCurrentId(nextStep?.id), [nextStep?.id]);
 
@@ -302,7 +365,7 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
     <div className="space-y-4">
       {step ? (
         <>
-          <StepBody step={step} onGo={go} onSkip={skip} />
+          <StepBody step={step} blocked={progress.done.has(step.id) ? null : (step.blocked?.(input) ?? null)} onGo={go} onSkip={skip} />
           {picked && nextStep && picked !== nextStep.id && (
             <button type="button" className="text-[13px] font-semibold text-[#00685F]" onClick={() => setPicked(null)}>
               Back to the next step: {nextStep.title}

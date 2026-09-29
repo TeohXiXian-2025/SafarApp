@@ -78,6 +78,7 @@ import {
   estimateTravelMin,
   metersBetween,
   sameJourney,
+  isHotelMoment,
   fmtClock,
   Idea,
   paths,
@@ -152,12 +153,16 @@ const isSide = (track: string) => track !== 'all' && !track.endsWith(':A');
  */
 function warningsFor(day: string, rows: Row[]): DayWarning[] {
   const all = rows.flatMap((r) => [r, ...(r.sides ?? [])]);
-  const chain = rows.filter((r) => !r.prayer).sort((a, b) => a.item.start.localeCompare(b.item.start));
+  const chain = rows.filter((r) => !r.prayer && !isHotelMoment(r.item)).sort((a, b) => a.item.start.localeCompare(b.item.start));
   const travel = (r: Row) => {
     const i = chain.indexOf(r);
     const prev = i > 0 ? chain[i - 1] : undefined;
     if (sameJourney(prev?.item, r.item)) return undefined;
-    if (r.item.transitFromPrev && r.item.transitFromPrev.fromId === prev?.item.id) return r.item.transitFromPrev.minutes;
+    const leg = r.item.transitFromPrev;
+    if (leg && leg.fromId === prev?.item.id) return leg.minutes;
+    // Coming from a prayer place between the two stops: the measured trip from there.
+    const from = leg && rows.find((x) => x.prayer && x.item.id === leg.fromId);
+    if (leg && from && prev && from.item.start >= prev.item.end && from.item.end <= r.item.start) return leg.minutes;
     return prev?.out && r.in ? estimateTravelMin(prev.out, r.in) : undefined;
   };
   return dayWarnings(
@@ -167,6 +172,7 @@ function warningsFor(day: string, rows: Row[]): DayWarning[] {
       ...(r.prayInside ? { prayInside: true } : {}),
       ...(r.prayer ? { kind: 'prayer' as const, label: r.item.prayer ? `${r.item.prayer.prayer} prayer` : undefined } : isSide(r.item.track) ? { kind: 'side' as const } : { transitMin: travel(r) }),
       checkin: r.item.ref.kind === 'booking' && r.item.ref.event === 'checkin',
+      ...(isHotelMoment(r.item) ? { soft: true } : {}),
     })),
     (id) => all.find((r) => r.item.id === id)?.idea?.place.openingHours,
   );
@@ -190,6 +196,8 @@ function dayModel(list: Row[], bookings: Map<string, Booking>): { rows: ChainRow
     ...(r.prayer ? { prayer: true } : {}),
     ...(r.item.ref.kind === 'booking' && (r.item.ref.event === 'checkin' || r.item.ref.event === 'checkout') ? { soft: true } : {}),
     ...((r.in ?? r.out) ? { loc: (r.in ?? r.out)! } : {}),
+    // A train or flight: you leave it at the other end.
+    ...(r.out && r.in && (r.out.lat !== r.in.lat || r.out.lng !== r.in.lng) ? { out: r.out } : {}),
     ...(r.prayInside ? { prayInside: true } : {}),
     ...(r.idea?.place.openingHours ? { open: openingRanges(r.idea.place.openingHours, r.item.day) } : {}),
     ...(r.item.pinned || r.meal ? { pinned: true } : {}),
@@ -360,7 +368,8 @@ function toRow(item: ScheduleItem, ideas: Map<string, Idea>, bookings: Map<strin
     };
   }
   if (r.meal) {
-    return { item, title: r.title, subtitle: r.place?.address ?? 'Halal restaurant', icon: <Utensils className="w-4 h-4" />, in: r.place?.location, out: r.place?.location, meal: r.meal, ...(r.phone ? { phone: r.phone } : {}) };
+    // Like the planner: a meal holds a prayer time that begins during it (step out to pray, then back).
+    return { item, title: r.title, subtitle: r.place?.address ?? 'Halal restaurant', icon: <Utensils className="w-4 h-4" />, in: r.place?.location, out: r.place?.location, meal: r.meal, prayInside: true, ...(r.phone ? { phone: r.phone } : {}) };
   }
   return { item, title: r.title, icon: <MapPin className="w-4 h-4" />, in: r.place?.location, out: r.place?.location, prayer: !!item.prayer };
 }
@@ -481,7 +490,7 @@ export function TimelinePage() {
     () =>
       prayerBreaks(
         frame.prayers,
-        savedRows.filter((r) => !r.prayer && !isSide(r.item.track)).map((r) => ({ id: r.item.id, start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), loc: r.out, prayerWalkMin: prayerWalkOf(r.idea) })),
+        savedRows.filter((r) => !r.prayer && !isSide(r.item.track)).map((r) => ({ id: r.item.id, start: toMin(r.item.start), end: Math.max(toMin(r.item.end), toMin(r.item.start)), loc: r.out, prayerWalkMin: prayerWalkOf(r.idea), ...(r.item.ref.kind === 'booking' ? { anchor: true } : {}) })),
         frame.base,
         journeySpans(
           savedRows.flatMap((r) => {

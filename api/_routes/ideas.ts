@@ -23,7 +23,9 @@ import {
   Member as MemberSchema,
   type Member,
   GeoPoint,
+  isDemoTrip,
 } from '../../src/domain/index.js';
+import { DEMO_POST_IMPORT, isDemoPost } from '../_lib/demoPost.js';
 import { Type } from '@google/genai';
 import { extractJson } from '../_lib/gemini.js';
 import { withTrip } from '../_lib/auth.js';
@@ -144,6 +146,8 @@ export const ideaRoutes: RouteTable = {
           .refine((b) => b.url || b.text || b.storagePaths || b.storagePath || b.audioPath, 'Send a link, screenshots, a recording or a caption'),
       );
       const storagePaths = raw.storagePaths ?? (raw.storagePath ? [raw.storagePath] : []);
+      // The demo trip's reel: the answer recorded from reading it for real (see demoPost.ts).
+      if (isDemoTrip(tripId) && raw.url && isDemoPost(raw.url)) return json(structuredClone(DEMO_POST_IMPORT));
       await useDailyQuota(user.uid, 'import');
       const trip = await loadTrip(tripId);
       const platform = { instagram: 'Instagram', xiaohongshu: 'Xiaohongshu', tiktok: 'TikTok', youtube: 'YouTube' } as const;

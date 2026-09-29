@@ -9,7 +9,7 @@ import { useAuth } from '../auth/auth';
 import { DEMO_KIT, demoKitUrl } from '../domain';
 import { auth } from '../firebase/config';
 import { api, ApiError } from '../lib/api';
-import { QUEST } from '../trip/demo/quest';
+import { FEATURES, QUEST, type FeatureKey } from '../trip/demo/quest';
 import { Avatar, Button, confirmDialog, SafarMark } from '../ui';
 
 const CAST = [
@@ -72,8 +72,8 @@ export function DemoPage() {
               Plan a week in Japan <span className="text-gold-soft italic">for four very different people.</span>
             </h1>
             <p className="text-white/80 text-[16px] md:text-lg mt-4 max-w-xl leading-relaxed">
-              You play Aisyah. Your mum only eats certified halal, your brother wants anime and views, and his friend Daniel wants pork ramen. Ten guided steps, about
-              15 minutes — with sample tickets, real places and five prayers a day.
+              You play Aisyah. Your mum only eats certified halal, your brother wants anime and views, and his friend Daniel wants pork ramen. Safar’s six
+              features in about 15 guided minutes — with sample tickets, a real Instagram reel, real places and five prayers a day.
             </p>
             <div className="mt-7 flex flex-col sm:flex-row gap-3">
               {guest ? (
@@ -126,16 +126,30 @@ export function DemoPage() {
       <main className="max-w-6xl mx-auto px-4 md:px-8 py-12 md:py-16 space-y-14">
         <section>
           <p className="text-[12px] font-bold uppercase tracking-[.12em] text-[#00685F]">The Trip Quest</p>
-          <h2 className="font-display text-3xl md:text-4xl font-semibold text-[#161C23] mt-2">Ten steps, one real plan</h2>
-          <p className="text-[#45524F] mt-2 max-w-2xl">A guide inside the trip shows each step, where to tap, and the file to use. Every step is something other planners can’t do for a mixed group.</p>
-          <ol className="mt-6 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {QUEST.map((s, i) => (
-              <li key={s.id} className="rounded-2xl bg-white border border-[#E7DFD5] p-4">
-                <span className="w-7 h-7 rounded-full bg-night text-gold-soft text-[12px] font-bold flex items-center justify-center">{i + 1}</span>
-                <p className="mt-3 font-bold text-[#161C23] text-[14.5px] leading-snug">{s.title}</p>
-                <p className="mt-1 text-[12.5px] text-[#6D7A77] leading-relaxed line-clamp-4">{s.why}</p>
-              </li>
-            ))}
+          <h2 className="font-display text-3xl md:text-4xl font-semibold text-[#161C23] mt-2">Six features, one real plan</h2>
+          <p className="text-[#45524F] mt-2 max-w-2xl">
+            A guide inside the trip shows each step, where to tap, and the file or link to use. Each is something other planners can’t do for a mixed group — do them in any
+            order.
+          </p>
+          <ol className="mt-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {(Object.keys(FEATURES) as FeatureKey[]).map((k, i) => {
+              const steps = QUEST.filter((s) => s.feature === k);
+              return (
+                <li key={k} className="rounded-2xl bg-white border border-[#E7DFD5] p-4">
+                  <p className="flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-full bg-night text-gold-soft text-[12px] font-bold flex items-center justify-center">{i + 1}</span>
+                    <span className="text-lg">{FEATURES[k].icon}</span>
+                    <span className="font-bold text-[#161C23] text-[15px]">{FEATURES[k].name}</span>
+                  </p>
+                  <ul className="mt-2.5 space-y-1 text-[13px] text-[#45524F]">
+                    {steps.map((s) => (
+                      <li key={s.id}>· {s.title}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-[12.5px] text-[#6D7A77] leading-relaxed line-clamp-4">{steps[0]?.why}</p>
+                </li>
+              );
+            })}
           </ol>
         </section>
 

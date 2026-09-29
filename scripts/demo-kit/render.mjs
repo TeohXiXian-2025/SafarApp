@@ -17,7 +17,6 @@ const FILES = [
   ['02-hotel-tokyo.html', '02-hotel-Richmond-Asakusa.pdf', 'pdf'],
   ['03-shinkansen-ticket.html', '03-shinkansen-Nozomi-21.png', { width: 390, height: 844 }],
   ['04-hotel-kyoto.html', '04-hotel-Granvia-Kyoto.pdf', 'pdf'],
-  ['05-instagram-post.html', '05-instagram-Kyoto-post.png', { width: 390, height: 844 }],
   ['06-passport-specimen.html', '06-passport-SPECIMEN-Aisyah.png', { width: 900, height: 620 }],
   ['07-dinner-receipt.html', '07-receipt-Panga-dinner.png', { width: 560, height: 760 }],
   ['08-train-delay-notice.html', '08-train-delay-notice.png', { width: 390, height: 844 }],
