@@ -1224,17 +1224,19 @@ export function TimelinePage() {
 
           {/* 3. Itinerary Plan */}
           {frame.prayers && (
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="inline-flex items-center gap-1 font-semibold text-[#6D7A77]">
+            <div className="space-y-1.5 text-xs">
+              <div className="flex items-center gap-1 font-semibold text-[#6D7A77]">
                 <Lock className="w-3.5 h-3.5" /> Prayer times, fixed:
-              </span>
-              {(['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => (
-                <span key={k} className="inline-flex items-center justify-center min-w-[140px] px-3 h-6 rounded-full bg-night text-white font-semibold tabular-nums text-center">
-                  <span className="text-gold-soft mr-1">{PRAYER_LABEL[k]}</span>
-                  {fmtClock(frame.prayers!.times[k])}
-                </span>
-              ))}
-              {outlook && <span className="inline-flex items-center min-h-6 px-2 rounded-full bg-[#EEF3F8] text-[#1D4E89] font-semibold">{outlook}</span>}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => (
+                  <span key={k} className="inline-flex items-center justify-center min-w-[90px] px-2.5 h-6 rounded-full bg-night text-white font-semibold tabular-nums text-center">
+                    <span className="text-gold-soft mr-1">{PRAYER_LABEL[k]}</span>
+                    {fmtClock(frame.prayers!.times[k])}
+                  </span>
+                ))}
+                {outlook && <span className="inline-flex items-center min-h-6 px-2 rounded-full bg-[#EEF3F8] text-[#1D4E89] font-semibold">{outlook}</span>}
+              </div>
             </div>
           )}
           {!frame.prayers && outlook && <p className="text-xs text-[#1D4E89]">Weather: {outlook}</p>}
@@ -2161,7 +2163,7 @@ function Backlog({
     return true;
   });
   const groups = cities.map((c) => [c, shown.filter((i) => cityOf(i) === c)] as const).filter(([, l]) => l.length);
-  const chip = (on: boolean) => cx('shrink-0 inline-flex items-center justify-center min-w-[135px] px-2.5 min-h-7 rounded-full text-xs font-semibold border text-center', on ? 'bg-night border-night text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]');
+  const chip = (on: boolean) => cx('shrink-0 inline-flex items-center justify-center min-w-[70px] px-3 min-h-7 rounded-full text-xs font-semibold border text-center', on ? 'bg-night border-night text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]');
 
   return (
     <div className={cx('space-y-3', !bare && 'bg-white rounded-2xl border border-[#E7DFD5] p-4 shadow-[0_1px_2px_rgba(22,28,35,.04)]')}>
