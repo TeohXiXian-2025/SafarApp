@@ -1228,8 +1228,8 @@ export function TimelinePage() {
               <span className="inline-flex items-center gap-1 font-semibold text-[#6D7A77]">
                 <Lock className="w-3.5 h-3.5" /> Prayer times, fixed:
               </span>
-              {(['dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => (
-                <span key={k} className="inline-flex items-center h-6 px-2 rounded-full bg-night text-white font-semibold tabular-nums">
+              {(['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => (
+                <span key={k} className="inline-flex items-center justify-center min-w-[140px] px-3 h-6 rounded-full bg-night text-white font-semibold tabular-nums text-center">
                   <span className="text-gold-soft mr-1">{PRAYER_LABEL[k]}</span>
                   {fmtClock(frame.prayers!.times[k])}
                 </span>
@@ -2199,19 +2199,21 @@ function Backlog({
             </div>
           </div>
           {!groups.length && <p className="text-sm text-[#6D7A77]">Nothing matches these filters.</p>}
-          {groups.map(([c, list]) => (
-            <section key={c} className="space-y-2">
-              <h3 className="flex flex-wrap items-center gap-x-1.5 text-[11px] font-bold uppercase tracking-wider text-[#6D7A77]">
-                <MapPin className="w-3 h-3" /> {c} · {list.length}
-                {c === dayCity && <span className="normal-case tracking-normal font-semibold text-[#00685F]">· where you are this day</span>}
-              </h3>
-              <ul className="space-y-2">
-                {list.map((i) => (
-                  <BacklogItem key={i.id} idea={i} pair={pairName(i.id)} hours={hoursOn(i, day)} onAdd={() => onAdd(i)} onPlace={() => onPlace(i)} placing={placing === i.id} />
-                ))}
-              </ul>
-            </section>
-          ))}
+          <div className="space-y-3 max-h-[calc(100vh-320px)] overflow-y-auto pr-1">
+            {groups.map(([c, list]) => (
+              <section key={c} className="space-y-2">
+                <h3 className="flex flex-wrap items-center gap-x-1.5 text-[11px] font-bold uppercase tracking-wider text-[#6D7A77]">
+                  <MapPin className="w-3 h-3" /> {c} · {list.length}
+                  {c === dayCity && <span className="normal-case tracking-normal font-semibold text-[#00685F]">· where you are this day</span>}
+                </h3>
+                <ul className="space-y-2">
+                  {list.map((i) => (
+                    <BacklogItem key={i.id} idea={i} pair={pairName(i.id)} hours={hoursOn(i, day)} onAdd={() => onAdd(i)} onPlace={() => onPlace(i)} placing={placing === i.id} />
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
         </>
       )}
     </div>
@@ -2219,6 +2221,7 @@ function Backlog({
 }
 
 function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Idea; pair?: string; hours: { text: string; closed: boolean } | null; onAdd: () => void; onPlace: () => void; placing: boolean }) {
+  const [showDesc, setShowDesc] = useState(false);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `backlog:${idea.id}`, data: { title: idea.place.name } });
 
   const description =
@@ -2240,7 +2243,7 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
       >
         <GripVertical className="w-4 h-4" />
       </button>
-      <button type="button" onClick={onAdd} className="flex items-start gap-3 flex-1 min-w-[10rem] text-left">
+      <div className="flex items-start gap-3 flex-1 min-w-[10rem] text-left">
         <PlaceThumb photoUrl={idea.place.photoUrl} at={idea.place.location} className="w-14 h-14 rounded-xl shrink-0 mt-0.5" small />
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-bold text-[#161C23] truncate">{idea.place.name}</span>
@@ -2256,9 +2259,24 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
             )}
           </span>
           {description && (
-            <span className="block text-xs text-[#525F5C] line-clamp-3 mt-1 leading-relaxed font-normal">
-              {description}
-            </span>
+            <div className="mt-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDesc((v) => !v);
+                }}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-[#00685F] hover:underline"
+              >
+                <span>{showDesc ? 'Hide details' : 'Show details'}</span>
+                <ChevronDown className={cx('w-3.5 h-3.5 transition-transform', showDesc && 'rotate-180')} />
+              </button>
+              {showDesc && (
+                <p className="mt-1 text-xs text-[#525F5C] leading-relaxed font-normal bg-[#F7F4EF] p-2 rounded-xl">
+                  {description}
+                </p>
+              )}
+            </div>
           )}
           {hours && (
             <span className={cx('block text-[11px] truncate mt-1', hours.closed ? 'text-[#B3261E] font-semibold' : 'text-[#3E4947]')}>
@@ -2266,7 +2284,7 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
             </span>
           )}
         </span>
-      </button>
+      </div>
       <div className="flex shrink-0 ml-auto items-center gap-1">
         <Button variant="ghost" className="shrink-0 !px-2.5 !min-h-9" onClick={onAdd} aria-label={`Add ${idea.place.name} at a suggested time`}>
           <Plus className="w-4 h-4" /> Add

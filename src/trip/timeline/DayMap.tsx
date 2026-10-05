@@ -30,6 +30,31 @@ export interface MapLink {
   color: string;
 }
 
+function ZoomControls() {
+  const map = useMap();
+  if (!map) return null;
+  return (
+    <div className="absolute bottom-2 right-2 z-10 flex flex-col gap-0.5 shadow-md bg-white rounded-lg p-0.5 border border-[#E7DFD5]">
+      <button
+        type="button"
+        onClick={() => map.setZoom((map.getZoom() ?? 13) + 1)}
+        className="w-5 h-5 rounded flex items-center justify-center font-bold text-xs text-[#161C23] hover:bg-[#F3EFE9]"
+        title="Zoom in"
+      >
+        +
+      </button>
+      <button
+        type="button"
+        onClick={() => map.setZoom((map.getZoom() ?? 13) - 1)}
+        className="w-5 h-5 rounded flex items-center justify-center font-bold text-xs text-[#161C23] hover:bg-[#F3EFE9]"
+        title="Zoom out"
+      >
+        −
+      </button>
+    </div>
+  );
+}
+
 export function DayMap({ stops, links = [], selectedId, onSelect }: { stops: MapStop[]; links?: MapLink[]; selectedId?: string | null; onSelect?: (id: string) => void }) {
   if (!MAPS_KEY) return <p className="text-sm text-[#B3261E] p-4">Google Maps key missing (VITE_GOOGLE_MAPS_API_KEY).</p>;
   if (!stops.length) {
@@ -39,32 +64,35 @@ export function DayMap({ stops, links = [], selectedId, onSelect }: { stops: Map
   const route = stops.filter((s) => s.kind === 'stop' || s.kind === 'booking' || s.kind === 'prayer');
   return (
     <APIProvider apiKey={MAPS_KEY}>
-      <Map mapId={MAP_ID} defaultCenter={stops[0].location} defaultZoom={13} gestureHandling="cooperative" disableDefaultUI zoomControl className="w-full h-full min-h-64">
-        {stops.map((s) => {
-          const on = s.id === selectedId;
-          return (
-            <AdvancedMarker key={s.id} position={s.location} title={s.title} zIndex={on ? 1000 : s.kind === 'prayer' ? 1 : 10} onClick={() => onSelect?.(s.id)}>
-              <span className="flex flex-col items-center">
-                {s.meet && <span className="mb-0.5 whitespace-nowrap rounded-md bg-[#161C23] px-1.5 py-0.5 text-[10px] font-bold text-white shadow">🚩 {s.meet}</span>}
-                <span
-                  className={cx(
-                    'relative flex items-center justify-center font-bold text-white shadow-md border-2 border-white transition-transform w-7 h-7 text-xs',
-                    // Prayer places: a rounded square, so they read as "the mosque" at a glance.
-                    s.kind === 'prayer' ? 'rounded-lg' : 'rounded-full',
-                    on && 'scale-125 ring-4 ring-black/20',
-                  )}
-                  style={{ background: s.color }}
-                >
-                  {s.label}
-                  {s.badge && <span className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-white text-[10px] leading-4 text-center shadow">{s.badge}</span>}
+      <div className="relative w-full h-full">
+        <Map mapId={MAP_ID} defaultCenter={stops[0].location} defaultZoom={13} gestureHandling="cooperative" disableDefaultUI zoomControl={false} className="w-full h-full min-h-48">
+          {stops.map((s) => {
+            const on = s.id === selectedId;
+            return (
+              <AdvancedMarker key={s.id} position={s.location} title={s.title} zIndex={on ? 1000 : s.kind === 'prayer' ? 1 : 10} onClick={() => onSelect?.(s.id)}>
+                <span className="flex flex-col items-center">
+                  {s.meet && <span className="mb-0.5 whitespace-nowrap rounded-md bg-[#161C23] px-1.5 py-0.5 text-[10px] font-bold text-white shadow">🚩 {s.meet}</span>}
+                  <span
+                    className={cx(
+                      'relative flex items-center justify-center font-bold text-white shadow-md border-2 border-white transition-transform w-7 h-7 text-xs',
+                      // Prayer places: a rounded square, so they read as "the mosque" at a glance.
+                      s.kind === 'prayer' ? 'rounded-lg' : 'rounded-full',
+                      on && 'scale-125 ring-4 ring-black/20',
+                    )}
+                    style={{ background: s.color }}
+                  >
+                    {s.label}
+                    {s.badge && <span className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-white text-[10px] leading-4 text-center shadow">{s.badge}</span>}
+                  </span>
+                  {on && <span className="mt-1 max-w-40 truncate rounded bg-white px-1.5 py-0.5 text-[11px] font-semibold text-[#161C23] shadow">{s.title}</span>}
                 </span>
-                {on && <span className="mt-1 max-w-40 truncate rounded bg-white px-1.5 py-0.5 text-[11px] font-semibold text-[#161C23] shadow">{s.title}</span>}
-              </span>
-            </AdvancedMarker>
-          );
-        })}
-        <Lines route={route.map((s) => s.location)} links={links} focus={stops.find((s) => s.id === selectedId)?.location} all={stops.map((s) => s.location)} />
-      </Map>
+              </AdvancedMarker>
+            );
+          })}
+          <Lines route={route.map((s) => s.location)} links={links} focus={stops.find((s) => s.id === selectedId)?.location} all={stops.map((s) => s.location)} />
+        </Map>
+        <ZoomControls />
+      </div>
     </APIProvider>
   );
 }
