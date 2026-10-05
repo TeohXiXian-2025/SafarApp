@@ -2161,7 +2161,7 @@ function Backlog({
     return true;
   });
   const groups = cities.map((c) => [c, shown.filter((i) => cityOf(i) === c)] as const).filter(([, l]) => l.length);
-  const chip = (on: boolean) => cx('shrink-0 px-2.5 min-h-7 rounded-full text-xs font-semibold border', on ? 'bg-night border-night text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]');
+  const chip = (on: boolean) => cx('shrink-0 inline-flex items-center justify-center min-w-[135px] px-2.5 min-h-7 rounded-full text-xs font-semibold border text-center', on ? 'bg-night border-night text-white' : 'bg-white border-[#E7DFD5] text-[#161C23]');
 
   return (
     <div className={cx('space-y-3', !bare && 'bg-white rounded-2xl border border-[#E7DFD5] p-4 shadow-[0_1px_2px_rgba(22,28,35,.04)]')}>

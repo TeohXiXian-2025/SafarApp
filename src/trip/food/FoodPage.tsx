@@ -227,11 +227,11 @@ export function FoodPage() {
 
       <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1">
         {FOOD_TABS.map((t) => (
-          <Chip key={t.key} selected={tab === t.key} onClick={() => setTab(t.key)}>
+          <Chip key={t.key} selected={tab === t.key} onClick={() => setTab(t.key)} className="min-w-[170px] justify-center text-center">
             {t.label} {items ? `(${items.filter((i) => t.buckets.includes(i.verdict.bucket)).length})` : ''}
           </Chip>
         ))}
-        <Chip selected={openOnly} onClick={() => setOpenOnly((v) => !v)}>
+        <Chip selected={openOnly} onClick={() => setOpenOnly((v) => !v)} className="min-w-[170px] justify-center text-center">
           Open now
         </Chip>
       </div>

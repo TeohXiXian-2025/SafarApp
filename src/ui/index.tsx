@@ -338,15 +338,16 @@ export function Toggle({ checked, onChange, label, hint }: { checked: boolean; o
   );
 }
 
-export function Chip({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
+export function Chip({ selected, onClick, className, children }: { selected: boolean; onClick: () => void; className?: string; children: ReactNode }) {
   return (
     <button
       type="button"
       aria-pressed={selected}
       onClick={onClick}
       className={cx(
-        'px-3 min-h-9 rounded-full text-sm font-semibold border transition-colors',
+        'px-3 min-h-9 rounded-full text-sm font-semibold border transition-colors inline-flex items-center justify-center',
         selected ? 'bg-night border-night text-white' : 'bg-white border-[#E7DFD5] text-[#161C23] hover:border-[#00685F]/40',
+        className,
       )}
     >
       {children}

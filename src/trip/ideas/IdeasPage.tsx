@@ -129,7 +129,7 @@ export function IdeasPage() {
   const sections = multiCity
     ? trip.destinations.map((d, k) => ({ key: k, name: d.name, dates: cityDatesText(d), ideas: shown.filter((i) => cityIdx(i) === k) })).filter((x) => x.ideas.length)
     : [{ key: 0, name: '', dates: null, ideas: shown }];
-  const chip = (on: boolean) => cx('shrink-0 px-3 min-h-8 rounded-full text-xs font-semibold border', on ? 'bg-night border-night text-white' : 'bg-white border-[#E7DFD5] text-[#161C23] hover:border-[#00685F]/40');
+  const chip = (on: boolean) => cx('shrink-0 inline-flex items-center justify-center min-w-[135px] px-3 min-h-8 rounded-full text-xs font-semibold border text-center', on ? 'bg-night border-night text-white' : 'bg-white border-[#E7DFD5] text-[#161C23] hover:border-[#00685F]/40');
 
   return (
     <div className="space-y-4">
@@ -156,7 +156,7 @@ export function IdeasPage() {
               }
             }}
             className={cx(
-              'shrink-0 inline-flex items-center gap-1.5 px-3.5 min-h-10 rounded-xl text-sm font-semibold border transition-colors',
+              'shrink-0 inline-flex items-center justify-center gap-1.5 min-w-[160px] px-3.5 min-h-10 rounded-xl text-sm font-semibold border transition-colors',
               filter === f.key ? 'bg-night border-night text-white shadow-[0_6px_14px_rgba(11,59,54,.22)]' : 'bg-white border-[#E7DFD5] text-[#161C23] hover:border-[#00685F]/40',
             )}
           >
