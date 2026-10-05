@@ -1159,34 +1159,29 @@ export function TimelinePage() {
 
   return (
     <DndContext sensors={sensors} collisionDetection={collision} autoScroll={{ acceleration: 30, threshold: { x: 0, y: 0.18 } }} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>
-      <div className="lg:grid lg:grid-cols-[210px_minmax(0,1fr)_minmax(260px,340px)] xl:grid-cols-[230px_minmax(0,1fr)_minmax(320px,420px)] lg:gap-5 xl:gap-7 items-start">
-        {/* Laptop: the days and Unplanned in a left pane. */}
-        {isLg && (
-          <aside className="sticky top-[76px] max-h-[calc(100dvh-96px)] overflow-y-auto overscroll-contain pr-1 -mr-1 space-y-4" aria-label="Days and unplanned places">
-            <div>
-              <p className="px-2 pb-2 text-[11px] font-bold uppercase tracking-[.08em] text-[#6D7A77]">{days.length} days</p>
-              <div className="flex flex-col gap-0.5">
-                {days.map((d, i) => (
-                  <DayRailItem
-                    key={d}
-                    day={d}
-                    index={i}
-                    selected={d === day}
-                    status={dayStatus.get(d) ?? null}
-                    count={rowsByDay.get(d)?.filter((r) => !r.prayer).length ?? 0}
-                    city={trip.destinations.length > 1 ? cityLabel(trip.destinations, dayCities.get(d) ?? []) : ''}
-                    onClick={() => setDay(d)}
-                  />
-                ))}
-              </div>
-            </div>
-            <Backlog {...backlogProps} onAdd={setAdding} onPlace={startPlace} />
-          </aside>
-        )}
-
+      <div className="lg:grid lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)] lg:gap-6 xl:gap-8 items-start">
+        {/* Left Column (Top-left to Center of display section) */}
         <div className="min-w-0 space-y-4">
-          {/* Day header */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between lg:flex-col lg:items-stretch 2xl:flex-row 2xl:items-end">
+          {/* 1. Date Bar (Top Left) */}
+          <div className="-mx-1 px-1 overflow-x-auto pb-1" aria-label="Date bar">
+            <div className="flex gap-2 w-max">
+              {days.map((d, i) => (
+                <DayChip
+                  key={d}
+                  day={d}
+                  index={i}
+                  selected={d === day}
+                  status={dayStatus.get(d) ?? null}
+                  count={rowsByDay.get(d)?.filter((r) => !r.prayer).length ?? 0}
+                  city={trip.destinations.length > 1 ? cityLabel(trip.destinations, dayCities.get(d) ?? []) : ''}
+                  onClick={() => setDay(d)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* 2. Date and day chosen for the date bar */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
               <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#00685F]">
                 Day {dayIndex + 1} of {days.length} · {cityHere}
@@ -1222,30 +1217,12 @@ export function TimelinePage() {
             </div>
           </div>
 
-          {/* Phone / tablet: day chips */}
-          {!isLg && (
-            <div className="-mx-4 px-4 md:-mx-6 md:px-6 overflow-x-auto">
-              <div className="flex gap-2 w-max pb-1">
-                {days.map((d, i) => (
-                  <DayChip
-                    key={d}
-                    day={d}
-                    index={i}
-                    selected={d === day}
-                    status={dayStatus.get(d) ?? null}
-                    count={rowsByDay.get(d)?.filter((r) => !r.prayer).length ?? 0}
-                    city={trip.destinations.length > 1 ? cityLabel(trip.destinations, dayCities.get(d) ?? []) : ''}
-                    onClick={() => setDay(d)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
           {error && <ErrorBanner>{error}</ErrorBanner>}
 
           {/* The day at a glance: stops, fixed bookings, prayer times (gold) and rain. */}
           {!loading && rows.length > 0 && <DayGlance rows={rows} warnings={warnings} rainy={weather} />}
+
+          {/* 3. Itinerary Plan */}
           {frame.prayers && (
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <span className="inline-flex items-center gap-1 font-semibold text-[#6D7A77]">
@@ -1494,16 +1471,21 @@ export function TimelinePage() {
               </div>
             )}
           </div>
-
-          {/* Tablet: Unplanned under the day (laptop has it on the left, phone in a pull-up tray). */}
-          {isMd && !isLg && <Backlog {...backlogProps} onAdd={setAdding} onPlace={startPlace} />}
         </div>
 
-        {/* Map: a sticky pane on laptop; the Map button shows it on phone / tablet. */}
-        <div className={cx('lg:sticky lg:top-[76px]', !showMap && 'hidden lg:block')}>
-          <Card className="overflow-hidden h-[62dvh] lg:h-[calc(100dvh-96px)]">
-            <DayMap stops={mapStops} links={mapLinks} selectedId={selected} onSelect={setSelected} />
-          </Card>
+        {/* Right Column (Center to Top-Right of display section) */}
+        <div className="space-y-4">
+          {/* 1. Map */}
+          <div className={cx('lg:sticky lg:top-[76px]', !showMap && 'hidden lg:block')}>
+            <Card className="overflow-hidden h-[380px] lg:h-[420px]">
+              <DayMap stops={mapStops} links={mapLinks} selectedId={selected} onSelect={setSelected} />
+            </Card>
+          </div>
+
+          {/* 2. Unplanned attraction along with description (below map) */}
+          <div className={cx(!showMap && 'block')}>
+            <Backlog {...backlogProps} onAdd={setAdding} onPlace={startPlace} />
+          </div>
         </div>
       </div>
 
@@ -2266,8 +2248,13 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
               </>
             )}
           </span>
+          {(idea.notes || idea.source?.caption || idea.place.address) && (
+            <span className="block text-[11px] text-[#6D7A77] line-clamp-2 mt-0.5 font-normal">
+              {idea.notes || idea.source?.caption || idea.place.address}
+            </span>
+          )}
           {hours && (
-            <span className={cx('block text-[11px] truncate', hours.closed ? 'text-[#B3261E] font-semibold' : 'text-[#3E4947]')}>
+            <span className={cx('block text-[11px] truncate mt-0.5', hours.closed ? 'text-[#B3261E] font-semibold' : 'text-[#3E4947]')}>
               {hours.closed ? 'Closed this day' : `🕒 ${hours.text}`}
             </span>
           )}

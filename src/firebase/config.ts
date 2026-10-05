@@ -33,19 +33,19 @@ export const isStandaloneApp =
   (window.matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true);
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: useSameOriginAuth ? window.location.host : import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyDemoPlaceholderKeyForLocalDev123',
+  authDomain: useSameOriginAuth ? window.location.host : (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'safar-demo.firebaseapp.com'),
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'safar-demo',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'safar-demo.appspot.com',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '123456789012',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:123456789012:web:abcdef123456',
 };
 
-const missing = Object.entries(firebaseConfig)
-  .filter(([, v]) => !v)
-  .map(([k]) => k);
+const missing = Object.keys(firebaseConfig)
+  .filter((k) => !import.meta.env[`VITE_${k.replace(/([A-Z])/g, '_$1').toUpperCase()}`])
+  .map((k) => k);
 if (missing.length) {
-  console.error(`[Safar] Missing Firebase env vars: ${missing.join(', ')}. See .env.example.`);
+  console.warn(`[Safar] Missing Firebase env vars: ${missing.join(', ')}. See .env.example.`);
 }
 
 // Initialize Firebase App
