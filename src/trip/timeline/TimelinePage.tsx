@@ -1475,9 +1475,9 @@ export function TimelinePage() {
 
         {/* Right Column (Center to Top-Right of display section) */}
         <div className="space-y-4">
-          {/* 1. Map */}
-          <div className={cx('lg:sticky lg:top-[76px]', !showMap && 'hidden lg:block')}>
-            <Card className="overflow-hidden h-[380px] lg:h-[420px]">
+          {/* 1. Map (Reduced by half: 200px height, static non-sticky) */}
+          <div className={cx(!showMap && 'hidden lg:block')}>
+            <Card className="overflow-hidden h-[200px]">
               <DayMap stops={mapStops} links={mapLinks} selectedId={selected} onSelect={setSelected} />
             </Card>
           </div>
@@ -2221,23 +2221,30 @@ function Backlog({
 function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Idea; pair?: string; hours: { text: string; closed: boolean } | null; onAdd: () => void; onPlace: () => void; placing: boolean }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `backlog:${idea.id}`, data: { title: idea.place.name } });
 
+  const description =
+    idea.notes ||
+    idea.source?.caption ||
+    (idea.halal?.reasons?.length ? idea.halal.reasons.join(' · ') : undefined) ||
+    (idea.sentiment?.pros?.length ? idea.sentiment.pros.join(' · ') : undefined) ||
+    idea.place.address;
+
   return (
-    <li ref={setNodeRef} className={cx('flex flex-wrap items-center gap-1 rounded-2xl border border-[#E7DFD5] bg-white p-2', (isDragging || placing) && 'opacity-40')}>
+    <li ref={setNodeRef} className={cx('flex flex-wrap items-start gap-2.5 rounded-2xl border border-[#E7DFD5] bg-white p-3 shadow-xs', (isDragging || placing) && 'opacity-40')}>
       {/* Drag handle on larger screens; everywhere, "Place" picks a spot on the timeline and "Add" suggests one. */}
       <button
         type="button"
         {...attributes}
         {...listeners}
         aria-label={`Drag ${idea.place.name} onto a day`}
-        className="hidden md:flex w-6 shrink-0 items-center justify-center text-[#9AA5A3] touch-none cursor-grab active:cursor-grabbing"
+        className="hidden md:flex w-5 shrink-0 items-center justify-center text-[#9AA5A3] touch-none cursor-grab active:cursor-grabbing hover:text-[#00685F] mt-1"
       >
         <GripVertical className="w-4 h-4" />
       </button>
-      <button type="button" onClick={onAdd} className="flex items-center gap-2.5 flex-1 min-w-[9rem] text-left">
-        <PlaceThumb photoUrl={idea.place.photoUrl} at={idea.place.location} className="w-11 h-11 rounded-xl shrink-0" small />
-        <span className="min-w-0">
-          <span className="block text-sm font-semibold text-[#161C23] truncate">{idea.place.name}</span>
-          <span className="block text-xs text-[#6D7A77] truncate">
+      <button type="button" onClick={onAdd} className="flex items-start gap-3 flex-1 min-w-[10rem] text-left">
+        <PlaceThumb photoUrl={idea.place.photoUrl} at={idea.place.location} className="w-14 h-14 rounded-xl shrink-0 mt-0.5" small />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-[#161C23] truncate">{idea.place.name}</span>
+          <span className="block text-xs font-semibold text-[#00685F] truncate mt-0.5">
             {pair ? (
               <span className="inline-flex items-center gap-1 text-[#1D4E89]">
                 <GitFork className="w-3 h-3" /> Split with {pair}
@@ -2248,19 +2255,19 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
               </>
             )}
           </span>
-          {(idea.notes || idea.source?.caption || idea.place.address) && (
-            <span className="block text-[11px] text-[#6D7A77] line-clamp-2 mt-0.5 font-normal">
-              {idea.notes || idea.source?.caption || idea.place.address}
+          {description && (
+            <span className="block text-xs text-[#525F5C] line-clamp-3 mt-1 leading-relaxed font-normal">
+              {description}
             </span>
           )}
           {hours && (
-            <span className={cx('block text-[11px] truncate mt-0.5', hours.closed ? 'text-[#B3261E] font-semibold' : 'text-[#3E4947]')}>
+            <span className={cx('block text-[11px] truncate mt-1', hours.closed ? 'text-[#B3261E] font-semibold' : 'text-[#3E4947]')}>
               {hours.closed ? 'Closed this day' : `🕒 ${hours.text}`}
             </span>
           )}
         </span>
       </button>
-      <div className="flex shrink-0 ml-auto">
+      <div className="flex shrink-0 ml-auto items-center gap-1">
         <Button variant="ghost" className="shrink-0 !px-2.5 !min-h-9" onClick={onAdd} aria-label={`Add ${idea.place.name} at a suggested time`}>
           <Plus className="w-4 h-4" /> Add
         </Button>
