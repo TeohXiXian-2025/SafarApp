@@ -246,9 +246,9 @@ export function AddBookingSheet({
             multiple
             className="hidden"
             onChange={(e) => {
-              const files = e.target.files;
+              const files = Array.from(e.target.files ?? []);
               e.target.value = '';
-              if (files?.length) void onBookingFiles('transport', files);
+              if (files.length) void onBookingFiles('transport', files);
             }}
           />
           <input
@@ -258,9 +258,9 @@ export function AddBookingSheet({
             multiple
             className="hidden"
             onChange={(e) => {
-              const files = e.target.files;
+              const files = Array.from(e.target.files ?? []);
               e.target.value = '';
-              if (files?.length) void onBookingFiles('hotels', files);
+              if (files.length) void onBookingFiles('hotels', files);
             }}
           />
           <input
@@ -270,9 +270,9 @@ export function AddBookingSheet({
             multiple
             className="hidden"
             onChange={(e) => {
-              const files = e.target.files;
+              const files = Array.from(e.target.files ?? []);
               e.target.value = '';
-              if (files?.length) void onDocumentFiles(files);
+              if (files.length) void onDocumentFiles(files);
             }}
           />
           <ErrorBanner>{error}</ErrorBanner>
