@@ -1,6 +1,6 @@
 // Document Vault: my passport, visas and insurance — only I can open them —
 // checked against the trip. The group sees only each person's status labels.
-import { AlertOctagon, CheckCircle2, CircleDashed, ExternalLink, Eye, EyeOff, FileText, Loader2, Lock, Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { AlertOctagon, CheckCircle2, CircleDashed, ExternalLink, Eye, EyeOff, FileText, Loader2, Lock, Pencil, Trash2, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { countryName, paths, Readiness, VAULT_KINDS, type CheckLevel, type ReadyCheck, type VaultDoc, type VaultFields, type VaultKind } from '../../domain';
 import { api, ApiError } from '../../lib/api';
@@ -68,9 +68,6 @@ export function VaultSection() {
           <h2 className="font-bold text-[#161C23] flex items-center gap-2">
             <Lock className="w-4 h-4 text-[#00685F]" /> My documents
           </h2>
-          <Button className="!min-h-9" onClick={() => setEditing('new')} data-quest="vault-upload">
-            <Plus className="w-4 h-4" /> Add
-          </Button>
         </div>
         {state.docs.length === 0 ? (
           <p className="text-sm text-[#6D7A77]">Add your passport first — Safar checks its expiry and the names on your tickets.</p>

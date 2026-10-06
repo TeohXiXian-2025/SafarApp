@@ -1,6 +1,6 @@
-import { AlertTriangle, ClipboardPaste, FileUp, Loader2, PencilLine, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, BedDouble, BusFront, ClipboardPaste, FileText, FileUp, Loader2, PencilLine, Sparkles, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import type { BookingDraft, Member } from '../../domain';
+import { VAULT_KINDS, type BookingDraft, type Member, type VaultFields, type VaultKind } from '../../domain';
 import { api, ApiError } from '../../lib/api';
 import { deleteFile, UPLOAD_ACCEPT, uploadTripFile } from '../../lib/storage';
 import { Button, Card, ErrorBanner, Sheet } from '../../ui';
@@ -13,6 +13,9 @@ interface ReviewItem {
   key: string;
   draft: EditableDraft;
   warnings: string[];
+  fileRef?: string;
+  confidence?: number;
+  source?: Source;
   error?: string;
   saved?: boolean;
 }
@@ -24,9 +27,21 @@ interface ParseResponse {
 
 type Step =
   | { name: 'choose' }
+  | { name: 'upload' }
   | { name: 'paste' }
   | { name: 'working'; label: string; progress?: number }
   | { name: 'review' };
+
+type UploadCategory = 'transport' | 'hotels' | 'documents';
+
+interface UploadResult {
+  key: string;
+  category: UploadCategory;
+  fileName: string;
+  status: 'uploading' | 'reading' | 'ready' | 'saved' | 'error';
+  progress?: number;
+  message?: string;
+}
 
 export function AddBookingSheet({
   open,
@@ -44,31 +59,32 @@ export function AddBookingSheet({
   const [step, setStep] = useState<Step>({ name: 'choose' });
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [source, setSource] = useState<Source>('manual');
-  const [fileRef, setFileRef] = useState<string>();
-  const [confidence, setConfidence] = useState<number>();
+  const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const transportInput = useRef<HTMLInputElement>(null);
+  const hotelsInput = useRef<HTMLInputElement>(null);
+  const documentsInput = useRef<HTMLInputElement>(null);
+  const freshUploads = useRef(new Set<string>());
 
   const reset = () => {
     setStep({ name: 'choose' });
     setItems([]);
+    setUploadResults([]);
     setText('');
     setError('');
-    setFileRef(undefined);
-    setConfidence(undefined);
   };
   const close = () => {
-    // An upload that never became a booking shouldn't linger in storage.
-    if (fileRef && !items.some((i) => i.saved)) void deleteFile(fileRef);
+    // Uploads that never became a booking or vault document shouldn't linger in storage.
+    freshUploads.current.forEach((p) => void deleteFile(p));
+    freshUploads.current.clear();
     reset();
     onClose();
   };
 
   const toReview = (res: ParseResponse, src: Source) => {
     setSource(src);
-    setConfidence(res.confidence);
     if (!res.drafts.length) {
       setError("We couldn't find any flight, train, bus, ferry or hotel details. Try a clearer photo, or enter it manually.");
       setStep({ name: 'choose' });
@@ -78,19 +94,66 @@ export function AddBookingSheet({
     setStep({ name: 'review' });
   };
 
-  const onFile = async (file: File) => {
+  const updateUpload = (key: string, patch: Partial<UploadResult>) => {
+    setUploadResults((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  };
+
+  const onBookingFiles = async (category: Exclude<UploadCategory, 'documents'>, files: FileList | File[]) => {
     setError('');
-    try {
-      setStep({ name: 'working', label: 'Uploading…', progress: 0 });
-      const path = await uploadTripFile(tripId, me.uid, 'bookings', file, (p) =>
-        setStep({ name: 'working', label: 'Uploading…', progress: p }),
-      );
-      setFileRef(path);
-      setStep({ name: 'working', label: 'Reading your ticket with AI…' });
-      toReview(await api.post<ParseResponse>('bookings/parse', { storagePath: path }, { tripId }), 'upload');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong.');
-      setStep({ name: 'choose' });
+    setSource('upload');
+    for (const file of Array.from(files)) {
+      const key = `${category}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      setUploadResults((rows) => [...rows, { key, category, fileName: file.name, status: 'uploading', progress: 0 }]);
+      try {
+        const path = await uploadTripFile(tripId, me.uid, 'bookings', file, (p) => updateUpload(key, { progress: p }));
+        freshUploads.current.add(path);
+        updateUpload(key, { status: 'reading', progress: undefined, message: 'Reading with AI' });
+        const parsed = await api.post<ParseResponse>('bookings/parse', { storagePath: path }, { tripId });
+        const drafts = parsed.drafts.filter((d) => (category === 'hotels' ? d.draft.kind === 'hotel' : d.draft.kind !== 'hotel'));
+        if (!drafts.length) {
+          updateUpload(key, { status: 'error', message: category === 'hotels' ? 'No hotel booking found in this file.' : 'No transport booking found in this file.' });
+          continue;
+        }
+        setItems((existing) => [
+          ...existing,
+          ...drafts.map((d, i) => ({
+            key: `${key}-${i}`,
+            draft: d.draft,
+            warnings: d.warnings,
+            fileRef: path,
+            confidence: parsed.confidence,
+            source: 'upload' as const,
+          })),
+        ]);
+        updateUpload(key, { status: 'ready', message: `${drafts.length} booking${drafts.length === 1 ? '' : 's'} ready to review` });
+      } catch (e) {
+        updateUpload(key, { status: 'error', message: e instanceof Error ? e.message : 'Could not upload this file.' });
+      }
+    }
+  };
+
+  const onDocumentFiles = async (files: FileList | File[]) => {
+    setError('');
+    for (const file of Array.from(files)) {
+      const key = `documents-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      setUploadResults((rows) => [...rows, { key, category: 'documents', fileName: file.name, status: 'uploading', progress: 0 }]);
+      try {
+        const path = await uploadTripFile(tripId, me.uid, 'vault', file, (p) => updateUpload(key, { progress: p }));
+        freshUploads.current.add(path);
+        updateUpload(key, { status: 'reading', progress: undefined, message: 'Reading document' });
+        const read = await api.post<{ kind: VaultKind | null; fields: VaultFields; confidence: number }>('vault/read', { storagePath: path }, { tripId });
+        if (!read.kind) {
+          void deleteFile(path);
+          freshUploads.current.delete(path);
+          updateUpload(key, { status: 'error', message: "Couldn't identify this as a passport, visa or insurance document." });
+          continue;
+        }
+        await api.post('vault/save', { kind: read.kind, fields: read.fields, storagePath: path, keepFile: true, confidence: read.confidence }, { tripId });
+        freshUploads.current.delete(path);
+        updateUpload(key, { status: 'saved', message: `${VAULT_KINDS[read.kind]} saved to Documents` });
+      } catch (e) {
+        updateUpload(key, { status: 'error', message: e instanceof ApiError && e.status === 412 ? 'Open the Documents tab and accept the private vault notice first.' : e instanceof Error ? e.message : 'Could not upload this document.' });
+      }
     }
   };
 
@@ -124,10 +187,16 @@ export function AddBookingSheet({
       try {
         await api.post(
           'bookings/create',
-          { draft: item.draft as BookingDraft, source, ...(fileRef ? { fileRef } : {}), ...(confidence !== undefined ? { parseConfidence: confidence } : {}) },
+          {
+            draft: item.draft as BookingDraft,
+            source: item.source ?? source,
+            ...(item.fileRef ? { fileRef: item.fileRef } : {}),
+            ...(item.confidence !== undefined ? { parseConfidence: item.confidence } : {}),
+          },
           { tripId },
         );
         item.saved = true;
+        if (item.fileRef) freshUploads.current.delete(item.fileRef);
         item.error = undefined;
       } catch (e) {
         item.error = e instanceof ApiError ? e.message : 'Could not save.';
@@ -137,6 +206,8 @@ export function AddBookingSheet({
     setItems([...next]);
     setSaving(false);
     if (next.every((i) => i.saved)) {
+      freshUploads.current.forEach((p) => void deleteFile(p));
+      freshUploads.current.clear();
       reset();
       onClose();
     }
@@ -145,27 +216,15 @@ export function AddBookingSheet({
   const pending = items.filter((i) => !i.saved);
 
   return (
-    <Sheet open={open} onClose={close} title="Add a booking" wide={step.name === 'review'}>
-      <input
-        ref={fileInput}
-        type="file"
-        accept={UPLOAD_ACCEPT}
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          e.target.value = '';
-          if (f) void onFile(f);
-        }}
-      />
-
+    <Sheet open={open} onClose={close} title="Add travel details" wide={step.name === 'review'}>
       {step.name === 'choose' && (
         <div className="space-y-3">
           <ErrorBanner>{error}</ErrorBanner>
           <Option
             icon={<FileUp className="w-5 h-5" />}
-            title="Upload a ticket"
-            text="E-ticket PDF, boarding pass or a screenshot/photo. AI fills in the details."
-            onClick={() => fileInput.current?.click()}
+            title="Upload files"
+            text="Add transport, hotel and document files from one place."
+            onClick={() => setStep({ name: 'upload' })}
           />
           <Option
             icon={<ClipboardPaste className="w-5 h-5" />}
@@ -175,6 +234,90 @@ export function AddBookingSheet({
           />
           <Option icon={<PencilLine className="w-5 h-5" />} title="Enter it manually" text="Type in the flight, train or hotel yourself." onClick={startManual} />
           <p className="text-xs text-[#6D7A77]">Uploads are private to you. Only the details you confirm are shared with the group.</p>
+        </div>
+      )}
+
+      {step.name === 'upload' && (
+        <div className="space-y-4">
+          <input
+            ref={transportInput}
+            type="file"
+            accept={UPLOAD_ACCEPT}
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = e.target.files;
+              e.target.value = '';
+              if (files?.length) void onBookingFiles('transport', files);
+            }}
+          />
+          <input
+            ref={hotelsInput}
+            type="file"
+            accept={UPLOAD_ACCEPT}
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = e.target.files;
+              e.target.value = '';
+              if (files?.length) void onBookingFiles('hotels', files);
+            }}
+          />
+          <input
+            ref={documentsInput}
+            type="file"
+            accept={UPLOAD_ACCEPT}
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = e.target.files;
+              e.target.value = '';
+              if (files?.length) void onDocumentFiles(files);
+            }}
+          />
+          <ErrorBanner>{error}</ErrorBanner>
+          <UploadBucket
+            icon={<BusFront className="w-5 h-5" />}
+            title="Transport"
+            text="Flights, trains, buses and ferries."
+            onClick={() => transportInput.current?.click()}
+          />
+          <UploadBucket
+            icon={<BedDouble className="w-5 h-5" />}
+            title="Hotels"
+            text="Hotel and stay confirmations."
+            onClick={() => hotelsInput.current?.click()}
+          />
+          <UploadBucket
+            icon={<FileText className="w-5 h-5" />}
+            title="Documents"
+            text="Passport, visa and insurance files for your private vault."
+            onClick={() => documentsInput.current?.click()}
+          />
+          {uploadResults.length > 0 && (
+            <div className="space-y-2">
+              {uploadResults.map((r) => (
+                <div key={r.key} className="rounded-xl border border-[#E7DFD5] bg-white px-3 py-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    {(r.status === 'uploading' || r.status === 'reading') && <Loader2 className="w-4 h-4 animate-spin text-[#00685F]" />}
+                    <span className="min-w-0 flex-1 truncate font-semibold text-[#161C23]">{r.fileName}</span>
+                    <span className={r.status === 'error' ? 'text-[#B3261E]' : r.status === 'saved' || r.status === 'ready' ? 'text-[#00685F]' : 'text-[#6D7A77]'}>
+                      {r.status === 'uploading' ? `${Math.round((r.progress ?? 0) * 100)}%` : r.status}
+                    </span>
+                  </div>
+                  {r.message && <p className={r.status === 'error' ? 'mt-1 text-xs text-[#B3261E]' : 'mt-1 text-xs text-[#6D7A77]'}>{r.message}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setStep({ name: 'choose' })}>
+              Back
+            </Button>
+            <Button className="flex-1" disabled={!items.some((i) => !i.saved)} onClick={() => setStep({ name: 'review' })}>
+              Review {items.filter((i) => !i.saved).length || ''} booking{items.filter((i) => !i.saved).length === 1 ? '' : 's'}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -283,6 +426,23 @@ function Option({ icon, title, text, onClick }: { icon: React.ReactNode; title: 
         <span className="block font-bold text-[#161C23]">{title}</span>
         <span className="block text-sm text-[#6D7A77]">{text}</span>
       </span>
+    </button>
+  );
+}
+
+function UploadBucket({ icon, title, text, onClick }: { icon: React.ReactNode; title: string; text: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full flex items-center gap-3 p-4 rounded-2xl border border-dashed border-[#D8CEC2] bg-white text-left hover:border-[#00685F]/60 hover:bg-[#00685F]/5 transition-colors"
+    >
+      <span className="w-10 h-10 rounded-xl bg-[#00685F]/10 text-[#00685F] flex items-center justify-center shrink-0">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-bold text-[#161C23]">{title}</span>
+        <span className="block text-sm text-[#6D7A77]">{text}</span>
+      </span>
+      <FileUp className="w-4 h-4 text-[#6D7A77] shrink-0" />
     </button>
   );
 }

@@ -1,7 +1,7 @@
 // Bookings, in three tabs: Transport (flights, trains, buses, ferries — and
 // the journeys still to book), Hotels (stays, hotel lists, hotel bookings)
 // and Documents (the private vault).
-import { Plus, TriangleAlert } from 'lucide-react';
+import { Upload, TriangleAlert } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Booking, paths, Stay, transportGaps } from '../../domain';
@@ -44,11 +44,9 @@ export function BookingsPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <PageHeader eyebrow="Tickets · stays · documents" title="Bookings">
-        {tab !== 'documents' && (
-          <Button onClick={() => setAdding(true)} className="shrink-0" data-quest="add-booking">
-            <Plus className="w-4 h-4" /> Add ticket or hotel
-          </Button>
-        )}
+        <Button onClick={() => setAdding(true)} className="shrink-0" data-quest="add-booking">
+          <Upload className="w-4 h-4" /> Upload
+        </Button>
       </PageHeader>
       <p className="-mt-2 text-sm text-[#6D7A77]">Transport and hotels become fixed points on the plan.</p>
 
@@ -72,7 +70,7 @@ export function BookingsPage() {
       {tab === 'documents' ? (
         <VaultSection />
       ) : tab === 'stays' ? (
-        <StaysSection bookings={bookings.data} onUpload={() => setAdding(true)} onEditBooking={setEditing} />
+        <StaysSection bookings={bookings.data} onEditBooking={setEditing} />
       ) : bookings.loading ? (
         <Spinner />
       ) : (
@@ -83,9 +81,6 @@ export function BookingsPage() {
             <Card className="p-6 text-center space-y-3">
               <p className="font-bold text-[#161C23]">No transport yet</p>
               <p className="text-sm text-[#6D7A77]">Upload an e-ticket or screenshot and AI fills in the details — or type them in.</p>
-              <Button onClick={() => setAdding(true)}>
-                <Plus className="w-4 h-4" /> Add your first booking
-              </Button>
             </Card>
           ) : (
             byDay.map(([day, list]) => (

@@ -33,7 +33,7 @@ function bookingsOf(stay: Stay, hotels: Booking[]): Booking[] {
   return hotels.filter((h) => !h.stayId && h.startLocal.slice(0, 10) < stay.checkOut && h.endLocal.slice(0, 10) > stay.checkIn);
 }
 
-export function StaysSection({ bookings, onUpload, onEditBooking }: { bookings: Booking[]; onUpload: () => void; onEditBooking: (b: Booking) => void }) {
+export function StaysSection({ bookings, onEditBooking }: { bookings: Booking[]; onEditBooking: (b: Booking) => void }) {
   const { trip, members, me, isAdmin } = useTrip();
   const stays = useQuery(`stays:${trip.id}`, () => paths.stays(trip.id), Stay);
   const [editing, setEditing] = useState<Stay | 'new' | null>(null);
@@ -136,7 +136,7 @@ export function StaysSection({ bookings, onUpload, onEditBooking }: { bookings: 
           .sort((a, b) => a.at.localeCompare(b.at))
           .map((x) =>
             'stay' in x && x.stay ? (
-              <StayCard key={x.stay.id} stay={x.stay} booked={bookingsOf(x.stay, hotels)} journeys={bookings} onEdit={() => setEditing(x.stay)} onUpload={onUpload} />
+              <StayCard key={x.stay.id} stay={x.stay} booked={bookingsOf(x.stay, hotels)} journeys={bookings} onEdit={() => setEditing(x.stay)} />
             ) : 'gap' in x && x.gap ? (
               <Card key={`gap-${x.gap.checkIn}`} className="p-4 flex flex-wrap items-center gap-3 border-dashed">
                 <span className="w-10 h-10 rounded-xl bg-[#FDF3E1] text-[#96590B] flex items-center justify-center shrink-0">
@@ -190,7 +190,7 @@ export function StaysSection({ bookings, onUpload, onEditBooking }: { bookings: 
   );
 }
 
-function StayCard({ stay, booked, journeys, onEdit, onUpload }: { stay: Stay; booked: Booking[]; journeys: Booking[]; onEdit: () => void; onUpload: () => void }) {
+function StayCard({ stay, booked, journeys, onEdit }: { stay: Stay; booked: Booking[]; journeys: Booking[]; onEdit: () => void }) {
   const { trip, isAdmin } = useTrip();
   const options = useQuery(`hotels:${trip.id}:${stay.id}`, () => paths.hotels(trip.id, stay.id), HotelOption);
   const [busy, setBusy] = useState(false);
@@ -295,7 +295,7 @@ function StayCard({ stay, booked, journeys, onEdit, onUpload }: { stay: Stay; bo
           ) : (
             <ul className="space-y-3">
               {shown.map((h) => (
-                <HotelCard key={h.key} stay={stay} hotel={h} chosen={h.key === stay.chosenKey} booked={booked.length > 0} journeys={journeys} onUpload={onUpload} />
+                <HotelCard key={h.key} stay={stay} hotel={h} chosen={h.key === stay.chosenKey} booked={booked.length > 0} journeys={journeys} />
               ))}
             </ul>
           )}
@@ -314,14 +314,13 @@ function StayCard({ stay, booked, journeys, onEdit, onUpload }: { stay: Stay; bo
           current={changing}
           journeys={journeys}
           onClose={() => setChanging(null)}
-          onUpload={onUpload}
         />
       )}
     </Card>
   );
 }
 
-function HotelCard({ stay, hotel: h, chosen, booked, journeys, onUpload }: { stay: Stay; hotel: HotelOption; chosen: boolean; booked: boolean; journeys: Booking[]; onUpload: () => void }) {
+function HotelCard({ stay, hotel: h, chosen, booked, journeys }: { stay: Stay; hotel: HotelOption; chosen: boolean; booked: boolean; journeys: Booking[] }) {
   const { trip, me, members, isAdmin } = useTrip();
   const [offers, setOffers] = useState<{ open: boolean; loading?: boolean }>({ open: false });
   const [markOpen, setMarkOpen] = useState(false);
@@ -475,7 +474,7 @@ function HotelCard({ stay, hotel: h, chosen, booked, journeys, onUpload }: { sta
       <div className="px-3">
         <ErrorBanner>{error}</ErrorBanner>
       </div>
-      {markOpen && <BookSheet stay={stay} hotel={h} journeys={journeys} onClose={() => setMarkOpen(false)} onUpload={() => (setMarkOpen(false), onUpload())} />}
+      {markOpen && <BookSheet stay={stay} hotel={h} journeys={journeys} onClose={() => setMarkOpen(false)} />}
     </li>
   );
 }
@@ -509,14 +508,12 @@ function BookSheet({
   current,
   journeys,
   onClose,
-  onUpload,
 }: {
   stay: Stay;
   hotel: HotelOption | null;
   current?: Booking;
   journeys: Booking[];
   onClose: () => void;
-  onUpload: () => void;
 }) {
   const { trip, members } = useTrip();
   const [who, setWho] = useState<string[]>(current?.travellerUids ?? members.map((m) => m.uid));
@@ -577,11 +574,6 @@ function BookSheet({
         <p className="text-sm text-[#161C23]">
           <strong>{name}</strong>. Check-in and check-out go on the timeline, and AI Arrange starts each day from here. Enter them as on your confirmation, in the hotel's local time.
         </p>
-        {!current && (
-          <Button variant="secondary" className="w-full" onClick={onUpload}>
-            Upload the confirmation instead (AI reads the exact times)
-          </Button>
-        )}
         <Field label="Check-in">{dt(checkIn, setCheckIn)}</Field>
         <Field label="Check-out">{dt(checkOut, setCheckOut, checkIn.slice(0, 10))}</Field>
         {!current && suggested.notes.length > 0 && (
