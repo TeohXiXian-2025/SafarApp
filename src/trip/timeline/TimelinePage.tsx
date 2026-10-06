@@ -2234,7 +2234,7 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
     idea.place.address;
 
   return (
-    <li ref={setNodeRef} className={cx('flex flex-wrap items-start gap-2.5 rounded-2xl border border-[#E7DFD5] bg-white p-3 shadow-xs', (isDragging || placing) && 'opacity-40')}>
+    <li ref={setNodeRef} className={cx('grid grid-cols-[auto_1fr_auto] items-start gap-2.5 rounded-2xl border border-[#E7DFD5] bg-white p-3 shadow-xs', (isDragging || placing) && 'opacity-40')}>
       {/* Drag handle on larger screens; everywhere, "Place" picks a spot on the timeline and "Add" suggests one. */}
       <button
         type="button"
@@ -2245,7 +2245,7 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
       >
         <GripVertical className="w-4 h-4" />
       </button>
-      <div className="flex items-start gap-3 flex-1 min-w-[10rem] text-left">
+      <div className="flex items-start gap-3 min-w-0 text-left">
         <PlaceThumb photoUrl={idea.place.photoUrl} at={idea.place.location} className="w-14 h-14 rounded-xl shrink-0 mt-0.5" small />
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-bold text-[#161C23] truncate">{idea.place.name}</span>
@@ -2273,11 +2273,6 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
                 <span>{showDesc ? 'Hide details' : 'Show details'}</span>
                 <ChevronDown className={cx('w-3.5 h-3.5 transition-transform', showDesc && 'rotate-180')} />
               </button>
-              {showDesc && (
-                <p className="mt-1 text-xs text-[#525F5C] leading-relaxed font-normal bg-[#F7F4EF] p-2 rounded-xl">
-                  {description}
-                </p>
-              )}
             </div>
           )}
           {hours && (
@@ -2287,7 +2282,7 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
           )}
         </span>
       </div>
-      <div className="flex shrink-0 ml-auto items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <Button variant="ghost" className="shrink-0 !px-2.5 !min-h-9" onClick={onAdd} aria-label={`Add ${idea.place.name} at a suggested time`}>
           <Plus className="w-4 h-4" /> Add
         </Button>
@@ -2295,6 +2290,11 @@ function BacklogItem({ idea, pair, hours, onAdd, onPlace, placing }: { idea: Ide
           <Move className="w-4 h-4" /> Place
         </Button>
       </div>
+      {description && showDesc && (
+        <p className="col-span-3 text-xs text-[#525F5C] leading-relaxed font-normal bg-[#F7F4EF] p-2.5 rounded-xl">
+          {description}
+        </p>
+      )}
     </li>
   );
 }
