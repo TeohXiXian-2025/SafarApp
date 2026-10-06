@@ -281,35 +281,25 @@ export function AddBookingSheet({
             title="Transport"
             text="Flights, trains, buses and ferries."
             onClick={() => transportInput.current?.click()}
+            onFiles={(files) => void onBookingFiles('transport', files)}
+            files={uploadResults.filter((r) => r.category === 'transport')}
           />
           <UploadBucket
             icon={<BedDouble className="w-5 h-5" />}
             title="Hotels"
             text="Hotel and stay confirmations."
             onClick={() => hotelsInput.current?.click()}
+            onFiles={(files) => void onBookingFiles('hotels', files)}
+            files={uploadResults.filter((r) => r.category === 'hotels')}
           />
           <UploadBucket
             icon={<FileText className="w-5 h-5" />}
             title="Documents"
             text="Passport, visa and insurance files for your private vault."
             onClick={() => documentsInput.current?.click()}
+            onFiles={(files) => void onDocumentFiles(files)}
+            files={uploadResults.filter((r) => r.category === 'documents')}
           />
-          {uploadResults.length > 0 && (
-            <div className="space-y-2">
-              {uploadResults.map((r) => (
-                <div key={r.key} className="rounded-xl border border-[#E7DFD5] bg-white px-3 py-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    {(r.status === 'uploading' || r.status === 'reading') && <Loader2 className="w-4 h-4 animate-spin text-[#00685F]" />}
-                    <span className="min-w-0 flex-1 truncate font-semibold text-[#161C23]">{r.fileName}</span>
-                    <span className={r.status === 'error' ? 'text-[#B3261E]' : r.status === 'saved' || r.status === 'ready' ? 'text-[#00685F]' : 'text-[#6D7A77]'}>
-                      {r.status === 'uploading' ? `${Math.round((r.progress ?? 0) * 100)}%` : r.status}
-                    </span>
-                  </div>
-                  {r.message && <p className={r.status === 'error' ? 'mt-1 text-xs text-[#B3261E]' : 'mt-1 text-xs text-[#6D7A77]'}>{r.message}</p>}
-                </div>
-              ))}
-            </div>
-          )}
           <div className="flex gap-3">
             <Button variant="secondary" onClick={() => setStep({ name: 'choose' })}>
               Back
@@ -430,19 +420,74 @@ function Option({ icon, title, text, onClick }: { icon: React.ReactNode; title: 
   );
 }
 
-function UploadBucket({ icon, title, text, onClick }: { icon: React.ReactNode; title: string; text: string; onClick: () => void }) {
+function UploadBucket({
+  icon,
+  title,
+  text,
+  onClick,
+  onFiles,
+  files,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  text: string;
+  onClick: () => void;
+  onFiles: (files: File[]) => void;
+  files: UploadResult[];
+}) {
+  const [dragging, setDragging] = useState(false);
+
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragging(false);
+    const dropped = Array.from(e.dataTransfer.files ?? []);
+    if (dropped.length) onFiles(dropped);
+  };
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full flex items-center gap-3 p-4 rounded-2xl border border-dashed border-[#D8CEC2] bg-white text-left hover:border-[#00685F]/60 hover:bg-[#00685F]/5 transition-colors"
+    <div
+      onDragEnter={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={() => setDragging(false)}
+      onDrop={onDrop}
+      className={[
+        'rounded-2xl border border-dashed bg-white transition-colors hover:border-[#00685F]/60 hover:bg-[#00685F]/5',
+        dragging ? 'border-[#00685F] bg-[#00685F]/5 ring-2 ring-[#00685F]/20' : 'border-[#D8CEC2]',
+      ].join(' ')}
     >
-      <span className="w-10 h-10 rounded-xl bg-[#00685F]/10 text-[#00685F] flex items-center justify-center shrink-0">{icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className="block font-bold text-[#161C23]">{title}</span>
-        <span className="block text-sm text-[#6D7A77]">{text}</span>
-      </span>
-      <FileUp className="w-4 h-4 text-[#6D7A77] shrink-0" />
-    </button>
+      <button type="button" onClick={onClick} className="w-full flex items-center gap-3 p-4 text-left">
+        <span className="w-10 h-10 rounded-xl bg-[#00685F]/10 text-[#00685F] flex items-center justify-center shrink-0">{icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-bold text-[#161C23]">{title}</span>
+          <span className="block text-sm text-[#6D7A77]">{text}</span>
+        </span>
+        <FileUp className="w-4 h-4 text-[#6D7A77] shrink-0" />
+      </button>
+      {files.length > 0 && (
+        <div className="space-y-2 border-t border-[#E7DFD5] px-3 pb-3 pt-2">
+          {files.map((r) => (
+            <UploadFileRow key={r.key} file={r} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UploadFileRow({ file: r }: { file: UploadResult }) {
+  return (
+    <div className="rounded-xl border border-[#E7DFD5] bg-white px-3 py-2 text-sm">
+      <div className="flex items-center gap-2">
+        {(r.status === 'uploading' || r.status === 'reading') && <Loader2 className="w-4 h-4 animate-spin text-[#00685F]" />}
+        <span className="min-w-0 flex-1 truncate font-semibold text-[#161C23]">{r.fileName}</span>
+        <span className={r.status === 'error' ? 'text-[#B3261E]' : r.status === 'saved' || r.status === 'ready' ? 'text-[#00685F]' : 'text-[#6D7A77]'}>
+          {r.status === 'uploading' ? `${Math.round((r.progress ?? 0) * 100)}%` : r.status}
+        </span>
+      </div>
+      {r.message && <p className={r.status === 'error' ? 'mt-1 text-xs text-[#B3261E]' : 'mt-1 text-xs text-[#6D7A77]'}>{r.message}</p>}
+    </div>
   );
 }
