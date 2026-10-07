@@ -3,7 +3,7 @@
 //   QuestPanel the guide — a floating card on laptops (the page stays usable), a sheet on phones
 //   spotlight  a pulsing ring around the button the current step needs
 import { collection, limit, orderBy, query } from 'firebase/firestore';
-import { Check, ChevronDown, ChevronRight, Copy, Download, Eye, FileText, Gamepad2, Info, Lightbulb, Link2, MapPin, PartyPopper, SkipForward, Sparkles, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy, Download, Eye, FileText, Gamepad2, Info, Lightbulb, Link2, MapPin, PartyPopper, Sparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ArrangeJob, Booking, DEMO_KIT, demoKitUrl, Expense, Idea, Incident, paths, ScheduleItem, type DemoFile, type Trip } from '../../domain';
@@ -219,8 +219,8 @@ function StepBody({ step, blocked, onGo, onSkip }: { step: QuestStep; blocked: s
         <Button className="flex-1" onClick={onGo}>
           <MapPin className="w-4 h-4" /> Show me where
         </Button>
-        <Button variant="ghost" onClick={onSkip} title="Mark this step as done and move on">
-          <SkipForward className="w-4 h-4" /> Skip
+        <Button variant="ghost" onClick={onSkip} title="Move to the next step">
+          <ChevronRight className="w-4 h-4" /> Next
         </Button>
       </div>
     </div>
@@ -341,13 +341,9 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
     const s = QUEST.find((x) => x.id === fresh)!;
     setCheer(s.title);
     setPicked(null);
-    if (s.reveal) {
-      // Jump to what changed; the guide comes back with the next step afterwards.
-      setPending(s.id);
-      setOpen(false);
-      return;
-    }
-    setOpen(true); // show the next step
+    setPending(null);
+    setRevealing(null);
+    setOpen(true); // show the next step automatically
     const t = setTimeout(() => setCheer(null), 3500);
     return () => clearTimeout(t);
   }, [progress.done, input.ready]);
