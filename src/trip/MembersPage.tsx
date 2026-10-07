@@ -165,7 +165,7 @@ function InvitePanel({ tripId, tripName }: { tripId: string; tripName: string })
   const active = (invites ?? []).filter((i) => i.expiresAt > Date.now() && i.uses < i.maxUses);
 
   return (
-    <Card className="p-5 space-y-4">
+    <Card className="p-5 space-y-4" reveal="invite-links">
       <div>
         <h2 className="font-bold text-[#161C23] flex items-center gap-2">
           <Link2 className="w-4 h-4 text-[#00685F]" /> Invite links
