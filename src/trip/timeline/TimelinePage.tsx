@@ -1990,7 +1990,7 @@ function StopRow({
               <Clock className="w-3.5 h-3.5 shrink-0 mt-px" /> {row.note}
             </p>
           )}
-          {!!row.journey?.length && <JourneyPrayerList list={row.journey} />}
+          {!!row.journey?.length && <JourneyPrayerList list={row.journey} collapsible />}
           {weather && (
             <p className="mt-1 flex items-start gap-1 text-xs text-[#1D4E89]">
               <CloudRain className="w-3.5 h-3.5 shrink-0 mt-px" /> {weather.text}
