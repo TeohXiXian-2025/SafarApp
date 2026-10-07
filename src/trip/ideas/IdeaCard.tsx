@@ -21,6 +21,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import {
   HalalSummary,
+  DEMO_SPLIT_PLACE,
   ideaConflicts,
   mustConfirm,
   needsReconfirm,
@@ -386,8 +387,8 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
         {/* Voting */}
         <div className="mt-auto pt-3 border-t border-[#E7DFD5] space-y-2">
           <div className="flex items-center gap-2">
-            <VoteButton active={myVote === 1} disabled={closed || !!busy} busy={busy === 'vote1'} onClick={() => vote(1)} count={tally.up} up />
-            <VoteButton active={myVote === -1} disabled={closed || !!busy} busy={busy === 'vote-1'} onClick={() => vote(-1)} count={tally.down} />
+            <VoteButton active={myVote === 1} disabled={closed || !!busy} busy={busy === 'vote1'} onClick={() => vote(1)} count={tally.up} up quest={idea.place.name.toLowerCase().includes(DEMO_SPLIT_PLACE.toLowerCase()) ? 'conflict-agree' : 'vote-agree'} />
+            <VoteButton active={myVote === -1} disabled={closed || !!busy} busy={busy === 'vote-1'} onClick={() => vote(-1)} count={tally.down} quest={idea.place.name.toLowerCase().includes(DEMO_SPLIT_PLACE.toLowerCase()) ? undefined : 'vote-agree'} />
             <div className="ml-auto flex -space-x-1.5">
               {trip.memberIds
                 .filter((u) => idea.votes[u])
@@ -445,7 +446,7 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
   );
 }
 
-function VoteButton({ up, active, count, disabled, busy, onClick }: { up?: boolean; active: boolean; count: number; disabled: boolean; busy: boolean; onClick: () => void }) {
+function VoteButton({ up, active, count, disabled, busy, onClick, quest }: { up?: boolean; active: boolean; count: number; disabled: boolean; busy: boolean; onClick: () => void; quest?: string }) {
   const Icon = up ? Check : X;
   return (
     <button
@@ -454,6 +455,7 @@ function VoteButton({ up, active, count, disabled, busy, onClick }: { up?: boole
       aria-label={up ? 'Agree with this idea' : 'Disagree with this idea'}
       disabled={disabled}
       onClick={onClick}
+      data-quest={quest}
       className={cx(
         'inline-flex items-center gap-1.5 min-h-9 px-3 rounded-full border text-sm font-bold transition-colors disabled:opacity-60',
         active ? (up ? 'bg-[#0B6B45] border-[#0B6B45] text-white' : 'bg-[#B3261E] border-[#B3261E] text-white') : 'bg-white border-[#E7DFD5] text-[#161C23] hover:border-[#00685F]/40',

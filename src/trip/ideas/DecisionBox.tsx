@@ -7,6 +7,7 @@ import { Check, GitFork, Plus, RefreshCw, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   aloneIn,
+  DEMO_SPLIT_PLACE,
   durText,
   groupChoices,
   nonGoers,
@@ -198,7 +199,7 @@ export function DecisionBox({ idea, split, alts }: { idea: Idea; split: Split | 
             ))}
             {!ready && <p className="text-[11px] text-[#6D7A77]">Not everyone has picked yet — you can still decide now.</p>}
             <div className="flex flex-wrap gap-2">
-              <Button className="flex-1 min-h-9" loading={busy === 'accept'} disabled={!!busy} onClick={() => act('accept', () => api.post('ideas/decide', { ideaId: idea.id, action: 'accept' }, q))}>
+              <Button className="flex-1 min-h-9" loading={busy === 'accept'} disabled={!!busy} data-quest={idea.place.name.toLowerCase().includes(DEMO_SPLIT_PLACE.toLowerCase()) ? 'split-accept' : undefined} onClick={() => act('accept', () => api.post('ideas/decide', { ideaId: idea.id, action: 'accept' }, q))}>
                 Accept
               </Button>
               <Button variant="secondary" className="flex-1 min-h-9" loading={busy === 'backup'} disabled={!!busy} onClick={() => act('backup', () => api.post('ideas/decide', { ideaId: idea.id, action: 'backup' }, q))}>

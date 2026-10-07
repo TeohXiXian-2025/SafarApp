@@ -44,7 +44,7 @@ function useIsLaptop() {
 }
 
 /** The trip data the quest looks at (the same shared listeners the pages use). */
-function useQuestInput(trip: Trip, uid: string): QuestInput & { ready: boolean } {
+function useQuestInput(trip: Trip, uid: string): Omit<QuestInput, 'clicked'> & { ready: boolean } {
   const id = trip.id;
   const b = useQuery(`bookings:${id}`, () => paths.bookings(id), Booking);
   const i = useQuery(`ideas:${id}`, () => paths.ideas(id), Idea);
@@ -216,11 +216,11 @@ function StepBody({ step, blocked, onGo, onSkip }: { step: QuestStep; blocked: s
         </span>
       </div>
       <div className="flex gap-2">
-        <Button className="flex-1" onClick={onGo}>
+        {step.id !== 'final' && <Button className="flex-1" onClick={onGo}>
           <MapPin className="w-4 h-4" /> Show me where
-        </Button>
+        </Button>}
         <Button variant="ghost" onClick={onSkip} title="Move to the next step">
-          <ChevronRight className="w-4 h-4" /> Next
+          <ChevronRight className="w-4 h-4" /> {step.id === 'final' ? 'Finish guide' : 'Next'}
         </Button>
       </div>
     </div>
@@ -310,7 +310,9 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const skipKey = `safar:quest-skipped:${trip.id}`;
+  const clickKey = `safar:quest-clicked:${trip.id}`;
   const [skipped, setSkipped] = useState(() => new Set(store.get(skipKey)));
+  const [clicked, setClicked] = useState(() => new Set(store.get(clickKey)));
   const [open, setOpen] = useState(() => laptop);
   const [picked, setPicked] = useState<string | null>(null);
   const [showList, setShowList] = useState(false);
@@ -321,7 +323,8 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const [pending, setPending] = useState<string | null>(null);
   const [revealing, setRevealing] = useState<string | null>(null);
 
-  const input = useQuestInput(trip, uid);
+  const tripInput = useQuestInput(trip, uid);
+  const input = useMemo(() => ({ ...tripInput, clicked }), [tripInput, clicked]);
   const progress = useMemo(() => questProgress(input), [input]);
   const finishedOrSkipped = (id: string) => progress.done.has(id) || skipped.has(id);
   // The guided planning flow before any bonus steps.
@@ -343,9 +346,16 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
     setPicked(null);
     setPending(null);
     setRevealing(null);
-    setOpen(true); // show the next step automatically
+    const showNext = () => {
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) {
+        timer = setTimeout(showNext, 400);
+        return;
+      }
+      setOpen(true);
+    };
+    let timer = setTimeout(showNext, 500);
     const t = setTimeout(() => setCheer(null), 3500);
-    return () => clearTimeout(t);
+    return () => { clearTimeout(t); clearTimeout(timer); };
   }, [progress.done, input.ready]);
 
   // Waits a moment — and for any open sheet, dialog or half-typed field to be done with — then shows it.
@@ -393,6 +403,21 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const onStepPage = !!step && (base ? pathname.startsWith(`/t/${trip.id}${base}`) : pathname === `/t/${trip.id}`);
   useSpotlight(step?.target, onStepPage && !progress.done.has(step?.id ?? ''));
 
+  useEffect(() => {
+    if (!step?.target || !onStepPage || progress.done.has(step.id)) return;
+    const id = step.id;
+    const target = step.target;
+    const onClick = (event: MouseEvent) => {
+      const control = (event.target as Element).closest(`[data-quest="${target}"]`);
+      if (!control || !control.isConnected || control.matches(':disabled') || control.closest('[disabled]')) return;
+      const next = new Set(clicked).add(id);
+      setClicked(next);
+      store.set(clickKey, [...next]);
+    };
+    document.addEventListener('click', onClick);
+    return () => document.removeEventListener('click', onClick);
+  }, [step?.id, step?.target, onStepPage, progress.done, clicked, clickKey]);
+
   const go = useCallback(() => {
     if (!step) return;
     const [path, hash] = step.where.split('#');
@@ -400,13 +425,19 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
     setOpen(false); // out of the way; it comes back when the step is done
     // Scroll to the section / the button once the page is there.
     setTimeout(() => {
-      const el = (hash && document.getElementById(hash)) || (step.target && document.querySelector(`[data-quest="${step.target}"]`));
+      const el = (step.target && document.querySelector(`[data-quest="${step.target}"]`)) || (hash && document.getElementById(hash));
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 450);
   }, [step, laptop, navigate, trip.id]);
 
   const skip = () => {
     if (!step) return;
+    if (step.id === 'final') {
+      const next = new Set(clicked).add('final');
+      setClicked(next);
+      store.set(clickKey, [...next]);
+      return;
+    }
     const next = new Set(skipped).add(step.id);
     setSkipped(next);
     store.set(skipKey, [...next]);

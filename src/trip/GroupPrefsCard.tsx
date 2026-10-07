@@ -63,7 +63,7 @@ export function GroupPrefsCard() {
       ))}
 
       <Link to="../preferences" relative="path" className="block">
-        <Button variant={me.prefs ? 'secondary' : 'primary'} className="w-full">
+        <Button variant={me.prefs ? 'secondary' : 'primary'} className="w-full" data-quest="preferences-edit">
           {me.prefs ? 'Edit my preferences' : 'Set my preferences'}
         </Button>
       </Link>

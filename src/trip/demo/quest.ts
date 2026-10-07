@@ -14,6 +14,7 @@ export interface QuestInput {
   schedule: ScheduleItem[];
   /** Pages this visitor opened in this trip. */
   seen: Set<string>;
+  clicked: Set<string>;
   /** Your Document Vault has a passport (asked from the server; null = not known yet). */
   hasPassport: boolean | null;
 }
@@ -89,11 +90,11 @@ export const QUEST: QuestStep[] = [
     feature: 'group',
     title: 'Start with the trip',
     story: 'Welcome to the sample Japan trip. For this demo, we already added your teammates so you can see the group flow right away. In your future trips, you can add more people from the People page with an invite link.',
-    todo: ['We already added your demo teammates.', 'Tap Show me where to open People.', 'Use Invite links in future trips to add more teammates.'],
+    todo: ['We already added your demo teammates.', 'Tap Show me where, then create an invite link.', 'In a future trip, share the link to add more teammates.'],
     why: 'Safar works best when the group is in one shared workspace. The demo starts with teammates ready, then shows the exact place where invites live.',
     where: '/members#invite',
     target: 'invite-create',
-    done: (q) => q.seen.has('members#invite'),
+    done: (q) => q.clicked.has('start'),
     reveal: () => ({ path: '/members', target: 'invite-links', text: 'This is where you add teammates in a real trip: create an invite link, copy it, or share it with your group.' }),
   },
   {
@@ -101,10 +102,11 @@ export const QUEST: QuestStep[] = [
     feature: 'group',
     title: 'Meet the group',
     story: "Aisyah is planning with Mum Aminah, brother Farid and Daniel. Their needs are different: halal rules, prayer breaks, pace, interests and budget.",
-    todo: ['Open People.', 'Read the group rules and each traveler’s needs.'],
+    todo: ['Open People.', 'Meet the teammates, then tap View group preferences.'],
     why: 'Safar turns individual needs into group rules, such as the strictest halal level for shared meals and prayer breaks only for the people who pray.',
     where: '/members',
-    done: (q) => q.seen.has('members'),
+    target: 'group-review',
+    done: (q) => q.clicked.has('group'),
     reveal: () => ({ path: '/members', target: 'group-rules', text: 'Four people become one planning context: halal, prayer, pace and budget are visible before decisions start.' }),
   },
   {
@@ -112,11 +114,11 @@ export const QUEST: QuestStep[] = [
     feature: 'group',
     title: 'Add a teammate',
     story: 'Real trips become easier when everyone can join the same workspace instead of planning through scattered chats.',
-    todo: ['People -> Invite links.', 'Create or copy an invite link.', 'This is how a teammate joins the trip and starts voting with the group.'],
+    todo: ['People -> Invite links.', 'Copy the link you created.', 'Share it in a future trip so a teammate can join and vote.'],
     why: 'The People page is where collaboration begins: invite teammates first, then their preferences and votes can shape the plan.',
     where: '/members#invite',
-    target: 'invite-create',
-    done: (q) => q.seen.has('members#invite'),
+    target: 'invite-copy',
+    done: (q) => q.clicked.has('invite'),
     reveal: () => ({ path: '/members', target: 'group-rules', text: 'Safar uses the member list as the source of truth for preferences, votes, bookings and split plans.' }),
   },
   {
@@ -124,10 +126,11 @@ export const QUEST: QuestStep[] = [
     feature: 'group',
     title: 'Review preferences',
     story: 'Before adding more places, check how Safar reads the group: who needs halal, who prays, how fast the group moves and what everyone likes.',
-    todo: ['Stay on People.', 'Review the group preferences card.', 'Notice that stricter needs affect shared meals and scheduling.'],
+    todo: ['Review the group preferences card.', 'Tap Edit my preferences to see how your needs are set.'],
     why: 'Preferences are not just profile details. They drive halal warnings, conflict checks, prayer blocks, pacing and what counts as a good suggestion.',
     where: '/members#preferences',
-    done: (q) => q.seen.has('members#preferences'),
+    target: 'preferences-edit',
+    done: (q) => q.clicked.has('preferences'),
     reveal: () => ({ path: '/members', target: 'group-rules', text: 'The group rules are the planning guardrails: they make the later food, voting and prayer steps make sense.' }),
   },
   {
@@ -140,7 +143,7 @@ export const QUEST: QuestStep[] = [
     where: '/bookings',
     target: 'add-booking',
     files: [DEMO_KIT.flight, DEMO_KIT.train, DEMO_KIT.hotelTokyo, DEMO_KIT.hotelKyoto],
-    done: (q) => q.seen.has('bookings') && q.bookings.filter((b) => b.kind === 'flight').length >= 2 && q.bookings.some((b) => b.kind === 'train') && q.bookings.filter((b) => b.kind === 'hotel').length >= 2,
+    done: (q) => q.clicked.has('bookings'),
     reveal: (q) => {
       const train = q.schedule.find((i) => bookingOf(i, q)?.kind === 'train' && i.ref.kind === 'booking');
       return planReveal(train, 'The bookings are now fixed anchors on the Plan. Safar plans activities around travel, hotels and local time zones.');
@@ -155,7 +158,7 @@ export const QUEST: QuestStep[] = [
     why: 'Halal Radar brings halal level, evidence source, distance, opening state and contact actions into one screen before the group votes.',
     where: `/food?lat=${KYOTO_STATION.lat}&lng=${KYOTO_STATION.lng}&near=${encodeURIComponent('Kyoto Station')}`,
     target: 'radar-add',
-    done: (q) => q.seen.has('food') && !!radarIdea(q),
+    done: (q) => q.clicked.has('radar'),
     reveal: (q) => ideaReveal(radarIdea(q), 'Food found through Halal Radar carries its halal evidence into Ideas, so the group can vote with context.'),
   },
   {
@@ -168,7 +171,7 @@ export const QUEST: QuestStep[] = [
     where: '/ideas',
     target: 'add-idea',
     link: { url: DEMO_POST_URL, label: 'Instagram reel - Kyoto: Arashiyama, Kinkaku-ji, Nishiki market' },
-    done: (q) => q.seen.has('ideas') && !!ownLinkedIdea(q),
+    done: (q) => q.clicked.has('suggest'),
     reveal: (q) => ideaReveal(ownLinkedIdea(q), 'A suggestion is now on the Ideas board with place details, halal checks, nearby prayer info and group votes.'),
   },
   {
@@ -176,10 +179,11 @@ export const QUEST: QuestStep[] = [
     feature: 'decisions',
     title: 'Vote Agree or Disagree',
     story: 'Ideas are not automatically placed on the schedule. The group first agrees, disagrees or explains why something is not suitable.',
-    todo: ['Open Ideas -> Vote now.', 'Use Agree or Disagree on an idea.', 'Notice that votes can carry reasons when there is a concern.'],
+    todo: ['Open Ideas -> Vote now.', 'Tap Agree or Disagree on a highlighted idea.', 'Votes can carry reasons when there is a concern.'],
     why: 'Agree and Disagree keep group planning explicit. Safar uses the result to decide whether an idea is accepted, reserved, rejected or needs a compromise.',
     where: '/ideas?filter=voting#vote',
-    done: (q) => q.seen.has('ideas#vote') && q.ideas.some((i) => !!i.votes[q.uid]),
+    target: 'vote-agree',
+    done: (q) => q.clicked.has('vote'),
     reveal: (q) => ideaReveal(q.ideas.find((i) => !!i.votes[q.uid]), 'The vote is now part of the shared decision record, with counts and who still needs to answer.'),
   },
   {
@@ -190,7 +194,8 @@ export const QUEST: QuestStep[] = [
     todo: ['Ideas -> Vote now -> open Ichiran.', 'Tap Agree.', 'When Safar warns that it conflicts with your rules, confirm: "I will keep Daniel company and just have tea."'],
     why: 'A group vote is not just majority rule. If an idea conflicts with someone’s needs, Safar makes the reason visible before resolving it.',
     where: '/ideas?filter=voting#conflict',
-    done: (q) => q.seen.has('ideas#conflict') && !!splitIdea(q)?.votes[q.uid],
+    target: 'conflict-agree',
+    done: (q) => q.clicked.has('conflict'),
     reveal: (q) => ideaReveal(splitIdea(q), 'Two sides are now visible: some want ramen, others need halal food. Safar can resolve this without forcing one group to lose.'),
   },
   {
@@ -201,7 +206,8 @@ export const QUEST: QuestStep[] = [
     todo: ['Ideas -> Needs a decision -> open Ichiran.', 'Review the middle grounds and choices.', 'Accept the split plan.'],
     why: 'Mixed groups can briefly split when one plan cannot serve everyone. Safar times both tracks and sets a shared regroup point.',
     where: '/ideas?filter=mixed',
-    done: (q) => q.seen.has('ideas') && !!splitIdea(q)?.decidedBy,
+    target: 'split-accept',
+    done: (q) => q.clicked.has('split'),
     blocked: noSplit,
     reveal: (q) => {
       const i = splitIdea(q);
@@ -220,7 +226,7 @@ export const QUEST: QuestStep[] = [
     why: 'Auto-plan connects the whole workflow: fixed bookings, agreed ideas, split decisions, travel time, opening hours and prayers become one timeline.',
     where: '/timeline',
     target: 'auto-plan',
-    done: (q) => q.seen.has('timeline') && q.jobs.some((j) => j.status === 'applied'),
+    done: (q) => q.clicked.has('autoPlan'),
     reveal: (q) => {
       const stop = q.schedule.find((i) => i.ref.kind === 'idea');
       return planReveal(stop, 'The plan is no longer a list of ideas. It is a timed itinerary with routes, fixed anchors and group decisions.');
@@ -231,10 +237,11 @@ export const QUEST: QuestStep[] = [
     feature: 'prayer',
     title: 'Check prayer time',
     story: 'For Aisyah, Mum and Farid, prayer is part of the day. Daniel does not pray, so Safar should keep him included too.',
-    todo: ['Open a planned day.', 'Find a prayer block.', 'Check the nearby mosque or prayer room and what the non-praying teammate can do nearby.'],
+    todo: ['Open Plan and find the fixed prayer times.', 'Tap the highlighted Dhuhr time to jump into the day.', 'Check the nearby mosque or prayer room and what the non-praying teammate can do nearby.'],
     why: 'Prayer times are treated like fixed blocks in the day, with walking time and nearby facilities included so the trip does not stall.',
     where: '/timeline',
-    done: (q) => q.seen.has('timeline') && !!firstPrayer(q),
+    target: 'prayer-review',
+    done: (q) => q.clicked.has('prayer'),
     reveal: (q) =>
       planReveal(
         firstPrayer(q),
@@ -249,7 +256,7 @@ export const QUEST: QuestStep[] = [
     todo: ['Review Plan, Ideas, Food and People.', 'Use the guide’s Show buttons to revisit what changed.', 'Keep the trip if you want to continue exploring.'],
     why: 'A new user should leave the guide knowing the main loop: invite people, collect needs, add anchors, discover places, decide together, resolve conflicts and plan around prayer.',
     where: '/timeline',
-    done: (q) => q.jobs.some((j) => j.status === 'applied') && !!firstPrayer(q) && !!splitIdea(q)?.decidedBy && (!!radarIdea(q) || !!ownLinkedIdea(q)),
+    done: (q) => q.clicked.has('final'),
     reveal: (q) => planReveal(firstPrayer(q) ?? q.schedule.find((i) => i.ref.kind === 'idea'), 'The trip is planned end to end: group needs shaped the food choices, decisions and prayer-aware schedule.'),
   },
 ];

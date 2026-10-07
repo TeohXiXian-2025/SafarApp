@@ -1194,7 +1194,7 @@ export function TimelinePage() {
             </div>
             {/* One control, two scopes: Auto-plan this day or the whole trip (a shared preview the admin applies). */}
             <div className="flex items-stretch gap-2 sm:shrink-0">
-              <div role="group" aria-label="Auto-plan" data-quest="auto-plan" className="flex flex-1 sm:flex-none min-h-10 rounded-xl border border-[#DDD5CA] bg-white overflow-hidden text-[13px] font-bold">
+              <div role="group" aria-label="Auto-plan" className="flex flex-1 sm:flex-none min-h-10 rounded-xl border border-[#DDD5CA] bg-white overflow-hidden text-[13px] font-bold">
                 <span className="flex items-center gap-1.5 pl-3 pr-2.5 text-[#161C23]">
                   <Sparkles className="w-4 h-4 text-gold" /> <span className="whitespace-nowrap hidden sm:inline">Auto-plan</span>
                 </span>
@@ -1202,6 +1202,7 @@ export function TimelinePage() {
                   <button
                     key={scope}
                     type="button"
+                    data-quest={scope === 'trip' ? 'auto-plan' : undefined}
                     onClick={() => void arrange(scope)}
                     disabled={!!arranging}
                     className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 whitespace-nowrap text-[#00685F] hover:bg-[#00685F]/10 border-l border-[#EEE8E0] disabled:opacity-50"
@@ -1230,10 +1231,10 @@ export function TimelinePage() {
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 {(['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'] as const).map((k) => (
-                  <span key={k} className="inline-flex items-center justify-center min-w-[90px] px-2.5 h-6 rounded-full bg-night text-white font-semibold tabular-nums text-center">
+                  <button key={k} type="button" data-quest={k === 'dhuhr' ? 'prayer-review' : undefined} onClick={() => document.getElementById('day-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="inline-flex items-center justify-center min-w-[90px] px-2.5 h-6 rounded-full bg-night text-white font-semibold tabular-nums text-center">
                     <span className="text-gold-soft mr-1">{PRAYER_LABEL[k]}</span>
                     {fmtClock(frame.prayers!.times[k])}
-                  </span>
+                  </button>
                 ))}
                 {outlook && <span className="inline-flex items-center min-h-6 px-2 rounded-full bg-[#EEF3F8] text-[#1D4E89] font-semibold">{outlook}</span>}
               </div>

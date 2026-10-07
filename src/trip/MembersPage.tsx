@@ -92,6 +92,9 @@ export function MembersPage() {
               )}
             </div>
           ))}
+          <button type="button" data-quest="group-review" onClick={() => document.getElementById('preferences')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} className="w-full px-4 py-3 text-left text-sm font-semibold text-[#00685F] hover:bg-[#00685F]/5">
+            View group preferences
+          </button>
         </Card>
 
         {!isAdmin && (
@@ -181,7 +184,7 @@ function InvitePanel({ tripId, tripName }: { tripId: string; tripName: string })
             Used {i.uses}/{i.maxUses} · expires {timeAgo(i.expiresAt)}
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" className="min-h-9 px-3" onClick={() => void copy(i.token)}>
+            <Button variant="secondary" className="min-h-9 px-3" onClick={() => void copy(i.token)} data-quest="invite-copy">
               {copied === i.token ? <Check className="w-4 h-4 text-[#00685F]" /> : <Copy className="w-4 h-4" />}
               {copied === i.token ? 'Copied' : 'Copy'}
             </Button>
