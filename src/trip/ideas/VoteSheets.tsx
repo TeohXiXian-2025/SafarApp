@@ -122,7 +122,7 @@ export function ConfirmGoSheet({
         )}
         <Field label="Why it's OK for you" group>
           <div className="flex flex-wrap gap-2">
-            {GO_REASONS.map((r) => (
+            {GO_REASONS.filter((r) => r !== "I'll pray before or after" || (idea.place.category !== 'food' && conflicts.some((c) => c.kind === 'prayer'))).map((r) => (
               <Chip key={r} selected={picked === r} onClick={() => setPicked(picked === r ? null : r)}>
                 {r}
               </Chip>

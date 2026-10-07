@@ -321,7 +321,17 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
     return new Set(store.get(skipKey));
   });
   const [clicked, setClicked] = useState(() => new Set(store.get(clickKey)));
+  const clickedRef = useRef(clicked);
+  const markDone = useCallback((id: string) => {
+    if (clickedRef.current.has(id)) return;
+    const next = new Set(clickedRef.current).add(id);
+    clickedRef.current = next;
+    setClicked(next);
+    store.set(clickKey, [...next]);
+  }, [clickKey]);
   const [open, setOpen] = useState(true);
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
+  const actionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const [showList, setShowList] = useState(false);
   const [kit, setKit] = useState(false);
@@ -339,6 +349,13 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const left = (s: QuestStep) => !finishedOrSkipped(s.id);
   const nextStep = QUEST.find((s) => left(s) && !s.bonus) ?? QUEST.find(left) ?? null;
   const step = (picked ? QUEST.find((s) => s.id === picked) : null) ?? nextStep;
+
+  useEffect(() => {
+    setFocusTarget(null);
+    return () => {
+      if (actionTimer.current) clearTimeout(actionTimer.current);
+    };
+  }, [step?.id]);
 
   // A step just got done: a short cheer, then the next one.
   const prevDone = useRef<Set<string> | null>(null);
@@ -369,7 +386,7 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
       setOpen(true);
       advanceTimer.current = null;
     };
-    advanceTimer.current = setTimeout(showNext, 500);
+    advanceTimer.current = setTimeout(showNext, ['start', 'group', 'invite', 'preferences'].includes(s.id) ? 0 : 500);
     if (cheerTimer.current) clearTimeout(cheerTimer.current);
     cheerTimer.current = setTimeout(() => setCheer(null), 3500);
   }, [progress.done, input.ready]);
@@ -417,8 +434,39 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
 
   const base = step?.where.split(/[?#]/)[0] ?? '';
   const onStepPage = !!step && (base ? pathname.startsWith(`/t/${trip.id}${base}`) : pathname === `/t/${trip.id}`);
-  useSpotlight(step?.target, onStepPage && !progress.done.has(step?.id ?? ''));
+  useSpotlight(focusTarget ? undefined : step?.target, onStepPage && !progress.done.has(step?.id ?? ''));
+  useSpotlight(focusTarget ?? undefined, onStepPage && !progress.done.has(step?.id ?? ''));
   useSpotlight(step?.completeTarget, onStepPage && !progress.done.has(step?.id ?? ''));
+
+  useEffect(() => {
+    if (step?.id !== 'start') return;
+    const created = (event: Event) => {
+      if ((event as CustomEvent<{ tripId: string }>).detail?.tripId !== trip.id) return;
+      setFocusTarget('invite-created-link');
+      if (actionTimer.current) clearTimeout(actionTimer.current);
+      const waitForLink = () => {
+        const link = document.querySelector('[data-quest="invite-created-link"]');
+        if (link?.getClientRects().length) actionTimer.current = setTimeout(() => markDone('start'), 2000);
+        else actionTimer.current = setTimeout(waitForLink, 100);
+      };
+      waitForLink();
+    };
+    window.addEventListener('safar:invite-created', created);
+    return () => window.removeEventListener('safar:invite-created', created);
+  }, [step?.id, trip.id, markDone]);
+
+  useEffect(() => {
+    if (step?.id !== 'bookings') return;
+    const finished = (event: Event) => {
+      if ((event as CustomEvent<{ tripId: string }>).detail?.tripId === trip.id) markDone('bookings');
+    };
+    window.addEventListener('safar:booking-closed', finished);
+    window.addEventListener('safar:booking-uploaded', finished);
+    return () => {
+      window.removeEventListener('safar:booking-closed', finished);
+      window.removeEventListener('safar:booking-uploaded', finished);
+    };
+  }, [step?.id, trip.id, markDone]);
 
   useEffect(() => {
     if (!step?.target || !onStepPage || progress.done.has(step.id)) return;
@@ -428,14 +476,20 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
       const control = (event.target as Element).closest(`[data-quest="${target}"]`);
       if (!control || !control.isConnected || control.matches(':disabled') || control.closest('[disabled]')) return;
       setTimeout(() => {
-        const next = new Set(clicked).add(id);
-        setClicked(next);
-        store.set(clickKey, [...next]);
+        if (id === 'start') return;
+        if (id === 'bookings') {
+          setFocusTarget('booking-upload-option');
+          setOpen(false);
+          return;
+        }
+        if (actionTimer.current) clearTimeout(actionTimer.current);
+        if (id === 'group') setFocusTarget('group-rules');
+        actionTimer.current = setTimeout(() => markDone(id), ['group', 'invite', 'preferences'].includes(id) ? 3000 : 0);
       }, 0);
     };
     document.addEventListener('click', onClick, true);
     return () => document.removeEventListener('click', onClick, true);
-  }, [step?.id, step?.target, step?.completeTarget, onStepPage, progress.done, clicked, clickKey]);
+  }, [step?.id, step?.target, step?.completeTarget, onStepPage, progress.done, markDone]);
 
   const go = useCallback(() => {
     if (!step) return;

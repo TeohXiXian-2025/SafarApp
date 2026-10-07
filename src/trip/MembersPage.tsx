@@ -105,7 +105,7 @@ export function MembersPage() {
       </div>
 
       <div className="space-y-4">
-        <div id="preferences">
+        <div id="preferences" data-quest="group-rules">
           <GroupPrefsCard />
         </div>
         {isAdmin ? (
@@ -125,6 +125,7 @@ function InvitePanel({ tripId, tripName }: { tripId: string; tripName: string })
   const [invites, setInvites] = useState<Invite[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(
@@ -141,8 +142,10 @@ function InvitePanel({ tripId, tripName }: { tripId: string; tripName: string })
     setCreating(true);
     setError('');
     try {
-      await api.post('invites/create', { maxUses: 20, expiresInDays: 7 }, { tripId });
+      const made = await api.post<Invite>('invites/create', { maxUses: 20, expiresInDays: 7 }, { tripId });
+      setCreatedToken(made.token);
       await load();
+      window.dispatchEvent(new CustomEvent('safar:invite-created', { detail: { tripId } }));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not create a link.');
     } finally {
@@ -178,7 +181,7 @@ function InvitePanel({ tripId, tripName }: { tripId: string; tripName: string })
       <ErrorBanner>{error}</ErrorBanner>
 
       {active.map((i) => (
-        <div key={i.token} className="rounded-xl border border-[#E7DFD5] p-3 space-y-2.5">
+        <div key={i.token} data-quest={i.token === createdToken ? 'invite-created-link' : undefined} className="rounded-xl border border-[#E7DFD5] p-3 space-y-2.5">
           <p className="text-xs font-mono text-[#161C23] break-all bg-[#FAF8F5] rounded-lg px-2.5 py-2">{inviteUrl(i.token)}</p>
           <p className="text-xs text-[#6D7A77]">
             Used {i.uses}/{i.maxUses} · expires {timeAgo(i.expiresAt)}

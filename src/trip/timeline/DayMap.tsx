@@ -7,12 +7,17 @@ import type { GeoPoint } from '../../domain';
 
 const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '';
 const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID';
+const CIRCLE_PATH = 0 as google.maps.SymbolPath;
 
 export class DayMapBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('Day map failed to render:', error);
   }
 
   render() {
@@ -88,7 +93,7 @@ export function DayMap({ stops, links = [], selectedId, onSelect }: { stops: Map
                 zIndex={on ? 1000 : s.kind === 'prayer' ? 1 : 10}
                 onClick={() => onSelect?.(s.id)}
                 label={{ text: s.kind === 'prayer' ? 'P' : s.label, color: '#fff', fontWeight: 'bold', fontSize: '12px' }}
-                icon={{ path: google.maps.SymbolPath.CIRCLE, fillColor: s.color, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2, scale: on ? 18 : 15 }}
+                icon={{ path: CIRCLE_PATH, fillColor: s.color, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2, scale: on ? 18 : 15 }}
               />
             );
           })}

@@ -1199,7 +1199,7 @@ export function TimelinePage() {
             </div>
             {/* One control, two scopes: Auto-plan this day or the whole trip (a shared preview the admin applies). */}
             <div className="flex items-stretch gap-2 sm:shrink-0">
-              <div role="group" aria-label="Auto-plan" className="flex flex-1 sm:flex-none min-h-10 rounded-xl border border-[#DDD5CA] bg-white overflow-hidden text-[13px] font-bold">
+              <div role="group" aria-label="Auto-plan" className="flex flex-1 sm:flex-none min-h-10 rounded-xl border border-[#DDD5CA] bg-white overflow-visible text-[13px] font-bold">
                 <span className="flex items-center gap-1.5 pl-3 pr-2.5 text-[#161C23]">
                   <Sparkles className="w-4 h-4 text-gold" /> <span className="whitespace-nowrap hidden sm:inline">Auto-plan</span>
                 </span>
@@ -1210,7 +1210,7 @@ export function TimelinePage() {
                     data-quest={scope === 'trip' ? 'auto-plan' : undefined}
                     onClick={() => void arrange(scope)}
                     disabled={!!arranging}
-                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 whitespace-nowrap text-[#00685F] hover:bg-[#00685F]/10 border-l border-[#EEE8E0] disabled:opacity-50"
+                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 whitespace-nowrap text-[#00685F] hover:bg-[#00685F]/10 border-l border-[#EEE8E0] last:rounded-r-[11px] disabled:opacity-50"
                   >
                     {arranging === scope && <Loader2 className="w-4 h-4 animate-spin" />}
                     {scope === 'day' ? 'This day' : 'Whole trip'}

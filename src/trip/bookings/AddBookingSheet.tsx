@@ -67,6 +67,7 @@ export function AddBookingSheet({
   const hotelsInput = useRef<HTMLInputElement>(null);
   const documentsInput = useRef<HTMLInputElement>(null);
   const freshUploads = useRef(new Set<string>());
+  const notifyGuide = (action: 'closed' | 'uploaded') => window.dispatchEvent(new CustomEvent(`safar:booking-${action}`, { detail: { tripId } }));
 
   const reset = () => {
     setStep({ name: 'choose' });
@@ -81,6 +82,7 @@ export function AddBookingSheet({
     freshUploads.current.clear();
     reset();
     onClose();
+    notifyGuide('closed');
   };
 
   const toReview = (res: ParseResponse, src: Source) => {
@@ -126,6 +128,7 @@ export function AddBookingSheet({
           })),
         ]);
         updateUpload(key, { status: 'ready', message: `${drafts.length} booking${drafts.length === 1 ? '' : 's'} ready to review` });
+        notifyGuide('uploaded');
       } catch (e) {
         updateUpload(key, { status: 'error', message: e instanceof Error ? e.message : 'Could not upload this file.' });
       }
@@ -151,6 +154,7 @@ export function AddBookingSheet({
         await api.post('vault/save', { kind: read.kind, fields: read.fields, storagePath: path, keepFile: true, confidence: read.confidence }, { tripId });
         freshUploads.current.delete(path);
         updateUpload(key, { status: 'saved', message: `${VAULT_KINDS[read.kind]} saved to Documents` });
+        notifyGuide('uploaded');
       } catch (e) {
         updateUpload(key, { status: 'error', message: e instanceof ApiError && e.status === 412 ? 'Open the Documents tab and accept the private vault notice first.' : e instanceof Error ? e.message : 'Could not upload this document.' });
       }
@@ -210,6 +214,7 @@ export function AddBookingSheet({
       freshUploads.current.clear();
       reset();
       onClose();
+      notifyGuide('closed');
     }
   };
 
@@ -225,6 +230,7 @@ export function AddBookingSheet({
             title="Upload files"
             text="Add transport, hotel and document files from one place."
             onClick={() => setStep({ name: 'upload' })}
+            quest="booking-upload-option"
           />
           <Option
             icon={<ClipboardPaste className="w-5 h-5" />}
@@ -404,11 +410,12 @@ export function AddBookingSheet({
   );
 }
 
-function Option({ icon, title, text, onClick }: { icon: React.ReactNode; title: string; text: string; onClick: () => void }) {
+function Option({ icon, title, text, onClick, quest }: { icon: React.ReactNode; title: string; text: string; onClick: () => void; quest?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-quest={quest}
       className="w-full flex items-start gap-3 p-4 rounded-2xl border border-[#E7DFD5] bg-white text-left hover:border-[#00685F]/50 transition-colors"
     >
       <span className="w-10 h-10 rounded-xl bg-[#00685F]/10 text-[#00685F] flex items-center justify-center shrink-0">{icon}</span>
