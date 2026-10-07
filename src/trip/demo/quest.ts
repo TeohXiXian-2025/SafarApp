@@ -91,8 +91,8 @@ export const QUEST: QuestStep[] = [
     story: 'This sample trip is a week in Japan: Kuala Lumpur to Tokyo, then Kyoto, then home from Osaka. You play Aisyah, the planner.',
     todo: ['Open the trip Home screen.', 'Notice the dates, route and planning areas: Plan, Ideas, Food and People.'],
     why: 'Safar plans from one shared trip workspace. New users should first understand where the trip lives before adding places or making decisions.',
-    where: '',
-    done: (q) => q.seen.has('home'),
+    where: '#trip-overview',
+    done: (q) => q.seen.has('home#trip-overview'),
     reveal: () => ({ path: '', target: 'trip-overview', text: 'This is the planning base: the trip dates, route and next actions all lead into the same shared plan.' }),
   },
   {

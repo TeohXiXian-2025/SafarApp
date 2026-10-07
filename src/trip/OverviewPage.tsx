@@ -80,7 +80,7 @@ export function OverviewPage() {
   const doneCount = ready.filter((r) => r.done).length;
 
   return (
-    <div data-reveal="trip-overview" className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
+    <div id="trip-overview" data-reveal="trip-overview" className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
       <div className="space-y-5 min-w-0">
         {/* Hero */}
         <section className="relative overflow-hidden rounded-3xl bg-night text-white anim-rise">
