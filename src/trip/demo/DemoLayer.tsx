@@ -14,6 +14,7 @@ import { Button, cx, Sheet } from '../../ui';
 import { KeepTripSheet } from './KeepTripSheet';
 import { RevealLayer } from './RevealLayer';
 import { FEATURES, QUEST, questProgress, type QuestInput, type QuestStep } from './quest';
+import { resetDemoCacheOnce } from './resetCache';
 
 const store = {
   get: (k: string): string[] => {
@@ -311,7 +312,14 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const { pathname } = useLocation();
   const skipKey = `safar:quest-skipped:${trip.id}`;
   const clickKey = `safar:quest-clicked:${trip.id}`;
-  const [skipped, setSkipped] = useState(() => new Set(store.get(skipKey)));
+  const [skipped, setSkipped] = useState(() => {
+    try {
+      resetDemoCacheOnce(localStorage, sessionStorage);
+    } catch {
+      // Storage may be blocked; the guide still works for this visit.
+    }
+    return new Set(store.get(skipKey));
+  });
   const [clicked, setClicked] = useState(() => new Set(store.get(clickKey)));
   const [open, setOpen] = useState(true);
   const [picked, setPicked] = useState<string | null>(null);
