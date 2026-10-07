@@ -73,8 +73,8 @@ export function DemoPage() {
               Plan a week in Japan <span className="text-gold-soft italic">for four very different people.</span>
             </h1>
             <p className="text-white/80 text-[16px] md:text-lg mt-4 max-w-xl leading-relaxed">
-              You play Aisyah. Your mum only eats certified halal, your brother wants anime and views, and his friend Daniel wants pork ramen. Safar’s six
-              features in about 15 guided minutes — with sample tickets, a real Instagram reel, real places and five prayers a day.
+              You play Aisyah. Your mum only eats certified halal, your brother wants anime and views, and his friend Daniel wants pork ramen. A guided sample trip
+              walks through the full Safar flow — teammates, bookings, Halal Radar, Agree/Disagree votes, conflict resolution and prayer-aware planning.
             </p>
             <div className="mt-7 flex flex-col sm:flex-row gap-3">
               {guest ? (
@@ -127,10 +127,10 @@ export function DemoPage() {
       <main className="max-w-6xl mx-auto px-4 md:px-8 py-12 md:py-16 space-y-14">
         <section>
           <p className="text-[12px] font-bold uppercase tracking-[.12em] text-[#00685F]">The Trip Quest</p>
-          <h2 className="font-display text-3xl md:text-4xl font-semibold text-[#161C23] mt-2">Six features, one real plan</h2>
+          <h2 className="font-display text-3xl md:text-4xl font-semibold text-[#161C23] mt-2">One guided flow, one real plan</h2>
           <p className="text-[#45524F] mt-2 max-w-2xl">
-            A guide inside the trip shows each step, where to tap, and the file or link to use. Each is something other planners can’t do for a mixed group — do them in any
-            order.
+            A guide inside the trip shows each step, where to tap, and the file or link to use. It teaches the planning loop a new user needs: invite people, review needs,
+            add anchors, find halal food, vote, resolve conflicts, then auto-plan around prayer.
           </p>
           <ol className="mt-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {(Object.keys(FEATURES) as FeatureKey[]).map((k, i) => {

@@ -102,9 +102,13 @@ export function MembersPage() {
       </div>
 
       <div className="space-y-4">
-        <GroupPrefsCard />
+        <div id="preferences">
+          <GroupPrefsCard />
+        </div>
         {isAdmin ? (
-          <InvitePanel tripId={trip.id} tripName={trip.name} />
+          <div id="invite">
+            <InvitePanel tripId={trip.id} tripName={trip.name} />
+          </div>
         ) : (
           <Card className="p-5 text-sm text-[#6D7A77]">Only the trip admin can invite people. Ask them for a link.</Card>
         )}
@@ -201,7 +205,7 @@ function InvitePanel({ tripId, tripName }: { tripId: string; tripName: string })
         </div>
       ))}
 
-      <Button onClick={create} loading={creating} variant={active.length ? 'secondary' : 'primary'} className="w-full">
+      <Button onClick={create} loading={creating} variant={active.length ? 'secondary' : 'primary'} className="w-full" data-quest="invite-create">
         {active.length ? 'Create another link' : 'Create invite link'}
       </Button>
     </Card>

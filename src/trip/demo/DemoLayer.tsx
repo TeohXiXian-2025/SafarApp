@@ -56,18 +56,19 @@ function useQuestInput(trip: Trip, uid: string): QuestInput & { ready: boolean }
   const [bookings, ideas, jobs, expenses, incidents] = [b.data, i.data, j.data, e.data, n.data];
   // Everything has arrived once: only after that does a step count as "just done".
   const loaded = ![b, i, j, e, n, s].some((q) => q.loading);
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
 
   // Pages seen (for "have a look" steps), remembered on this device.
   const seenKey = `safar:quest-seen:${id}`;
   const [seen, setSeen] = useState(() => new Set(store.get(seenKey)));
   useEffect(() => {
-    const page = pathname.split('/')[3] ?? '';
-    if (!page || seen.has(page)) return;
+    const page = pathname.split('/')[3] || 'home';
     const next = new Set(seen).add(page);
+    if (hash) next.add(`${page}${hash}`);
+    if (next.size === seen.size) return;
     setSeen(next);
     store.set(seenKey, [...next]);
-  }, [pathname, seen, seenKey]);
+  }, [pathname, hash, seen, seenKey]);
 
   // The vault is private (no live listener): ask while the passport step is the one being done.
   const [hasPassport, setHasPassport] = useState<boolean | null>(null);
@@ -233,7 +234,7 @@ function Finished({ onKeep, onClose }: { onKeep: () => void; onClose: () => void
         <PartyPopper className="w-8 h-8" />
       </span>
       <h3 className="font-display text-2xl font-semibold text-[#161C23]">The trip is planned</h3>
-      <p className="text-[14px] text-[#45524F] leading-relaxed">One week, four very different people, nobody left out. You’ve seen all six:</p>
+      <p className="text-[14px] text-[#45524F] leading-relaxed">One week, four very different people, nobody left out. You’ve seen the planning flow:</p>
       <ul className="text-left space-y-1.5 text-[13.5px] text-[#161C23]">
         {Object.values(FEATURES).map((f) => (
           <li key={f.name} className="flex items-center gap-2 rounded-lg bg-white border border-[#EFE8DE] px-3 py-2">
@@ -325,7 +326,7 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const finishedOrSkipped = (id: string) => progress.done.has(id) || skipped.has(id);
   // Steps can be done in any order: carry on after the furthest one done, then come back for any missed.
   const furthest = QUEST.reduce((m, s, i) => (progress.done.has(s.id) ? i : m), -1);
-  // The six features before the bonus.
+  // The guided planning flow before any bonus steps.
   const left = (s: QuestStep) => !finishedOrSkipped(s.id);
   const nextStep =
     QUEST.find((s, i) => i > furthest && left(s) && !s.bonus) ?? QUEST.find((s) => left(s) && !s.bonus) ?? QUEST.find(left) ?? null;

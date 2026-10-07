@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   Clock,
   ExternalLink,
@@ -15,8 +16,7 @@ import {
   ShieldCheck,
   ShieldQuestion,
   Star,
-  ThumbsDown,
-  ThumbsUp,
+  X,
   Trash2, Coffee } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -133,7 +133,7 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
   const myConflicts = conflicts.filter((c) => c.uid === me.uid);
   const toConfirm = mustConfirm(myConflicts);
   const reconfirm = ['voting', 'mixed', 'backlog', 'scheduled'].includes(idea.status) && needsReconfirm(idea.votes[me.uid], myConflicts);
-  // 👍 despite a conflict asks first; 👎 asks why; tapping your current vote takes it back.
+  // Agreeing despite a conflict asks first; disagreeing asks why; tapping your current vote takes it back.
   const vote = (value: 1 | -1) => {
     if (myVote === value) return act(`vote${value}`, () => sendVote({ value: 0 }));
     if (value === -1) return setDownSheet(true);
@@ -340,7 +340,7 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
         {reconfirm && (
           <div className="rounded-xl border border-[#F0C987] bg-[#FDF3E1] p-3 text-sm flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-[#96590B] shrink-0" />
-            <span className="flex-1 text-[#7A4A06]">Something changed since you said 👍 — still going?</span>
+            <span className="flex-1 text-[#7A4A06]">Something changed since you agreed — still going?</span>
             <button type="button" className="font-bold text-[#00685F] shrink-0" onClick={() => setConfirmSheet('again')}>
               Review
             </button>
@@ -395,7 +395,7 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
                 .map((u) => {
                   const m = byUid.get(u);
                   return (
-                    <span key={u} title={`${m?.displayName ?? 'Member'} ${idea.votes[u].value === 1 ? '👍' : '👎'}${idea.votes[u].reason ? ` — ${idea.votes[u].reason}` : ''}`} className={cx('rounded-full ring-2', idea.votes[u].value === 1 ? 'ring-[#B7E1CB]' : 'ring-[#F2B8B5]')}>
+                    <span key={u} title={`${m?.displayName ?? 'Member'} ${idea.votes[u].value === 1 ? 'agreed' : 'disagreed'}${idea.votes[u].reason ? ` — ${idea.votes[u].reason}` : ''}`} className={cx('rounded-full ring-2', idea.votes[u].value === 1 ? 'ring-[#B7E1CB]' : 'ring-[#F2B8B5]')}>
                       <Avatar name={m?.displayName ?? '?'} photoURL={m?.photoURL} size={22} />
                     </span>
                   );
@@ -434,7 +434,7 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
           onConfirm={async (text) => void (await sendVote({ value: 1, ack: text }))}
           onDecline={() => {
             setConfirmSheet(null);
-            // Still voting → vote 👎 (halal); already accepted → step out to a middle ground.
+            // Still voting -> disagree (halal); already accepted -> step out to a middle ground.
             if (OPEN_STATUSES.includes(idea.status)) setDownSheet('halal');
             else setSteppingOut(true);
           }}
@@ -446,12 +446,12 @@ export function IdeaCard({ idea, split, alts, scheduledDay }: { idea: Idea; spli
 }
 
 function VoteButton({ up, active, count, disabled, busy, onClick }: { up?: boolean; active: boolean; count: number; disabled: boolean; busy: boolean; onClick: () => void }) {
-  const Icon = up ? ThumbsUp : ThumbsDown;
+  const Icon = up ? Check : X;
   return (
     <button
       type="button"
       aria-pressed={active}
-      aria-label={up ? 'Vote yes' : 'Vote no'}
+      aria-label={up ? 'Agree with this idea' : 'Disagree with this idea'}
       disabled={disabled}
       onClick={onClick}
       className={cx(
@@ -459,7 +459,7 @@ function VoteButton({ up, active, count, disabled, busy, onClick }: { up?: boole
         active ? (up ? 'bg-[#0B6B45] border-[#0B6B45] text-white' : 'bg-[#B3261E] border-[#B3261E] text-white') : 'bg-white border-[#E7DFD5] text-[#161C23] hover:border-[#00685F]/40',
       )}
     >
-      {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Icon className="w-4 h-4" />} {count}
+      {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Icon className="w-4 h-4" />} <span>{up ? 'Agree' : 'Disagree'}</span> {count}
     </button>
   );
 }
