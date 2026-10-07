@@ -77,7 +77,7 @@ export const Trip = z.object({
   memberIds: z.array(Id).max(50),
   status: TripStatus,
   /** A demo trip (see demo.ts): deleted at expiresAt unless the guest keeps it by making an account. */
-  demo: z.object({ expiresAt: Millis, kept: z.boolean().optional() }).optional(),
+  demo: z.object({ expiresAt: Millis, kept: z.boolean().optional(), dataVersion: z.number().int().optional() }).optional(),
   createdAt: Millis,
   updatedAt: Millis,
 });

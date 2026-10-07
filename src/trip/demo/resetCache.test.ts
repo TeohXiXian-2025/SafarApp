@@ -22,7 +22,7 @@ describe('one-time demo cache reset', () => {
     local.setItem('safar:lastCurrency:demo_abc', 'JPY');
     local.setItem('safar:quest-clicked:real_trip', '["start"]');
     local.setItem('firebase:authUser', 'keep');
-    local.setItem('safar:demo-cache-reset:guide-v2', '1');
+    local.setItem('safar:demo-cache-reset:guide-v3', '1');
     session.setItem('safar:quest-seen:demo_abc', '["members"]');
 
     expect(resetDemoCacheOnce(local, session)).toBe(true);
@@ -32,7 +32,7 @@ describe('one-time demo cache reset', () => {
     expect(session.getItem('safar:quest-seen:demo_abc')).toBeNull();
     expect(local.getItem('safar:quest-clicked:real_trip')).toBe('["start"]');
     expect(local.getItem('firebase:authUser')).toBe('keep');
-    expect(local.getItem('safar:demo-cache-reset:guide-v2')).toBe('1');
+    expect(local.getItem('safar:demo-cache-reset:guide-v3')).toBe('1');
 
     local.setItem('safar:quest-clicked:demo_abc', '["start"]');
     expect(resetDemoCacheOnce(local, session)).toBe(false);

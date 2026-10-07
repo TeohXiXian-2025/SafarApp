@@ -3,7 +3,7 @@
 //   demo/keep             the guest made a real account → their trip isn't deleted
 //   demo/build-template   (CRON_SECRET) rebuild the template the copies come from
 import { FieldValue } from 'firebase-admin/firestore';
-import { buildTemplate, deleteExpired, keepDemo, startDemo } from '../_lib/demo.js';
+import { buildTemplate, deleteExpired, keepDemo, resetGuestDemo, startDemo } from '../_lib/demo.js';
 import { optionalEnv } from '../_lib/env.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { handle, HttpError, json } from '../_lib/http.js';
@@ -42,6 +42,11 @@ export const demoRoutes: RouteTable = {
     await keepDemo(tripId, user.uid);
     return json({ ok: true });
   }),
+
+  'POST demo/reset': withTrip(async (_req, { tripId, user }) => {
+    if (!isDemoTrip(tripId)) throw new HttpError(400, 'Not a demo trip');
+    return json({ tripId: await resetGuestDemo(tripId, user.uid) });
+  }, { admin: true, perMinute: 5 }),
 
   'POST demo/build-template': handle(async (req) => {
     requireCronSecret(req);

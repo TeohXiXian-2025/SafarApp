@@ -10,6 +10,7 @@ export const isDemoTrip = (tripId: string) => tripId.startsWith(DEMO_TRIP_PREFIX
 
 /** A demo trip (and its guest account) is deleted this long after it starts, unless kept. */
 export const DEMO_TTL_MS = 48 * 3_600_000;
+export const DEMO_DATA_VERSION = 1;
 
 /** The travel mates' fixed ids (real accounts nobody can sign in to). */
 export const DEMO_MATES = {

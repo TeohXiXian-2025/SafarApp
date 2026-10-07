@@ -1,4 +1,4 @@
-const RESET_KEY = 'safar:demo-cache-reset:guide-v3';
+const RESET_KEY = 'safar:demo-cache-reset:guide-v4';
 
 const isDemoKey = (key: string) => key.startsWith('safar:') && /:demo_[A-Za-z0-9_-]+$/.test(key);
 

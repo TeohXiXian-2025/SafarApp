@@ -22,7 +22,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate, useOutletContext, useP
 import { useAuth } from '../auth/auth';
 import { AccountMenu, AppHeader } from '../components/live/AppHeader';
 import { InboxBell } from '../components/live/InboxBell';
-import { Booking, Idea, Member, paths, ScheduleItem, Split, Stay, Trip } from '../domain';
+import { Booking, DEMO_DATA_VERSION, Idea, Member, paths, ScheduleItem, Split, Stay, Trip } from '../domain';
 import { useDoc, useQuery } from '../lib/firestore';
 import { formatDateRange } from '../lib/format';
 import { prefs } from '../pwa/pwa';
@@ -32,6 +32,7 @@ import { ExpenseSheet } from './expenses/ExpenseSheet';
 import { AddIdeaSheet } from './ideas/AddIdeaSheet';
 import { useNeeds } from './ideas/NeedsYou';
 import { DemoLayer } from './demo/DemoLayer';
+import { DemoResetGate } from './demo/DemoResetGate';
 
 export interface TripCtx {
   trip: Trip;
@@ -127,6 +128,10 @@ export function TripLayout() {
         </main>
       </div>
     );
+  }
+
+  if (ctx?.trip.demo && uid?.startsWith('guest_') && !ctx.trip.demo.kept && (ctx.trip.demo.dataVersion ?? 0) < DEMO_DATA_VERSION) {
+    return <DemoResetGate tripId={ctx.trip.id} />;
   }
 
   const today = localToday();

@@ -11,6 +11,7 @@ import type { DocumentReference } from 'firebase-admin/firestore';
 import {
   DEMO_MATES,
   DEMO_PLAYER,
+  DEMO_DATA_VERSION,
   DEMO_TRIP_PREFIX,
   DEMO_TTL_MS,
   Idea,
@@ -25,10 +26,10 @@ import {
   type MemberPrefs,
 } from '../../src/domain/index.js';
 import { internalAuth } from './auth.js';
-import { adminAuth, adminDb } from './firebaseAdmin.js';
+import { adminAuth, adminBucket, adminDb } from './firebaseAdmin.js';
 import { HttpError } from './http.js';
 import { searchPlace } from './places.js';
-import { deleteTripFiles } from './vault.js';
+import { deleteTripFiles, vaultRef } from './vault.js';
 
 /** The visitor's part while the template is built (replaced by the guest's id in each copy). */
 const TEMPLATE_PLAYER = 'safar-demo-aisyah';
@@ -207,7 +208,7 @@ async function copyTemplate(cfg: DemoConfig, guestUid: string): Promise<string> 
   let n = 0;
   for (const d of docs) {
     const data = shiftTimes(JSON.parse(swap(JSON.stringify(d.data))), now - cfg.builtAt) as Record<string, unknown>;
-    if (d.path === paths.trip(cfg.templateTripId)) Object.assign(data, { status: 'planning', demo: { expiresAt: now + DEMO_TTL_MS }, createdAt: now, updatedAt: now });
+    if (d.path === paths.trip(cfg.templateTripId)) Object.assign(data, { status: 'planning', demo: { expiresAt: now + DEMO_TTL_MS, dataVersion: DEMO_DATA_VERSION }, createdAt: now, updatedAt: now });
     batch.set(db.doc(swap(d.path)), data);
     if (++n % 400 === 0) {
       await batch.commit();
@@ -229,6 +230,34 @@ export async function startDemo(): Promise<{ token: string; tripId: string }> {
   const tripId = await copyTemplate(cfg, uid);
   const token = await adminAuth().createCustomToken(uid, { demo: true });
   return { token, tripId };
+}
+
+/** Replace an old guest demo with a clean copy, including votes and uploads. */
+export async function resetGuestDemo(tripId: string, uid: string): Promise<string> {
+  const db = adminDb();
+  const oldRef = db.doc(paths.trip(tripId));
+  const old = await oldRef.get();
+  const demo = old.get('demo') as { kept?: boolean; dataVersion?: number; resetTripId?: string } | undefined;
+  if (!old.exists || !uid.startsWith('guest_') || !demo || demo.kept || old.get('adminId') !== uid) throw new HttpError(403, 'Only an unkept guest demo can be reset');
+  if ((demo.dataVersion ?? 0) >= DEMO_DATA_VERSION) return tripId;
+
+  let replacement = demo.resetTripId;
+  if (!replacement) {
+    const cfg = (await db.doc(paths.demoConfig()).get()).data() as DemoConfig | undefined;
+    if (!cfg?.templateTripId) throw new HttpError(503, 'The demo trip is being set up — try again in a few minutes');
+    replacement = await copyTemplate(cfg, uid);
+    await oldRef.update({ 'demo.resetTripId': replacement });
+  }
+
+  const memberIds = (old.get('memberIds') as string[] | undefined) ?? [];
+  const invites = await db.collection('inviteTokens').where('tripId', '==', tripId).get();
+  await Promise.all([
+    ...invites.docs.map((doc) => doc.ref.delete()),
+    ...memberIds.map((memberUid) => db.recursiveDelete(vaultRef(tripId, memberUid))),
+    adminBucket().deleteFiles({ prefix: `trips/${tripId}/` }),
+  ]);
+  await db.recursiveDelete(oldRef);
+  return replacement;
 }
 
 /** The guest made a real account (linked Google / email): their demo trip stays. */
