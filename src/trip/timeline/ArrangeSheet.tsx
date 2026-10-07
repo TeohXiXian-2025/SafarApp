@@ -137,7 +137,7 @@ export function ArrangeSheet({
             </Button>
           )}
           {canApply ? (
-            <Button className="flex-1" loading={busy} onClick={() => run(onApply)}>
+            <Button className="flex-1" loading={busy} onClick={() => run(onApply)} data-quest="auto-plan-apply">
               Apply to timeline
             </Button>
           ) : (

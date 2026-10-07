@@ -1,14 +1,26 @@
 // The selected day on a map: numbered stops joined in visiting order, split
-// groups in their own colours with dashed lines out from (and back to) the
-// meeting point, a flag with the meeting time, and prayer places on the route. Tapping a
-// stop on the timeline focuses it here.
-import { AdvancedMarker, APIProvider, Map, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
-import { useEffect } from 'react';
+// groups in their own colours with dashed lines, and prayer places on the route.
+// Tapping a stop on the timeline focuses it here.
+import { APIProvider, Map, Marker, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
+import { Component, useEffect, type ReactNode } from 'react';
 import type { GeoPoint } from '../../domain';
-import { cx } from '../../ui';
 
 const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '';
 const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID';
+
+export class DayMapBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed
+      ? <p className="text-sm text-[#6D7A77] p-4">Map is temporarily unavailable. Your timeline is still here.</p>
+      : this.props.children;
+  }
+}
 
 export interface MapStop {
   id: string;
@@ -69,24 +81,15 @@ export function DayMap({ stops, links = [], selectedId, onSelect }: { stops: Map
           {stops.map((s) => {
             const on = s.id === selectedId;
             return (
-              <AdvancedMarker key={s.id} position={s.location} title={s.title} zIndex={on ? 1000 : s.kind === 'prayer' ? 1 : 10} onClick={() => onSelect?.(s.id)}>
-                <span className="flex flex-col items-center">
-                  {s.meet && <span className="mb-0.5 whitespace-nowrap rounded-md bg-[#161C23] px-1.5 py-0.5 text-[10px] font-bold text-white shadow">🚩 {s.meet}</span>}
-                  <span
-                    className={cx(
-                      'relative flex items-center justify-center font-bold text-white shadow-md border-2 border-white transition-transform w-7 h-7 text-xs',
-                      // Prayer places: a rounded square, so they read as "the mosque" at a glance.
-                      s.kind === 'prayer' ? 'rounded-lg' : 'rounded-full',
-                      on && 'scale-125 ring-4 ring-black/20',
-                    )}
-                    style={{ background: s.color }}
-                  >
-                    {s.label}
-                    {s.badge && <span className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-white text-[10px] leading-4 text-center shadow">{s.badge}</span>}
-                  </span>
-                  {on && <span className="mt-1 max-w-40 truncate rounded bg-white px-1.5 py-0.5 text-[11px] font-semibold text-[#161C23] shadow">{s.title}</span>}
-                </span>
-              </AdvancedMarker>
+              <Marker
+                key={s.id}
+                position={s.location}
+                title={[s.title, s.badge, s.meet].filter(Boolean).join(' · ')}
+                zIndex={on ? 1000 : s.kind === 'prayer' ? 1 : 10}
+                onClick={() => onSelect?.(s.id)}
+                label={{ text: s.kind === 'prayer' ? 'P' : s.label, color: '#fff', fontWeight: 'bold', fontSize: '12px' }}
+                icon={{ path: google.maps.SymbolPath.CIRCLE, fillColor: s.color, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2, scale: on ? 18 : 15 }}
+              />
             );
           })}
           <Lines route={route.map((s) => s.location)} links={links} focus={stops.find((s) => s.id === selectedId)?.location} all={stops.map((s) => s.location)} />

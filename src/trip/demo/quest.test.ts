@@ -29,4 +29,13 @@ describe('demo quest progress', () => {
   it('provides a highlighted control for every interactive step', () => {
     expect(QUEST.filter((step) => step.id !== 'final').every((step) => !!step.target)).toBe(true);
   });
+
+  it('waits for the generated plan to be applied', () => {
+    const q = input();
+    q.clicked.add('autoPlan');
+    expect(questProgress(q).done.has('autoPlan')).toBe(false);
+
+    q.jobs = [{ status: 'applied' } as QuestInput['jobs'][number]];
+    expect(questProgress(q).done.has('autoPlan')).toBe(true);
+  });
 });

@@ -313,7 +313,7 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const clickKey = `safar:quest-clicked:${trip.id}`;
   const [skipped, setSkipped] = useState(() => new Set(store.get(skipKey)));
   const [clicked, setClicked] = useState(() => new Set(store.get(clickKey)));
-  const [open, setOpen] = useState(() => laptop);
+  const [open, setOpen] = useState(true);
   const [picked, setPicked] = useState<string | null>(null);
   const [showList, setShowList] = useState(false);
   const [kit, setKit] = useState(false);
@@ -334,6 +334,12 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
 
   // A step just got done: a short cheer, then the next one.
   const prevDone = useRef<Set<string> | null>(null);
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cheerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    if (cheerTimer.current) clearTimeout(cheerTimer.current);
+  }, []);
   useEffect(() => {
     if (!input.ready) return; // still loading: what's done now isn't news
     const before = prevDone.current;
@@ -346,16 +352,18 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
     setPicked(null);
     setPending(null);
     setRevealing(null);
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
     const showNext = () => {
       if (document.querySelector('[role="dialog"], [role="alertdialog"]')) {
-        timer = setTimeout(showNext, 400);
+        advanceTimer.current = setTimeout(showNext, 400);
         return;
       }
       setOpen(true);
+      advanceTimer.current = null;
     };
-    let timer = setTimeout(showNext, 500);
-    const t = setTimeout(() => setCheer(null), 3500);
-    return () => { clearTimeout(t); clearTimeout(timer); };
+    advanceTimer.current = setTimeout(showNext, 500);
+    if (cheerTimer.current) clearTimeout(cheerTimer.current);
+    cheerTimer.current = setTimeout(() => setCheer(null), 3500);
   }, [progress.done, input.ready]);
 
   // Waits a moment — and for any open sheet, dialog or half-typed field to be done with — then shows it.
@@ -402,21 +410,24 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const base = step?.where.split(/[?#]/)[0] ?? '';
   const onStepPage = !!step && (base ? pathname.startsWith(`/t/${trip.id}${base}`) : pathname === `/t/${trip.id}`);
   useSpotlight(step?.target, onStepPage && !progress.done.has(step?.id ?? ''));
+  useSpotlight(step?.completeTarget, onStepPage && !progress.done.has(step?.id ?? ''));
 
   useEffect(() => {
     if (!step?.target || !onStepPage || progress.done.has(step.id)) return;
     const id = step.id;
-    const target = step.target;
+    const target = step.completeTarget ?? step.target;
     const onClick = (event: MouseEvent) => {
       const control = (event.target as Element).closest(`[data-quest="${target}"]`);
       if (!control || !control.isConnected || control.matches(':disabled') || control.closest('[disabled]')) return;
-      const next = new Set(clicked).add(id);
-      setClicked(next);
-      store.set(clickKey, [...next]);
+      setTimeout(() => {
+        const next = new Set(clicked).add(id);
+        setClicked(next);
+        store.set(clickKey, [...next]);
+      }, 0);
     };
-    document.addEventListener('click', onClick);
-    return () => document.removeEventListener('click', onClick);
-  }, [step?.id, step?.target, onStepPage, progress.done, clicked, clickKey]);
+    document.addEventListener('click', onClick, true);
+    return () => document.removeEventListener('click', onClick, true);
+  }, [step?.id, step?.target, step?.completeTarget, onStepPage, progress.done, clicked, clickKey]);
 
   const go = useCallback(() => {
     if (!step) return;

@@ -37,6 +37,7 @@ export interface QuestStep {
   why: string;
   where: string;
   target?: string;
+  completeTarget?: string;
   files?: DemoFile[];
   link?: { url: string; label: string };
   done: (q: QuestInput) => boolean;
@@ -226,7 +227,8 @@ export const QUEST: QuestStep[] = [
     why: 'Auto-plan connects the whole workflow: fixed bookings, agreed ideas, split decisions, travel time, opening hours and prayers become one timeline.',
     where: '/timeline',
     target: 'auto-plan',
-    done: (q) => q.clicked.has('autoPlan'),
+    completeTarget: 'auto-plan-apply',
+    done: (q) => q.clicked.has('autoPlan') && q.jobs.some((j) => j.status === 'applied'),
     reveal: (q) => {
       const stop = q.schedule.find((i) => i.ref.kind === 'idea');
       return planReveal(stop, 'The plan is no longer a list of ideas. It is a timed itinerary with routes, fixed anchors and group decisions.');

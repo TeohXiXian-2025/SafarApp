@@ -100,7 +100,7 @@ import { Badge, Button, Card, cx, ErrorBanner, Sheet, Spinner, Toast } from '../
 import { bookingTitle, clockName, formatDay, KIND, tzCity } from '../bookings/format';
 import { useTrip } from '../TripLayout';
 import { PRAYER_GROUP, PRAYER_PICK_COLORS, REST_GROUP, TRACK_COLOR, trackKeyOf } from '../trackColors';
-import { DayMap, type MapLink, type MapStop } from './DayMap';
+import { DayMap, DayMapBoundary, type MapLink, type MapStop } from './DayMap';
 import { ArrangeSheet } from './ArrangeSheet';
 import { AddStopSheet, CANDIDATE, EditStopSheet, type Checker } from './StopSheets';
 import { FixDaySheet } from './FixDaySheet';
@@ -702,7 +702,11 @@ export function TimelinePage() {
   );
 
   // AI plan: one shared preview for the trip (the newest open one) — every member sees the same; the admin applies.
-  const openPlan = jobs.data.find((j) => j.status === 'preview');
+  const [justArranged, setJustArranged] = useState<ArrangeJob | null>(null);
+  const openPlan = justArranged ?? jobs.data.find((j) => j.status === 'preview');
+  useEffect(() => {
+    if (justArranged && jobs.data.some((j) => j.id === justArranged.id)) setJustArranged(null);
+  }, [justArranged, jobs.data]);
   const [viewPlan, setViewPlan] = useState(false);
   const [arranging, setArranging] = useState<'day' | 'trip' | null>(null);
   const lastJob = jobs.data.find((j) => j.status !== 'discarded');
@@ -851,7 +855,8 @@ export function TimelinePage() {
   const arrange = async (scope: 'day' | 'trip') => {
     setArranging(scope);
     await call(async () => {
-      await api.post<ArrangeJob>('schedule/arrange', scope === 'day' ? { day } : {}, { tripId: trip.id });
+      const job = await api.post<ArrangeJob>('schedule/arrange', scope === 'day' ? { day } : {}, { tripId: trip.id });
+      setJustArranged(job);
       setViewPlan(true);
     });
     setArranging(null);
@@ -1481,7 +1486,9 @@ export function TimelinePage() {
           {/* 1. Map (Reduced by half: 200px height, static non-sticky) */}
           <div className={cx(!showMap && 'hidden lg:block')}>
             <Card className="overflow-hidden h-[200px]">
-              <DayMap stops={mapStops} links={mapLinks} selectedId={selected} onSelect={setSelected} />
+              <DayMapBoundary>
+                <DayMap stops={mapStops} links={mapLinks} selectedId={selected} onSelect={setSelected} />
+              </DayMapBoundary>
             </Card>
           </div>
 
@@ -1621,9 +1628,13 @@ export function TimelinePage() {
           author={openPlan.createdBy === me.uid ? 'you' : people.get(openPlan.createdBy)?.displayName}
           onApply={async () => {
             await api.post('schedule/apply', { jobId: openPlan.id }, { tripId: trip.id });
+            setJustArranged(null);
             if (openPlan.day && openPlan.day !== day) setDay(openPlan.day);
           }}
-          onDiscard={isAdmin || openPlan.createdBy === me.uid ? () => api.post('schedule/discard', { jobId: openPlan.id }, { tripId: trip.id }) : undefined}
+          onDiscard={isAdmin || openPlan.createdBy === me.uid ? async () => {
+            await api.post('schedule/discard', { jobId: openPlan.id }, { tripId: trip.id });
+            setJustArranged(null);
+          } : undefined}
           onClose={() => setViewPlan(false)}
         />
       )}
