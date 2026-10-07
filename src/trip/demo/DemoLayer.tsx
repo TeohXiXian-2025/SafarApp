@@ -324,12 +324,9 @@ export function DemoLayer({ trip, uid }: { trip: Trip; uid: string }) {
   const input = useQuestInput(trip, uid);
   const progress = useMemo(() => questProgress(input), [input]);
   const finishedOrSkipped = (id: string) => progress.done.has(id) || skipped.has(id);
-  // Steps can be done in any order: carry on after the furthest one done, then come back for any missed.
-  const furthest = QUEST.reduce((m, s, i) => (progress.done.has(s.id) ? i : m), -1);
   // The guided planning flow before any bonus steps.
   const left = (s: QuestStep) => !finishedOrSkipped(s.id);
-  const nextStep =
-    QUEST.find((s, i) => i > furthest && left(s) && !s.bonus) ?? QUEST.find((s) => left(s) && !s.bonus) ?? QUEST.find(left) ?? null;
+  const nextStep = QUEST.find((s) => left(s) && !s.bonus) ?? QUEST.find(left) ?? null;
   const step = (picked ? QUEST.find((s) => s.id === picked) : null) ?? nextStep;
 
   // A step just got done: a short cheer, then the next one.

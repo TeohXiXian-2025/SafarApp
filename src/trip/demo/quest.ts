@@ -139,7 +139,7 @@ export const QUEST: QuestStep[] = [
     where: '/bookings',
     target: 'add-booking',
     files: [DEMO_KIT.flight, DEMO_KIT.train, DEMO_KIT.hotelTokyo, DEMO_KIT.hotelKyoto],
-    done: (q) => q.bookings.filter((b) => b.kind === 'flight').length >= 2 && q.bookings.some((b) => b.kind === 'train') && q.bookings.filter((b) => b.kind === 'hotel').length >= 2,
+    done: (q) => q.seen.has('bookings') && q.bookings.filter((b) => b.kind === 'flight').length >= 2 && q.bookings.some((b) => b.kind === 'train') && q.bookings.filter((b) => b.kind === 'hotel').length >= 2,
     reveal: (q) => {
       const train = q.schedule.find((i) => bookingOf(i, q)?.kind === 'train' && i.ref.kind === 'booking');
       return planReveal(train, 'The bookings are now fixed anchors on the Plan. Safar plans activities around travel, hotels and local time zones.');
@@ -154,7 +154,7 @@ export const QUEST: QuestStep[] = [
     why: 'Halal Radar brings halal level, evidence source, distance, opening state and contact actions into one screen before the group votes.',
     where: `/food?lat=${KYOTO_STATION.lat}&lng=${KYOTO_STATION.lng}&near=${encodeURIComponent('Kyoto Station')}`,
     target: 'radar-add',
-    done: (q) => !!radarIdea(q),
+    done: (q) => q.seen.has('food') && !!radarIdea(q),
     reveal: (q) => ideaReveal(radarIdea(q), 'Food found through Halal Radar carries its halal evidence into Ideas, so the group can vote with context.'),
   },
   {
@@ -167,7 +167,7 @@ export const QUEST: QuestStep[] = [
     where: '/ideas',
     target: 'add-idea',
     link: { url: DEMO_POST_URL, label: 'Instagram reel - Kyoto: Arashiyama, Kinkaku-ji, Nishiki market' },
-    done: (q) => !!ownLinkedIdea(q),
+    done: (q) => q.seen.has('ideas') && !!ownLinkedIdea(q),
     reveal: (q) => ideaReveal(ownLinkedIdea(q), 'A suggestion is now on the Ideas board with place details, halal checks, nearby prayer info and group votes.'),
   },
   {
@@ -177,8 +177,8 @@ export const QUEST: QuestStep[] = [
     story: 'Ideas are not automatically placed on the schedule. The group first agrees, disagrees or explains why something is not suitable.',
     todo: ['Open Ideas -> Vote now.', 'Use Agree or Disagree on an idea.', 'Notice that votes can carry reasons when there is a concern.'],
     why: 'Agree and Disagree keep group planning explicit. Safar uses the result to decide whether an idea is accepted, reserved, rejected or needs a compromise.',
-    where: '/ideas?filter=voting',
-    done: (q) => q.ideas.some((i) => !!i.votes[q.uid]),
+    where: '/ideas?filter=voting#vote',
+    done: (q) => q.seen.has('ideas#vote') && q.ideas.some((i) => !!i.votes[q.uid]),
     reveal: (q) => ideaReveal(q.ideas.find((i) => !!i.votes[q.uid]), 'The vote is now part of the shared decision record, with counts and who still needs to answer.'),
   },
   {
@@ -188,8 +188,8 @@ export const QUEST: QuestStep[] = [
     story: 'Daniel really wants Ichiran ramen in Shibuya. Mum and Farid disagree because the broth is pork. You can agree only if you confirm why.',
     todo: ['Ideas -> Vote now -> open Ichiran.', 'Tap Agree.', 'When Safar warns that it conflicts with your rules, confirm: "I will keep Daniel company and just have tea."'],
     why: 'A group vote is not just majority rule. If an idea conflicts with someone’s needs, Safar makes the reason visible before resolving it.',
-    where: '/ideas?filter=voting',
-    done: (q) => !!splitIdea(q)?.votes[q.uid],
+    where: '/ideas?filter=voting#conflict',
+    done: (q) => q.seen.has('ideas#conflict') && !!splitIdea(q)?.votes[q.uid],
     reveal: (q) => ideaReveal(splitIdea(q), 'Two sides are now visible: some want ramen, others need halal food. Safar can resolve this without forcing one group to lose.'),
   },
   {
@@ -200,7 +200,7 @@ export const QUEST: QuestStep[] = [
     todo: ['Ideas -> Needs a decision -> open Ichiran.', 'Review the middle grounds and choices.', 'Accept the split plan.'],
     why: 'Mixed groups can briefly split when one plan cannot serve everyone. Safar times both tracks and sets a shared regroup point.',
     where: '/ideas?filter=mixed',
-    done: (q) => !!splitIdea(q)?.decidedBy,
+    done: (q) => q.seen.has('ideas') && !!splitIdea(q)?.decidedBy,
     blocked: noSplit,
     reveal: (q) => {
       const i = splitIdea(q);
@@ -219,7 +219,7 @@ export const QUEST: QuestStep[] = [
     why: 'Auto-plan connects the whole workflow: fixed bookings, agreed ideas, split decisions, travel time, opening hours and prayers become one timeline.',
     where: '/timeline',
     target: 'auto-plan',
-    done: (q) => q.jobs.some((j) => j.status === 'applied'),
+    done: (q) => q.seen.has('timeline') && q.jobs.some((j) => j.status === 'applied'),
     reveal: (q) => {
       const stop = q.schedule.find((i) => i.ref.kind === 'idea');
       return planReveal(stop, 'The plan is no longer a list of ideas. It is a timed itinerary with routes, fixed anchors and group decisions.');
@@ -233,7 +233,7 @@ export const QUEST: QuestStep[] = [
     todo: ['Open a planned day.', 'Find a prayer block.', 'Check the nearby mosque or prayer room and what the non-praying teammate can do nearby.'],
     why: 'Prayer times are treated like fixed blocks in the day, with walking time and nearby facilities included so the trip does not stall.',
     where: '/timeline',
-    done: (q) => !!firstPrayer(q),
+    done: (q) => q.seen.has('timeline') && !!firstPrayer(q),
     reveal: (q) =>
       planReveal(
         firstPrayer(q),
