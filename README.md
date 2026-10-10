@@ -2,35 +2,18 @@
 > *By Ds gang (Chong Pohyi, Teoh Xi Xian, Tan Wei Feng)*  
 > **Problem Statement:** Travel Planner | 🎥 **[Video Presentation](https://youtu.be/gcn_F3Ni2fs)** | 📊 **[Presentation Slides](https://safar-app-cristal-teohs-projects.vercel.app/pitch)
 **
+
+> **Documentation status:** Section 2 preserves the original ideation and mentor history. Sections 3–6 describe the current app. See the [desktop/tablet guide](User%20Guide/Desktop%20Guide.md), [phone guide](User%20Guide/Phone/Phone%20Guide.md), and [README change summary](README-update-recommendations.md).
 ---
 
 ## 📑 Table of Contents
-* [1. Project Overview](#1-project-overview)
-  * [1.1 The Problem](#the-problem)
-  * [1.2 Current Market Solution](#current-market-solution)
-  * [1.3 Our Solution](#our-solution)
-  * [1.4 Extra Features](#extra-features)
-* [2. Ideation & Process](#2-ideation--process)
-  * [2.1 Ideas We Considered](#21-ideas-we-considered)
-  * [2.2 Ideation Boards](#22-ideation-boards)
-  * [2.3 Mentor Consultation](#23-mentor-consultation)
-* [3. Design & Prototype](#3-design--prototype)
-  * [3.1 Web App Architecture & Hero Onboarding](#31-web-app-architecture--hero-onboarding)
-  * [3.2 Dynamic Prayer-Anchored Timeline & Live Map](#32-dynamic-prayer-anchored-timeline--live-map)
-  * [3.3 AI Mediator & Auto-Split Conflict Resolver](#33-ai-mediator--auto-split-conflict-resolver)
-  * [3.4 Live Geo-Fenced Halal Radar](#34-live-geo-fenced-halal-radar)
-  * [3.5 Social-to-Itinerary Video Extractor](#35-social-to-itinerary-video-extractor)
-  * [3.6 AI Document Vault & Offline Travel Dossier](#36-ai-document-vault--offline-travel-dossier)
-  * [3.7 Live Transit Status & Emergency Fallback Engine](#37-live-transit-status--emergency-fallback-engine)
-* [4. Competitive Edge (What Makes It Different)](#4-competitive-edge-what-makes-it-different)
-  * [4.1 User Journey Transformation (Before vs. After)](#41-user-journey-transformation)
-  * [4.2 Distinctive Twists](#42-distinctive-twists)
-  * [4.3 Competitor Comparison Matrix](#43-competitor-comparison-matrix)
-* [5. Technical Architecture & Feasibility](#5-technical-architecture--feasibility)
-  * [5.1 Tech Stack](#51-tech-stack)
-  * [5.2 System Architecture Diagram](#52-system-architecture-diagram)
-  * [5.3 Build Plan & Scope](#53-build-plan--scope)
-* [6. Try It & Run It](#6-try-it--run-it)
+
+1. [Project Overview](#1-project-overview)
+2. [Ideation & Process](#2-ideation--process)
+3. [Current App & User Flow](#3-current-app--user-flow)
+4. [What Safar Does Today](#4-what-safar-does-today)
+5. [Technical Architecture](#5-technical-architecture)
+6. [Try It & Run It](#6-try-it--run-it)
 
 ---
 
@@ -46,7 +29,9 @@ Planning a trip as a Muslim traveler is exhausting because you have to **juggle 
 <p align="left">Because current tools cannot balance these conflicting needs, someone in the group is always forced to sacrifice their ideal travel experience.</p>
 
 <a id="current-market-solution"></a>
-### 📉 Current Market Solution
+### 📉 Original Market Comparison
+
+This table records the team's initial problem framing during ideation; it is not a current feature audit of the other products.
 
 | Tool | What They Do | Why They Fall Short |
 | :--- | :--- | :--- |
@@ -55,22 +40,22 @@ Planning a trip as a Muslim traveler is exhausting because you have to **juggle 
 | 📱 **Excel & WhatsApp** | Manual schedule tracking and group chats. | Zero automation. Groups must manually argue over schedules and search for food or prayer spots instead of having an app resolve conflicts fairly. |
 
 <a id="our-solution"></a>
-### ✨ Our Solution
+### ✨ Current Solution
 
-| Root cause | Explanation | Our Solution |
-| :--- | :--- | :--- |
-| ⏱️ **Schedule Blind Spots** | Standard travel apps ignore daily prayer times (Waktu Solat), leaving Muslim travelers scrambling to find a mosque while the rest of the group waits with nothing to do. | **Dynamic Prayer-Anchored Timeline:** The app uses the destination's GPS to calculate local prayer times automatically. It inserts a "Prayer Block" into the group schedule, mapping the nearest wudu-friendly facility within walking distance. At the exact same time, it schedules a nearby cafe break or quick activity for non-Muslim members, so the trip never stalls. |
-| 🍽️ **Fragmented Food Search** | Finding safe Halal food overseas forces travelers to manually switch between map apps, social media, and static directories just to verify ingredients.  | **Live Geo-Fenced Halal Radar:** When it is time to eat, the app drops a recommendation based on the group's exact location on the map. It filters nearby restaurants using a clear 3-tier label (Certified Halal, Muslim-Owned, or Pork-Free), displaying walking distances, live wait times, and verified menus all on one single screen. |
-| 🧑‍🧑‍🧒‍🧒 **Inflexible Group Decisions** |  Standard apps use a simple "majority rules" vote. When group preferences clash, someone is always forced to sacrifice their strict dietary rules or personal travel goals.  | **AI Compromise & Auto-Split Engine:** If a group vote creates a conflict, the AI immediately steps in. It will either suggest a middle-ground venue (such as a food district with both Halal and non-Halal stalls side-by-side) or it will automatically split the itinerary into two separate paths for a few hours, placing a synchronized pin on the map for everyone to smoothly regroup later. |
+Safar gives a mixed group one shared trip workspace. Members set their food, prayer, pace and budget needs; add fixed bookings and places; vote on ideas; and build a daily plan around approved stops and prayer times. The [screenshot user guide](User%20Guide/Desktop%20Guide.md) follows this flow in the live demo.
+
+| Need | Current app behavior |
+| :--- | :--- |
+| Prayer-aware scheduling | Prayer times are calculated from the place, date and regional method. The plan displays fixed prayer windows and can include nearby facilities and parallel free time for non-praying members. |
+| Halal food discovery | Food search combines place sources and shows the evidence behind each label. A label may be certified, listed halal, likely, pork-free or unchecked. Travellers should confirm dietary requirements with the restaurant. |
+| Group decisions | Members vote Agree or Disagree on Ideas. When needs conflict, Safar can present middle grounds or a split plan for the admin to review and accept. |
 
 <a id="extra-features"></a>
-### 🚀 Extra Features
+### 🚀 Additional Features
 
-| Feature | What it is | What it actually solve |
-| :--- | :--- | :--- |
-| 📱 **Social-to-Itinerary Engine** | Users can paste a link from an Instagram Reel, TikTok, or Xiaohongshu directly into the app. The AI scans the video, extracts the locations, and instantly generates a draft itinerary block on the shared canvas. | Travelers spend hours manually cross-referencing viral social media videos with map apps which is troublesome. This feature turns a quick social link into a routed itinerary, while instantly running the extracted location through the app's Halal Radar to verify if the trending spot is actually Muslim-friendly. |
-| 🔒 **AI Document Cross-Check Vault** | A secure group vault where users upload passports, visas, and flight tickets. The AI evaluates document metadata to prevent check-in rejections. By extracting flight numbers and PNRs, the Vault acts as the live data feed for the Emergency Engine. | In group travel, one person's expired passport or incorrect visa can ruin the trip. It catches bureaucratic errors weeks in advance and provides the exact legal constraints the AI needs to ensure emergency reroutes are legally viable for all members. |
-| 🆘 **Emergency Fallback Engine** | Because the Vault monitors the uploaded flight tickets, the AI detects cancellations instantly. It triggers a "self-healing" protocol that auto-resyncs the timeline and ensures new transit routes comply with the Vault's visa data. | When an emergency ruins a schedule, the AI auto-resyncs the timeline safely. Simultaneously, it drops new verified Halal dining and prayer facility pins tailored to the new delay route, ensuring Muslim travelers are never stranded without safe options during an emergency. |
+* **Social links to Ideas:** Paste a supported social link, review the places Safar extracts, then add the useful candidates to the group board. Results depend on the link and available services.
+* **Private Document Vault:** Upload a travel document, review server-extracted fields, and choose whether to retain the original file. The app can check dates and export a PDF dossier; travellers remain responsible for confirming official passport and visa requirements.
+* **Disruption support:** When flight-status monitoring is configured, a scheduled check can raise a delay or cancellation report near departure. An admin previews and applies a proposed schedule resync. Weather alerts can flag outdoor stops at risk.
 
 ---
 
@@ -117,207 +102,50 @@ To view our complete and interactive ideation flow, please click the link below.
 
 ---
 
-<a id="3-design--prototype"></a>
-## 🎨 3. Design & Prototype
+<a id="3-current-app--user-flow"></a>
+## 📱 3. Current App & User Flow
 
-🔗 **Live Production Deployment:** **[Safar Web App (Live on Vercel)](https://safar-app-cristal-teohs-projects.vercel.app/)**  
-*The web app is engineered with a bespoke Islamic-contemporary aesthetic (Warm Cream `#FAF8F5`, Deep Emerald `#00685F`, and Obsidian Slate `#161C23`) designed for high-density group collaboration, zero cognitive clutter, and responsive mobile/desktop coordination.*
+The [live app](https://safar-app-cristal-teohs-projects.vercel.app/) has a 13-step guest demo. It creates a temporary copy of a sample Japan trip and shows the same screens used for a real trip. See the [desktop/tablet guide](User%20Guide/Desktop%20Guide.md) and [phone guide](User%20Guide/Phone/Phone%20Guide.md) for screen-by-screen captures.
 
----
+1. **Create or open a trip.** A signed-in planner chooses destinations and dates; teammates join through an invite link. The guest demo starts with four sample members.
+2. **Review group needs.** People records dietary rules, prayer needs, pace, interests and budget before places are suggested.
+3. **Add fixed bookings.** Flights, trains and hotels become time anchors. Uploaded ticket details are reviewed before saving.
+4. **Discover and suggest places.** Food search shows halal evidence and recent traveller queue reports where available. Places from search, social links or manual entry go to Ideas.
+5. **Vote and resolve conflicts.** Members vote on Ideas. A disagreement can lead to a reviewed middle ground or temporary split with a regroup plan.
+6. **Build and inspect the plan.** The planner previews and applies Auto-plan, then checks travel time, meals, prayer windows and nearby facilities in the daily timeline.
 
-<a id="31-web-app-architecture--hero-onboarding"></a>
-### 🌟 3.1 Web App Architecture & Hero Onboarding
-
-> **The Flow:** The landing interface establishes the dual-focus value proposition ("Faith-Anchored Trips. Weather-Smart & Group-Synced"). Groups can start planning immediately as a Team Lead or launch quick itineraries directly from viral social links.
-
-![Landing Page & Hero Onboarding](images/1_Hero_Landing.png)
-*Figure 3.1: Modern hero screen featuring live city weather cards (Kyoto, Tokyo, Makkah, Istanbul), destination router, and one-click onboarding wizard.*
+The images in [images/](images/) show the original concept and prototype. They should be treated as historical illustrations; the user guides contain current app screenshots.
 
 ---
 
-<a id="32-dynamic-prayer-anchored-timeline--live-map"></a>
-### ⏱️ 3.2 Dynamic Prayer-Anchored Timeline & Live Map
+<a id="4-what-safar-does-today"></a>
+## ⚡ 4. What Safar Does Today
 
-> **The Flow:** The core Workspace canvas brings together the full itinerary schedule, real-time Kyoto/Tokyo Solat API prayer times, and interactive Google/OSM map. Prayer blocks (*Fajr, Dhuhr, Asr, Maghrib, Isha*) are automatically woven into the route based on live GPS coordinates without manual time-budgeting.
-
-![Dynamic Prayer-Anchored Timeline Workspace](images/2_Prayer_Timeline_Workspace.png)
-*Figure 3.2: Multi-day workspace canvas displaying live Solat API synchronization, weather windows, itinerary cards, and GPS polyline route tracking.*
-
----
-
-<a id="33-ai-mediator--auto-split-conflict-resolver"></a>
-### 🤝 3.3 AI Mediator & Auto-Split Conflict Resolver
-
-> **The Flow:** When an unavoidable dietary contradiction is detected (e.g. *Ichiran Ramen's pork-based tonkotsu broth* clashing with Muslim group members Amina, Tariq, and Fatima), the AI Mediator steps in. Instead of forcing a "majority-rules" compromise, it calculates two parallel walking tracks (*Track A: Narita-ya 100% Halal Ramen* vs. *Track B: Ichiran Original Tonkotsu*) with synchronized walking times and an auto-generated regroup meetup pin at Senso-ji.
-
-![AI Mediator & Auto-Split Resolution](images/3_AI_Mediator_Split_Engine.png)
-*Figure 3.3: AI Mediator modal presenting a 98% Harmony Score win-win split plan with walking distances and shared meetup synchronizer.*
-
----
-
-<a id="34-live-geo-fenced-halal-radar"></a>
-### 📡 3.4 Live Geo-Fenced Halal Radar
-
-> **The Flow:** The dedicated Halal Radar provides instant, real-time discovery within walking or driving radius. Venues feature verified 3-tier safety badges (*Certified Halal, Muslim-Owned, Pork-Free*), walking transit times, live estimated wait times, and direct access to verified menu breakdowns.
-
-![Live Geo-Fenced Halal Radar](images/4_Halal_Radar_Finder.png)
-*Figure 3.4: Geo-fenced radar display with live map overlay, walking radii, verified menus, and one-tap turn-by-turn navigation.*
-
----
-
-<a id="35-social-to-itinerary-video-extractor"></a>
-### 📱 3.5 Social-to-Itinerary Video Extractor
-
-> **The Flow:** Travelers can paste links from Xiaohongshu (RedNote), TikTok, or Instagram Reels directly into the discovery drawer. The multimodal AI parser extracts POI names, descriptions, and coordinates, allowing users to save spots directly to their itinerary or preview them on the map.
-
-![Social-to-Itinerary Video Extractor](images/5_Social_Video_Extractor.png)
-*Figure 3.5: Multimodal video extractor turning viral social reels into verified map pins and discoverable attraction cards.*
-
----
-
-<a id="36-ai-document-vault--offline-travel-dossier"></a>
-### 🔒 3.6 AI Document Vault & Offline Travel Dossier
-
-> **The Flow:** The group Document Vault securely stores passports, flight e-tickets, and hotel vouchers. The client-side parser checks the international 6-month passport expiry rule, verifies accommodation date consistency, and compiles all tickets into a printable, emergency offline PDF dossier via `jsPDF`.
-
-![AI Document Cross-Check Vault](images/6_Document_Vault_Cross_Check.png)
-*Figure 3.6: AI Document Vault tracking passport biometric validity, flight bookings, and hotel reservations with client-side privacy protection.*
-
----
-
-<a id="37-live-transit-status--emergency-fallback-engine"></a>
-### 🚨 3.7 Live Transit Status & Emergency Fallback Engine
-
-> **The Flow:** Powered by live transit status synchronization (`Aviationstack` & `Navitime` APIs), the system detects real-time flight disruptions (e.g. flight MH70 delayed by 4 hours). Rather than stranding travelers, the AI quantifies schedule impact and prepares an automated rescue plan ("AI Reroute") that shifts downstream hotel check-ins and re-anchors prayer windows.
-
-![Live Transit Status & Emergency Fallback](images/7_Emergency_Fallback_Reroute.png)
-*Figure 3.7: Live flight delay detection triggering automated schedule impact analysis and one-click AI itinerary rerouting.*
-
----
-
-<a id="4-competitive-edge-what-makes-it-different"></a>
-## ⚡ 4. Competitive Edge (What Makes It Different)
-
-While standard apps like Wanderlog handle basic collaborative planning, they treat religious and dietary requirements as optional preferences rather than strict constraints. **Safar App** introduces a culturally aware AI that actively resolves group conflicts instead of just logging them.
-
-<a id="41-user-journey-transformation"></a>
-### 🔄 4.1 User Journey Transformation (Before vs. After Safar App)
-
-![User Journey Transformation: Before vs. After Safar App](images/BeforeAfterUserJourney.png)
-*Figure 4.1: Multi-persona user journey comparison highlighting the transformation across Planning, Daily Travel, Dining, and Group Conflicts for both Muslim travelers and Non-Muslim companions.*
-
----
-
-<a id="42-distinctive-twists"></a>
-### 🌟 4.2 Distinctive Twists
-
-* ⏱️ **1. Dynamic Prayer-Anchored Timeline**  
-  >Instead of just giving static prayer notifications, it uses live GPS to automatically insert prayer and wudu-friendly facility blocks into the schedule while simultaneously assigning nearby activities for non-Muslim companions so group travel never stalls.
-
-* 🤖 **2. AI Compromise & Auto-Split Engine**  
-  >Instead of using basic "majority rules" voting where someone always loses, the AI arbitrates disputes by either finding common-ground venues or creating temporary, synchronized split routes that regroup seamlessly.
-
-* 📍 **3. Live Geo-Fenced Halal Radar**  
-  >Rather than relying on generic directories, it drops dynamic meal blocks based on current coordinates with a transparent 3-tier safety tag (*Certified Halal*, *Muslim-Owned*, *Pork-Free*) alongside live wait times.
-
-* 📲 **4. Social-to-Itinerary Engine**  
-  >Instead of manually copying spots from social media, users drop TikTok or Instagram links to auto-generate itinerary blocks that are instantly pre-screened through the Halal Radar.
-
-* 🛡️ **5. AI Document Cross-Check Vault**  
-  >Moving beyond passive cloud storage, it proactively cross-checks uploaded passport metadata against flight dates to prevent check-in rejections, while acting as the live, legal data feed that powers the AI's emergency rerouting.
-
-* 🔄 **6. Emergency Fallback Engine**  
-  >When a transit delay hits, the app doesn't just display alerts; it uses the Vault's ticket data to trigger a "self-healing" protocol. It auto-shifts downstream bookings, ensures alternative routes are legally viable for all members, and instantly drops new Halal and prayer checkpoints.
-
----
-
-<a id="43-competitor-comparison-matrix"></a>
-### 📊 4.3 Competitor Comparison Matrix
-
-| Feature | Safar App (Ours) | Wanderlog | HalalTrip | Lambus | TripAdvisor (Trips) | Excel & WhatsApp |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Primary Use Case** | **Mixed/Muslim Groups** | Group Itinerary Builder | Static Muslim Directory | Group Expense & Travel | Venue Discovery & Saves | Manual Tracking |
-| 🗓️ **Collaborative Timeline** | ✅ **Yes** | ✅ Yes | ❌ No | ✅ Yes | ⚠️ View Only | ❌ No |
-| 🌙 **Live Geo-Fenced Halal Radar** | ✅ **Yes** | ❌ No | ⚠️ Static Only | ❌ No | ⚠️ Filters Only | ❌ No |
-| 🕌 **Auto-Syncs Prayers to Map** | ✅ **Yes** | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No |
-| ⚖️ **AI Conflict Resolution (Auto-Split)**| ✅ **Yes** | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No |
-| 🚨 **Emergency Fallback Re-Routing** | ✅ **Yes** | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No |
-| 🗂️ **Group Document Vault & Checks** | ✅ **Yes** | ⚠️ Manual | ❌ No | ✅ Yes | ❌ No | ⚠️ Unsecure |
-
----
-
-<a id="5-technical-architecture--feasibility"></a>
-## 5. Technical Architecture & Feasibility
-
-<a id="51-tech-stack"></a>
-### 🛠️ 5.1 Tech Stack
-
-#### 1. Frontend
-* **Technologies:** **React 19**, **TypeScript (~5.8)**, **Vite 6**, **Tailwind CSS v4**, **Framer Motion (`motion: ^12.23`)**, **Lucide React**
-* **Why We Chose It:** Delivers instantaneous page transitions, strict compile-time type safety across complex group itinerary schemas, and fluid 60fps mobile drawer animations with a bespoke Islamic aesthetic (Emerald, Amber, Sandstone palette).
-* **Minor Constraint & Easy Fix:**
-  * *Constraint:* Mobile browsers occasionally trigger browser pull-to-refresh gestures when dragging drawer sheets upward.
-  * *How We Handle It:* Added `overscroll-behavior-y: contain` and localized drag listeners to sheet handles to keep gestures smooth and localized.
-
-#### 2. Backend & Hosting
-* **Technologies:** **Vercel Global Edge Network (Production SPA Deployment)**
-* **Why We Chose It:** Sub-50ms worldwide asset delivery across Asia-Pacific edge nodes, zero server maintenance, automated HTTPS, and continuous deployment directly connected to the GitHub `main` branch.
-* **Minor Constraint & Easy Fix:**
-  * *Constraint:* Direct browser reloads on deep client routes (e.g., `/trip/123`) would yield a 404 on traditional static web servers.
-  * *How We Handle It:* Configured a clean rewrite in [`vercel.json`](file:///c:/Users/User/Documents/AllActiveUniProject/Competition/CodeNection/SafarApp/vercel.json) (`/(.*) -> /index.html`) so Vite's client-side routing handles all paths seamlessly.
-
-#### 3. Database & Real-Time Sync
-* **Technologies:** **Google Cloud Firebase Firestore (`firebase: ^12.18.0`)** + **HTML5 BroadcastChannel API**
-* **Why We Chose It:** Native WebSocket `onSnapshot` listeners provide bi-directional state sync across group members for live pin drops and timeline adjustments, with offline-first persistence in IndexedDB.
-* **Minor Constraint & Easy Fix:**
-  * *Constraint:* Simultaneous typing or rapid dragging by multiple collaborators can trigger frequent Firestore writes.
-  * *How We Handle It:* Implemented a 300ms debounce on updates and used the HTML5 BroadcastChannel API for instantaneous multi-tab sync on the same device without burning remote Firestore read/write units.
-
-#### 4. APIs & External Services
-* **Google Gemini 2.0 Flash (`@google/genai: ^2.4.0`)**
-  * *Why We Chose It:* Sub-second latency, large context window, and multimodal intelligence for parsing travel reels and arbitrating group conflicts.
-  * *Minor Constraint & Fix:* AI output formatting variance is eliminated by passing a strict schema (`response_schema`), ensuring structured JSON matching our TypeScript models.
-* **Google Maps & Places API (`@vis.gl/react-google-maps: ^1.10.0`)**
-  * *Why We Chose It:* Gold standard for international POI discovery, live walking distance matrices, and interactive map pins.
-  * *Minor Constraint & Fix:* If running on a local testing environment without an active key, the app gracefully falls back to an OpenStreetMap / Leaflet view.
-* **Aladhan Prayer Times API & Astronomical Presets**
-  * *Why We Chose It:* Computes the 5 daily prayer times (Fajr, Dhuhr, Asr, Maghrib, Isha) and Qibla bearings globally.
-  * *Minor Constraint & Fix:* Minor calculation variance between international methods is normalized to standard regional authorities, backed by offline astronomical presets for key travel hubs (Tokyo, Kyoto, Osaka).
-* **Open-Meteo Weather API**
-  * *Why We Chose It:* Keyless, high-resolution hourly forecast API for weather overlays and transit delay simulation.
-  * *Minor Constraint & Fix:* Redundant network requests during timeline navigation are mitigated via 15-minute client-side `sessionStorage` caching.
-* **Client-Side Export Engine (`jsPDF: ^4.2.1`)**
-  * *Why We Chose It:* Generates print-ready emergency travel dossiers, prayer timetables, and offline boarding checklists directly in the user's browser with zero server latency and zero PII upload risks.
-  * *Minor Constraint & Fix:* Standardized on high-efficiency core vector fonts to keep export processing instant and client memory usage under 25MB.
-
----
-
-<a id="52-system-architecture-diagram"></a>
-### 🏛️ 5.2 System Architecture Diagram
-
-![System Architecture](images/SystemArchitecture.png)
-*Figure 5.1: High-level System Architecture of Safar App illustrating the Client Tier, Delivery & Edge Hosting, Real-Time Cloud Database, and External Intelligence Services.*
-
----
-
-<a id="53-build-plan--scope"></a>
-### 📦 5.3 Build Plan & Scope (Engineering Deliverables & Real-World Feasibility)
-
-> **💡 Production-Grade Feasibility:**  
-> Safar App is engineered as a **Live-API-First system with an Offline Resilience Core**. Unlike superficial hackathon mockups that rely on static hardcoded strings, every module below is powered by live REST APIs, Google Cloud services, and deterministic mathematical algorithms designed to operate reliably under real-world travel conditions (including flight mode and foreign roaming latency).
-
-| Module & Live Production Pipeline | Engineering Implementation & Algorithmic Mechanics | Real-World Edge Case Handling & Boundaries |
+| Area | Implemented behavior | Boundary |
 | :--- | :--- | :--- |
-| **1. Dynamic Prayer-Anchored Timeline** *(Solution 1)*<br><br>• **Live APIs:** Aladhan REST API (`api.aladhan.com/v1/timings`)<br>• **Runtime:** React 19 State + Local Astronomical Model | • Fetches live solar timings by latitude/longitude and date.<br>• Normalizes 24h solar angles into minutes-since-midnight arrays.<br>• Linear collision detector scans itinerary nodes; if a stop overlaps a prayer window, it auto-injects a 30-min "Prayer & Wudu" block.<br>• Concurrently queries nearby low-friction POIs (cafes/viewpoints) to generate a parallel activity track for non-Muslim companions. | • **Airplane / Dead-Zone Resilience:** If offline, the engine falls back seamlessly to mathematical solar angle calculation tables (Tokyo/Kyoto presets) with zero UI lag.<br>• **Boundary:** Automates chronological schedule insertion without external Google Calendar OAuth write syncing. |
-| **2. Live Geo-Fenced Halal Radar** *(Solution 2)*<br><br>• **Live APIs:** `@vis.gl/react-google-maps` + Cloud Firestore Geohash Index | • Queries Firestore using geohash bounding-box prefixes.<br>• Executes Haversine great-circle math ($2R \cdot \arcsin(\sqrt{h})$, $R = 6,371,000\text{m}$) on device to calculate precise walking distances.<br>• Computes pedestrian walking durations at a constant 4.8 km/h.<br>• Enforces a 3-tier taxonomy (`certified`, `muslim_owned`, `pork_free`) with live ratings and price levels. | • **Quota & Key Failure Resilience:** If the Google Maps API key is unset or rate-throttled, an automatic adapter switches the viewport to an OpenStreetMap/Leaflet fallback.<br>• **Boundary:** Geofenced to a 1.5km radius from active coordinates. Focuses on discovery and 1-click scheduling without live restaurant POS/table reservation hooks. |
-| **3. AI Compromise & Auto-Split Engine** *(Solution 3)*<br><br>• **Live APIs:** Google Gemini 2.0 Flash SDK (`@google/genai`) with JSON Schema Enforcement | • Ingests group participant preference matrices (`activeGroups`, `preferences`).<br>• Detects clashes (e.g. Halal Wagyu vs. non-Halal Sushi) and prompts Gemini with strict `response_schema`.<br>• Produces two deterministic options:<br>&nbsp;&nbsp;1) *Stay Together:* Compromise venue scored on travel detour vs. menu diversity (threshold $\ge 80\%$).<br>&nbsp;&nbsp;2) *Smart Split:* Branches schedule into parallel tracks with calculated `splitDurationMinutes` (60–90m) and an auto-generated shared regroup meetup pin. | • **Zero Hallucination / Timeout Resilience:** Enforced JSON schema guarantees valid model properties. If Gemini hits latency limits, a rule-based deterministic heuristic engine immediately serves pre-validated compromise POIs.<br>• **Boundary:** Bounded to 2 parallel sub-tracks (Group A / Group B) to prevent chaotic multi-branch fragmentation. |
-| **4. Social-to-Itinerary Engine** *(Extra Feature 1)*<br><br>• **Live APIs:** Gemini 2.0 Flash Multimodal Parser + URL Extraction Proxy | • Accepts live URLs from TikTok, Instagram Reels, and Xiaohongshu.<br>• Gemini zero-shot pipeline extracts venue name, category, operational notes, and address from video metadata and transcripts.<br>• Automatically routes extracted entities through the Halal Radar service to verify Halal status before generating a staged itinerary draft card. | • **CORS & Bandwidth Resilience:** Social link metadata is extracted via lightweight proxy endpoints, avoiding browser CORS blocks and bypassing multi-GB video frame downloading.<br>• **Boundary:** Ingests up to 5 POIs per URL rather than arbitrary batch web scraping. |
-| **5. AI Document Cross-Check Vault** *(Extra Feature 2)*<br><br>• **Live APIs:** `jsPDF (v4.2)` Client Engine + Regex Document Parser | • Client-side date-math parser verifies uploaded travel documents.<br>• Enforces the international 6-month passport validity rule (`expiryDate < tripReturnDate + 180 days`).<br>• Cross-checks flight departure times against hotel check-in dates to detect accommodation date gaps.<br>• Client-side `jsPDF` engine compiles vectors into an emergency offline travel dossier. | • **Zero PII Exposure:** All document validation and PDF rendering happens locally in browser memory without sending passport numbers or personal identity data to third-party servers.<br>• **Boundary:** Validates document metadata and travel dates client-side without live embassy visa verification queries. |
-| **6. Emergency Fallback Engine** *(Extra Feature 3)*<br><br>• **Live APIs:** Aviationstack Flight Simulation + Open-Meteo Weather Alerts | • Ingests transit disruption signals (e.g. simulated 4-hour flight delay on flight MH70).<br>• Calculates downstream blast radius: automatically shifts subsequent transit connections (e.g. Keisei Skyliner $\rightarrow$ Narita Express) and recalculates hotel arrival windows.<br>• Drafts automated delay notification notices for accommodations.<br>• Queries airport geofences to surface Halal-friendly lounges (Plaza Premium) and airport prayer rooms. | • **Cascade Stability:** Downstream time shifts preserve prayer time constraints so schedule adjustments remain culturally compliant.<br>• **Boundary:** Generates actionable recovery routes, lounge bookings, and notices without executing live airline ticket reissuance transactions. |
+| Shared planning | Firestore-backed trip, members, ideas, bookings and schedule with live client listeners. | An internet connection and configured Firebase project are needed for shared updates. |
+| Prayer | Local calculations through the adhan library, with country-aware methods and a prayer-aware timeline. | Travellers should verify local prayer times against their preferred authority. |
+| Halal Radar | Google and open-map place sources, evidence-based labels, traveller reports and optional recent queue reports. | Listings and AI assessments are guidance, not a universal certification or live restaurant feed. |
+| Group decisions | Agree/Disagree votes, conflict warnings, middle-ground options and an admin-reviewed split. | A split is applied only after a group decision; the app does not override member preferences automatically. |
+| Social import | Extracts candidate places from supported links for review. | Provider access and available link content affect extraction. |
+| Vault | Private Firebase Storage upload, server-side AI extraction, user confirmation and PDF export. | Files leave the device when uploaded. The app does not make legal visa determinations. |
+| Disruption response | Optional flight checks and weather alerts can raise reports; an admin can preview and apply a resync. | The app does not reissue airline tickets or send accommodation notices automatically. |
 
-#### 🎯 Feasibility & Scope Boundaries
-* **Zero Payment Gateway Overhead:** Focused 100% on the core logistical planning, conflict resolution, and intelligence algorithms rather than getting bogged down in credit card processing or live airline booking systems.
-* **Serverless Architecture:** Eliminates backend server maintenance and deployment friction, allowing full focus on user experience, real-time collaboration, and AI performance.
+---
+
+<a id="5-technical-architecture"></a>
+## 🛠️ 5. Technical Architecture
+
+* **Frontend:** React 19, TypeScript, Vite 6, Tailwind CSS 4, React Router and Lucide React. The PWA service worker caches the app shell.
+* **Backend and hosting:** Vercel serves the SPA and one serverless router at [api/router.ts](api/router.ts). [vercel.json](vercel.json) routes API calls to the function and app paths to the SPA.
+* **Identity and data:** Firebase Authentication, Firestore and Firebase Storage. Firestore listeners update shared trip views.
+* **Prayer and planning:** The adhan package calculates times locally; domain rules schedule fixed bookings, stops, meals and prayer windows.
+* **Places and routes:** Google services are used when configured; Photon, OpenStreetMap-based services and remembered places provide fallbacks. Some functions require provider keys or quotas.
+* **AI:** Server-side extraction uses configured Gemini models, with a Groq fallback where available. Outputs still require review, especially for documents and dietary claims.
+* **Weather and flights:** Open-Meteo supports forecasts and alerts. Optional Aviationstack checks monitor booked flights near departure and raise reports for admin review.
+* **Exports:** jsPDF generates the travel dossier in the browser after relevant data is loaded.
+
+The exact availability of external services depends on deployment credentials, quotas and provider responses. See [.env.example](.env.example) for configuration names and [package.json](package.json) for the installed stack.
 
 ---
 
@@ -327,6 +155,8 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 * **Live app:** https://safar-app-cristal-teohs-projects.vercel.app
 * **Demo trip (no account):** https://safar-app-cristal-teohs-projects.vercel.app/demo — you play Aisyah, planning a December week in Japan for four very different people, guided step by step. Sample documents are in [`public/demo-kit/`](public/demo-kit).
 * **Pitch deck:** https://safar-app-cristal-teohs-projects.vercel.app/pitch
+* **User guides:** [Desktop/tablet](User%20Guide/Desktop%20Guide.md) · [Phone](User%20Guide/Phone/Phone%20Guide.md)
+* **README review:** [What changed and why](README-update-recommendations.md)
 
 ### Project structure
 
@@ -342,11 +172,15 @@ While standard apps like Wanderlog handle basic collaborative planning, they tre
 
 ### Run it locally
 
+The guest demo and write operations need valid Firebase client and Admin credentials in `.env.local`. Copying the example alone is not enough. A malformed Admin private key causes the demo start request to fail with HTTP 500.
+
 ```bash
 npm install
 cp .env.example .env.local   # fill in the keys (see the comments in the file)
 npm run dev                  # app + API on http://localhost:5173
 npm test                     # unit tests
-npm run e2e:demo             # an end-to-end test (needs npm run dev running)
+npm run build                # production build
+npm run typecheck            # TypeScript check
+npm run e2e:demo             # API demo test (needs npm run dev and working Firebase Admin credentials)
 ```
 
