@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Safar | CodeNection 2026 finals</title>
+  <style>
+    :root{--cream:#f7f3eb;--paper:#fffdf8;--ink:#16312d;--muted:#5e706a;--green:#0c675b;--mint:#d9eee4;--orange:#c35d35;--line:#c8d3c9}
+    *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#102a26;color:var(--ink);font-family:Arial,Helvetica,sans-serif}
+    button{font:inherit}.stage{width:100vw;height:100vh;display:grid;place-items:center}.slide{display:none;position:relative;width:min(100vw,177.7778vh);height:min(100vh,56.25vw);padding:4.2% 5.3% 4.5%;background:var(--cream);overflow:hidden;flex-direction:column}.slide.active{display:flex}
+    .slide.dark{background:var(--ink);color:var(--paper)}.slide.green{background:var(--green);color:var(--paper)}.slide.paper{background:var(--paper)}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:2%;font-size:clamp(11px,.85vw,16px);font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--green)}.dark .top,.green .top{color:#afe4cd}.top .time{font-variant-numeric:tabular-nums;letter-spacing:.03em}
+    h1,h2,h3,p{margin:0}h1,h2{font-family:Arial,Helvetica,sans-serif;letter-spacing:-.055em}h1{font-size:clamp(64px,7.6vw,126px);line-height:.94}h2{font-size:clamp(44px,5.2vw,82px);line-height:.98}h3{font-size:clamp(26px,2.6vw,42px);line-height:1.05;letter-spacing:-.035em}.lead{font-size:clamp(24px,2.5vw,39px);line-height:1.21;letter-spacing:-.025em}.body{font-size:clamp(18px,1.63vw,27px);line-height:1.32}.small{font-size:clamp(12px,.95vw,17px);line-height:1.25;color:var(--muted)}.dark .small,.green .small{color:#c2ded2}
+    .bottom{margin-top:auto;display:flex;justify-content:space-between;align-items:end;gap:20px;font-size:clamp(11px,.9vw,16px);color:var(--muted)}.dark .bottom,.green .bottom{color:#c2ded2}.num{font-weight:800;letter-spacing:.15em}.main{flex:1;min-height:0;margin-top:4.2%;display:flex;flex-direction:column}.row{display:grid;grid-template-columns:1fr 1fr;gap:5%;align-items:center;min-height:0;flex:1}.row.wide{grid-template-columns:1.05fr .95fr}.col{min-width:0}.accent{color:var(--green)}.dark .accent,.green .accent{color:#a9e9c8}.orange{color:var(--orange)}.rule{height:2px;background:var(--green);width:100%;margin:4% 0}.dark .rule,.green .rule{background:#a9e9c8}
+    .hero{display:grid;grid-template-columns:.9fr 1.1fr;gap:5%;align-items:center;flex:1;min-height:0}.hero h1{margin-bottom:6%}.hero .lead{max-width:640px}.hero img{width:100%;max-height:65vh;object-fit:contain;filter:drop-shadow(0 18px 25px #0002)}
+    .photo{width:100%;height:100%;object-fit:cover;display:block}.frame{height:50vh;min-height:0;max-height:57vh;background:#fff;border:1px solid var(--line);padding:10px;box-shadow:0 20px 35px #102e271a}.frame img{width:100%;height:100%;object-fit:contain;display:block}.frame.cover img{object-fit:cover}.caption{font-size:clamp(12px,.95vw,17px);color:var(--muted);margin-top:10px}.dark .caption{color:#c2ded2}
+    .bigline{font-size:clamp(32px,3.8vw,62px);line-height:1.12;letter-spacing:-.045em;font-weight:700}.bigline + .bigline{margin-top:5%}.three{display:grid;grid-template-columns:repeat(3,1fr);gap:3%;margin-top:6%}.three>div{border-top:2px solid var(--green);padding-top:5%}.three b{display:block;font-size:clamp(25px,2.4vw,40px);margin-bottom:4%;letter-spacing:-.035em}.three p{font-size:clamp(18px,1.45vw,24px);line-height:1.3;color:var(--muted)}
+    .stat{font-size:clamp(82px,10vw,160px);letter-spacing:-.085em;font-weight:800;line-height:.95;color:var(--green)}.stat-label{font-size:clamp(24px,2.15vw,35px);line-height:1.15;max-width:560px;margin-top:3%}.source{font-size:clamp(11px,.8vw,14px);line-height:1.2;color:var(--muted)}.source a{color:inherit}.dark .source{color:#c2ded2}
+    .timeline{display:grid;grid-template-columns:repeat(4,1fr);gap:2%;margin-top:7%}.timeline>div{border-top:2px solid var(--green);padding-top:20px}.timeline strong{display:block;font-size:clamp(22px,2vw,34px);letter-spacing:-.025em}.timeline p{font-size:clamp(16px,1.25vw,22px);line-height:1.3;margin-top:12px;color:var(--muted)}.timeline .index{color:var(--green);font-size:clamp(16px,1.2vw,20px);margin-bottom:18px;display:block}
+    .quote{border-left:7px solid var(--orange);padding-left:5%;font-size:clamp(27px,3vw,50px);line-height:1.15;letter-spacing:-.04em;font-weight:700}.bullet{display:flex;gap:18px;align-items:baseline;font-size:clamp(20px,1.75vw,29px);line-height:1.3;margin-top:4%}.bullet b{color:var(--green);min-width:2ch}.dark .bullet b{color:#a9e9c8}
+    .screenpair{display:grid;grid-template-columns:1fr 1fr;gap:2%;height:50vh;min-height:0}.screenpair .frame{height:100%;max-height:none}.screenpair .frame img{object-fit:contain}.screenpair .frame.crop img{object-fit:cover;object-position:top}
+    .label{font-size:clamp(15px,1.1vw,20px);font-weight:800;color:var(--green);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3%}.dark .label{color:#a9e9c8}.statement{font-size:clamp(24px,2.5vw,42px);line-height:1.15;letter-spacing:-.035em;margin-top:5%}.split-note{border-left:3px solid var(--orange);padding-left:20px;margin-top:6%;font-size:clamp(16px,1.25vw,22px);line-height:1.28;color:var(--muted)}
+    .architecture{display:grid;grid-template-columns:repeat(3,1fr);gap:4%;margin-top:6%}.architecture>div{border-top:2px solid #a9e9c8;padding-top:18px}.architecture b{font-size:clamp(25px,2.25vw,37px);display:block;margin-bottom:13px}.architecture p{font-size:clamp(18px,1.45vw,25px);line-height:1.32;color:#c2ded2}
+    .demo-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:2%;height:62%;margin-top:4%}.demo-grid>div{display:flex;flex-direction:column;min-height:0}.demo-grid img{width:100%;height:72%;object-fit:contain;background:#fff;border:1px solid var(--line)}.demo-grid b{font-size:clamp(17px,1.35vw,23px);margin-top:12px}.demo-grid span{font-size:clamp(14px,1.03vw,18px);color:var(--muted);margin-top:5px;line-height:1.2}
+    .url{font-size:clamp(18px,1.55vw,26px);overflow-wrap:anywhere;color:#a9e9c8}.actions{display:flex;gap:8px;position:fixed;right:18px;bottom:18px;z-index:20;opacity:.2}.actions:hover,.actions:focus-within{opacity:1}.actions button{border:1px solid #ffffffa0;border-radius:4px;background:#102a26;color:#fff;padding:5px 10px;cursor:pointer}.notes{display:none;position:fixed;inset:auto 0 0 0;background:#102a26;color:#fff;padding:15px 24px;font-size:17px;line-height:1.35;z-index:15;max-height:35vh;overflow:auto}.notes.open{display:block}.notes strong{color:#a9e9c8}
+    @media print{html,body{overflow:visible;background:white}.stage{height:auto;display:block}.slide{display:flex!important;width:100%;height:56.25vw;page-break-after:always}.actions,.notes{display:none!important}}
+  </style>
+</head>
+<body>
+<main class="stage" aria-label="Safar finals pitch">
+  <section class="slide paper active" data-time="0:00–0:25" data-note="Introduce Team Ds Gang. State the product promise in one sentence. Do not describe every feature yet.">
+    <div class="top"><span>CodeNection 2026 · Travel Planner</span><span class="time">0:00–0:25</span></div>
+    <div class="hero"><div><h1>Safar<span class="accent">.</span></h1><p class="lead">One shared trip for Muslim travellers and mixed groups.</p><p class="body" style="margin-top:8%;color:var(--muted)">Team Ds Gang<br>Chong Pohyi · Teoh Xi Xian · Tan Wei Feng</p></div><img src="../assets/landing.png" alt="Safar guest trip overview"></div>
+    <div class="bottom"><span>Grand finals · 10-minute pitch</span><span class="num">01 / 13</span></div>
+  </section>
+
+  <section class="slide" data-time="0:25–1:10" data-note="Tell the Kyoto lunch scenario as a short story. The tension is between a shared schedule and individual hard constraints.">
+    <div class="top"><span>01 · The traveller</span><span class="time">0:25–1:10</span></div>
+    <div class="main row wide"><div class="col"><h2>Four friends.<br>One day in Tokyo.</h2><p class="statement">Lunch looks settled until one person checks the broth and another checks the prayer time.</p><p class="split-note">A food choice can exclude a member. A missed prayer window changes the rest of the day.</p></div><div class="frame cover"><img src="../assets/problem.jpg" alt="Illustration of a mixed travel group facing food and schedule friction"></div></div>
+    <div class="bottom"><span>Example scenario from Safar's Japan guest trip</span><span class="num">02 / 13</span></div>
+  </section>
+
+  <section class="slide paper" data-time="1:10–1:50" data-note="Explain the audience without overselling the entire market as Safar's revenue. Mention this is travel demand, not traction.">
+    <div class="top"><span>02 · The context</span><span class="time">1:10–1:50</span></div>
+    <div class="main row"><div class="col"><div class="stat">196M</div><p class="stat-label">international Muslim arrivals in 2025</p><p class="body" style="margin-top:8%;max-width:600px">Our first audience: Malaysian friend and student groups planning travel abroad together.</p></div><div class="col"><h2>A large audience.<br><span class="accent">A specific job.</span></h2><div class="rule"></div><p class="lead">Help a group agree on a day that respects each traveller's requirements.</p><p class="small" style="margin-top:8%">The market figure shows travel demand. Safar has not measured its own market share or paid demand.</p></div></div>
+    <div class="bottom"><span class="source">Source: <a href="https://crescentrating.com/insights/gmti" target="_blank" rel="noopener">Mastercard–CrescentRating GMTI 2026</a></span><span class="num">03 / 13</span></div>
+  </section>
+
+  <section class="slide" data-time="1:50–2:30" data-note="Walk through the current tool chain. Each tool can be useful, but the group has to connect its outputs manually.">
+    <div class="top"><span>03 · The planning gap</span><span class="time">1:50–2:30</span></div>
+    <div class="main"><h2>Good tools. A manual handoff.</h2><div class="timeline"><div><span class="index">01</span><strong>Discover</strong><p>Social posts and maps surface places.</p></div><div><span class="index">02</span><strong>Verify</strong><p>Someone checks halal evidence and prayer access.</p></div><div><span class="index">03</span><strong>Decide</strong><p>The group debates options in chat.</p></div><div><span class="index">04</span><strong>Rebuild</strong><p>A planner repairs the schedule after each change.</p></div></div><p class="lead" style="margin-top:auto;margin-bottom:4%">The lost work sits between the apps.</p></div>
+    <div class="bottom"><span>Observed workflow in the team's project research and prototype framing</span><span class="num">04 / 13</span></div>
+  </section>
+
+  <section class="slide dark" data-time="2:30–3:10" data-note="Explain the mentor pivot: a Muslim-only planner and simple majority voting did not solve mixed-group travel. Say that hard needs must be visible before voting.">
+    <div class="top"><span>04 · Why we changed direction</span><span class="time">2:30–3:10</span></div>
+    <div class="main row"><div class="col"><h2>Our first idea was too narrow.</h2><p class="statement">A Muslim-only itinerary still leaves mixed groups negotiating outside the app.</p></div><div class="col"><div class="quote">A majority vote cannot overrule a strict food or prayer requirement.</div><p class="body" style="margin-top:8%;color:#c2ded2">Mentor feedback moved us toward shared planning with visible constraints and reviewable compromises.</p></div></div>
+    <div class="bottom"><span>Project ideation and mentor feedback, September 2026</span><span class="num">05 / 13</span></div>
+  </section>
+
+  <section class="slide paper" data-time="3:10–3:50" data-note="This is the product spine. Everyone enters needs; bookings anchor the calendar; ideas are reviewed; the day plan is previewed before applying.">
+    <div class="top"><span>05 · The product</span><span class="time">3:10–3:50</span></div>
+    <div class="main"><h2>One trip. A decision the group can see.</h2><div class="timeline"><div><span class="index">01</span><strong>Join</strong><p>Invite members and record food, prayer, pace and budget needs.</p></div><div><span class="index">02</span><strong>Anchor</strong><p>Add flights, trains and hotels as fixed bookings.</p></div><div><span class="index">03</span><strong>Choose</strong><p>Suggest places, vote and review conflicts.</p></div><div><span class="index">04</span><strong>Plan</strong><p>Preview the day around accepted stops and prayer windows.</p></div></div><p class="lead" style="margin-top:auto;margin-bottom:4%">Safar keeps the decision connected to the itinerary.</p></div>
+    <div class="bottom"><span>Current guest demo flow</span><span class="num">06 / 13</span></div>
+  </section>
+
+  <section class="slide" data-time="3:50–4:35" data-note="Point at actual preferences. Then explain that fixed bookings become schedule anchors. The planner sees constraints before asking AI to arrange stops.">
+    <div class="top"><span>06 · Before a place is suggested</span><span class="time">3:50–4:35</span></div>
+    <div class="main row wide"><div class="col"><h2>Start with<br>the people.</h2><div class="bullet"><b>1</b><span>Each member records needs that affect the day.</span></div><div class="bullet"><b>2</b><span>Existing bookings set the parts of the trip that cannot move.</span></div><p class="split-note">The demo starts with four sample travellers. Their preferences are example data, not user research results.</p></div><div><div class="frame"><img src="../assets/preferences.png" alt="Current Safar group preferences screen"></div><p class="caption">Current guest demo · group preferences</p></div></div>
+    <div class="bottom"><span>Inputs before itinerary generation</span><span class="num">07 / 13</span></div>
+  </section>
+
+  <section class="slide paper" data-time="4:35–5:20" data-note="Show that food labels express evidence and uncertainty. Then explain the Ichiran conflict: Safar presents an alternative or split, and a person accepts it.">
+    <div class="top"><span>07 · Food and group choice</span><span class="time">4:35–5:20</span></div>
+    <div class="main row wide"><div class="col"><h2>Show the evidence.<br>Then decide.</h2><p class="statement">A nearby result may be listed halal, likely, pork-free or unchecked.</p><p class="statement">A food conflict can lead to a middle ground or a short split with a regroup point.</p><p class="split-note">The trip lead reviews the option. Travellers confirm strict dietary needs with the venue.</p></div><div><div class="screenpair"><div class="frame"><img src="../assets/food.png" alt="Safar Halal Radar food results"></div><div class="frame"><img src="../assets/conflict.png" alt="Safar group decision and food conflict screen"></div></div><p class="caption">Current app screens · Food and Ideas</p></div></div>
+    <div class="bottom"><span>Evidence is shown with uncertainty; no universal certification claim</span><span class="num">08 / 13</span></div>
+  </section>
+
+  <section class="slide" data-time="5:20–6:00" data-note="Show the day plan and prayer view. The key point is that prayer is a time and place constraint inside the itinerary, while the group reviews the result before applying.">
+    <div class="top"><span>08 · A workable day</span><span class="time">5:20–6:00</span></div>
+    <div class="main row wide"><div class="col"><h2>Prayer belongs<br>in the plan.</h2><p class="statement">Local calculations put prayer windows beside travel, meals and booked stops.</p><p class="statement">Auto-plan previews a proposal before the trip lead applies it.</p><p class="split-note">Travellers can check the times against their preferred local authority.</p></div><div><div class="screenpair"><div class="frame"><img src="../assets/prayer.png" alt="Safar prayer context screen"></div><div class="frame"><img src="../assets/plan.png" alt="Safar trip timeline and plan screen"></div></div><p class="caption">Current app screens · prayer context and day plan</p></div></div>
+    <div class="bottom"><span>Booking anchors stay visible during planning</span><span class="num">09 / 13</span></div>
+  </section>
+
+  <section class="slide dark" data-time="6:00–6:40" data-note="Keep the technical explanation at the product level. State what is working and where judgment remains with the traveller.">
+    <div class="top"><span>09 · What we built</span><span class="time">6:00–6:40</span></div>
+    <div class="main"><h2>A live, shared workspace.</h2><div class="architecture"><div><b>Shared trip</b><p>React app, Firebase sign-in and Firestore updates for members.</p></div><div><b>Planning rules</b><p>Bookings, travel buffers, meals and local prayer calculations shape proposals.</p></div><div><b>Assisted review</b><p>AI can extract places or document fields. The user confirms them before use.</p></div></div><p class="lead" style="margin-top:auto;margin-bottom:4%;color:#a9e9c8">Food claims, document details and disruption changes stay reviewable.</p></div>
+    <div class="bottom"><span>Deployed guest demo · provider availability depends on configuration</span><span class="num">10 / 13</span></div>
+  </section>
+
+  <section class="slide" data-time="6:40–7:00" data-note="Open the live guest demo tab now. Tell the judges exactly what they will see: people, food conflict, then planned day.">
+    <div class="top"><span>10 · Live product</span><span class="time">6:40–7:00</span></div>
+    <div class="main row"><div><h2>Now, the trip<br>in action.</h2><p class="lead" style="margin-top:7%">Follow one decision from group needs to the day plan.</p></div><div><div class="frame"><img src="../assets/overview.png" alt="Safar guest trip overview"></div><p class="caption">Guest Japan trip · no account required</p></div></div>
+    <div class="bottom"><span>Open the guest demo in a separate browser tab</span><span class="num">11 / 13</span></div>
+  </section>
+
+  <section class="slide paper" data-time="7:00–9:35" data-note="Keep this slide as a fallback while presenting the live guest demo. 7:00 people/bookings, 7:35 food, 8:15 conflict, 8:55 preview/apply plan, 9:25 return to deck.">
+    <div class="top"><span>Live demo · fallback guide</span><span class="time">7:00–9:35</span></div>
+    <div class="main"><h2>From needs to a day everyone can use.</h2><div class="demo-grid"><div><img src="../assets/preferences.png" alt="Group preferences fallback screenshot"><b>7:00 · People</b><span>Show member needs and fixed bookings.</span></div><div><img src="../assets/food.png" alt="Food results fallback screenshot"><b>7:35 · Food</b><span>Compare source and confidence labels.</span></div><div><img src="../assets/conflict.png" alt="Conflict fallback screenshot"><b>8:15 · Decision</b><span>Review the Ichiran warning and options.</span></div><div><img src="../assets/plan.png" alt="Plan fallback screenshot"><b>8:55 · Plan</b><span>Preview bookings, travel and prayer windows.</span></div></div></div>
+    <div class="bottom"><span>Live demo: <a href="https://safar-app-cristal-teohs-projects.vercel.app/demo" target="_blank" rel="noopener" style="color:var(--green)">safar-app-cristal-teohs-projects.vercel.app/demo</a></span><span class="num">12 / 13</span></div>
+  </section>
+
+  <section class="slide green" data-time="9:35–10:00" data-note="Close in 25 seconds. Say what Safar makes possible, then the immediate next validation step. Thank the judges.">
+    <div class="top"><span>11 · Closing</span><span class="time">9:35–10:00</span></div>
+    <div class="main row"><div><h2>One shared trip.<br>Needs visible<br>before the group<br>commits.</h2></div><div><p class="lead">Our next step is to test real mixed-group trips and measure whether Safar reduces planning rework and missed constraints.</p><div class="rule"></div><p class="body">Thank you. We are Team Ds Gang.</p><p class="url" style="margin-top:8%">safar-app-cristal-teohs-projects.vercel.app/demo</p></div></div>
+    <div class="bottom"><span>Questions welcome</span><span class="num">13 / 13</span></div>
+  </section>
+</main>
+<div class="notes" id="notes" aria-live="polite"></div>
+<nav class="actions" aria-label="Slide controls"><button id="prev" aria-label="Previous slide">←</button><button id="next" aria-label="Next slide">→</button><button id="notesButton" aria-label="Toggle presenter notes">Notes</button></nav>
+<script>
+  const slides=[...document.querySelectorAll('.slide')];let current=0;
+  function show(index){current=Math.max(0,Math.min(slides.length-1,index));slides.forEach((slide,i)=>slide.classList.toggle('active',i===current));location.hash='s'+(current+1);document.getElementById('notes').innerHTML='<strong>Slide '+(current+1)+' · '+slides[current].dataset.time+'</strong><br>'+slides[current].dataset.note;}
+  document.getElementById('prev').onclick=()=>show(current-1);document.getElementById('next').onclick=()=>show(current+1);
+  document.getElementById('notesButton').onclick=()=>document.getElementById('notes').classList.toggle('open');
+  addEventListener('keydown',e=>{if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();show(current+1)}else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();show(current-1)}else if(e.key.toLowerCase()==='n'){document.getElementById('notes').classList.toggle('open')}else if(e.key==='Escape'){document.getElementById('notes').classList.remove('open')}});
+  const requested=Number((location.hash.match(/^#s(\d+)$/)||[])[1]);show(requested?requested-1:0);
+</script>
+</body>
+</html>

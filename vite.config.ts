@@ -26,7 +26,9 @@ function manifestOnMobileOnly(): Plugin {
       order: 'post',
       handler: (html, ctx) =>
         // Only the app page — the pitch deck isn't an app.
-        ctx.path.endsWith('pitch.html') ? html.replace(/\s*<link rel="manifest"[^>]*>/, '') : html.replace(/<link rel="manifest"[^>]*>/, script),
+        ctx.path.endsWith('prototype-pitch.html') || ctx.path.endsWith('finals-pitch.html')
+          ? html.replace(/\s*<link rel="manifest"[^>]*>/, '')
+          : html.replace(/<link rel="manifest"[^>]*>/, script),
     },
   };
 }
@@ -61,11 +63,11 @@ const pwa = VitePWA({
     importScripts: ['push-sw.js'],
     // The pitch deck is a separate page with big images — don't ship it to every phone.
     // Pitch-deck screenshots and the demo trip's sample files load on demand instead.
-    globIgnores: ['pitch.html', 'assets/pitch-*', 'assets/*.png', 'assets/*.jpg', 'images/**', 'demo-kit/**', 'og-image.png'],
+    globIgnores: ['deliverables/*-pitch.html', 'assets/pitch-*', 'assets/*.png', 'assets/*.jpg', 'images/**', 'demo-kit/**', 'og-image.png'],
     maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
     navigateFallback: '/index.html',
     // Server routes and Firebase's auth handler must always hit the network.
-    navigateFallbackDenylist: [/^\/api\//, /^\/__\//, /^\/pitch/],
+    navigateFallbackDenylist: [/^\/api\//, /^\/__\//, /^\/pitch/, /^\/final-pitch/],
     cleanupOutdatedCaches: true,
     // Control the page right after the FIRST install, so the app works offline
     // without needing a reload. Later updates still wait for the user's "Update" tap.
@@ -133,7 +135,8 @@ export default defineConfig(() => {
       rollupOptions: {
         input: {
           main: path.resolve(__dirname, 'index.html'),
-          pitch: path.resolve(__dirname, 'pitch.html'),
+          pitch: path.resolve(__dirname, 'deliverables/archived/prototype-pitch.html'),
+          finalPitch: path.resolve(__dirname, 'deliverables/finals-pitch.html'),
         },
         output: {
           // Split oversized vendor libraries into separate, cacheable chunks

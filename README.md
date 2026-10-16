@@ -1,7 +1,6 @@
 # 🌍 Safar App
 > *By Ds gang (Chong Pohyi, Teoh Xi Xian, Tan Wei Feng)*  
-> **Problem Statement:** Travel Planner | 🎥 **[Video Presentation](https://youtu.be/gcn_F3Ni2fs)** | 📊 **[Presentation Slides](https://safar-app-cristal-teohs-projects.vercel.app/pitch)
-**
+> **Problem Statement:** Travel Planner | 🎥 **[Video Presentation](https://youtu.be/gcn_F3Ni2fs)** | 📊 **[Prototype Presentation Slides](https://safar-app-cristal-teohs-projects.vercel.app/pitch)**
 
 > **Documentation status:** Section 2 preserves the original ideation and mentor history. Sections 3–6 describe the current app. See the [desktop/tablet guide](User%20Guide/Desktop%20Guide.md), [phone guide](User%20Guide/Phone/Phone%20Guide.md), and [README change summary](README-update-recommendations.md).
 ---
@@ -154,7 +153,8 @@ The exact availability of external services depends on deployment credentials, q
 
 * **Live app:** https://safar-app-cristal-teohs-projects.vercel.app
 * **Demo trip (no account):** https://safar-app-cristal-teohs-projects.vercel.app/demo — you play Aisyah, planning a December week in Japan for four very different people, guided step by step. Sample documents are in [`public/demo-kit/`](public/demo-kit).
-* **Pitch deck:** https://safar-app-cristal-teohs-projects.vercel.app/pitch
+* **Prototype pitch (3 minutes, archived):** https://safar-app-cristal-teohs-projects.vercel.app/pitch · [HTML deck](deliverables/archived/prototype-pitch.html) · [script](deliverables/archived/prototype-script.md)
+* **Grand Finals pitch (10 minutes):** [HTML deck](deliverables/finals-pitch.html) · [timed speaker script](deliverables/finals-script.md). Preserves the prototype's 12 sections in order, with a two-minute demo inside the ten minutes. The script includes a prototype context checklist. Keep the deck with its [screenshot assets](deliverables/assets/) when sharing it offline. Previous finals versions are in [archived](deliverables/archived/). Regenerate the deck and script with `node scripts/build-finals-deck.mjs`.
 * **User guides:** [Desktop/tablet](User%20Guide/Desktop%20Guide.md) · [Phone](User%20Guide/Phone/Phone%20Guide.md)
 * **README review:** [What changed and why](README-update-recommendations.md)
 

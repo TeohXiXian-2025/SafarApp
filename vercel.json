@@ -2,11 +2,19 @@
   "rewrites": [
     {
       "source": "/pitch",
-      "destination": "/pitch.html"
+      "destination": "/deliverables/archived/prototype-pitch.html"
     },
     {
       "source": "/pitch/",
-      "destination": "/pitch.html"
+      "destination": "/deliverables/archived/prototype-pitch.html"
+    },
+    {
+      "source": "/final-pitch",
+      "destination": "/deliverables/finals-pitch.html"
+    },
+    {
+      "source": "/final-pitch/",
+      "destination": "/deliverables/finals-pitch.html"
     },
     {
       "source": "/__/auth/:path*",
