@@ -1,0 +1,43 @@
+/* Added slides: market analysis (#mkt) and solution architecture (#arch). Scoped by slide id. */
+#mkt h2,#arch h2{font-size:58px}
+#mkt .mx{position:absolute;left:0;top:118px;width:860px;background:#fffdf8;border-radius:24px;box-shadow:0 10px 30px rgba(18,62,52,.08);overflow:hidden}
+#mkt .mx-row{display:grid;grid-template-columns:250px repeat(5,1fr);align-items:center;min-height:62px;border-bottom:1.5px solid #e7e1cf;font-size:17px}
+#mkt .mx-row:last-child{border:0}
+#mkt .mx-row>span{text-align:center;font-size:22px;color:#0d6556}
+#mkt .mx-row>b{padding-left:22px;font-weight:650;color:#123e34;line-height:1.2}
+#mkt .mx-head{background:#123e34;color:#f3ead0;min-height:58px;font-size:13px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700}
+#mkt .mx-head>span{color:#f3ead0;font-size:13px;line-height:1.2}
+#mkt .mx-row>span:last-child{background:#e3ecde;align-self:stretch;display:grid;place-items:center}
+#mkt .mx-head>span:last-child{background:#cba85f;color:#0b2a24}
+#mkt .mx .no{color:#b9b3a3}#mkt .mx .part{color:#a9812f}
+#mkt .mx-key{position:absolute;left:0;top:540px;font-size:14px;color:#61736b}
+#mkt .errc{position:absolute;right:0;top:118px;width:560px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+#mkt .errc>div{background:#fffdf8;border-radius:20px;padding:16px 18px;box-shadow:0 10px 30px rgba(18,62,52,.08);border-top:5px solid #0d6556}
+#mkt .errc>div:nth-child(3),#mkt .errc>div:nth-child(4){border-top-color:#cba85f}
+#mkt .errc small{display:block;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#0d6556;margin-bottom:6px}
+#mkt .errc p{font-size:17px;line-height:1.3;color:#123e34}
+#mkt .errc-t{position:absolute;right:0;top:84px;width:560px;font-size:14px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#a9812f}
+#mkt .now{position:absolute;right:0;top:430px;width:560px}
+#mkt .now h3{font-size:14px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#a9812f;margin-bottom:10px}
+#mkt .now>div{display:flex;gap:16px;align-items:center;background:#123e34;color:#f3ead0;border-radius:18px;padding:12px 18px;margin-bottom:10px}
+#mkt .now strong{font-family:Georgia,serif;font-size:30px;font-weight:400;color:#e8cf8e;min-width:120px}
+#mkt .now span{font-size:16px;line-height:1.3}
+#mkt .src{position:absolute;left:0;bottom:-6px;font-size:13px;color:#61736b}
+
+#arch .lane{position:absolute;top:120px;bottom:70px;border-radius:24px;padding:16px;background:#fffdf8;box-shadow:0 10px 30px rgba(18,62,52,.08)}
+#arch .lane>h3{font-size:13px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#a9812f;margin-bottom:12px}
+#arch .l1{left:0;width:300px}#arch .l2{left:360px;width:300px}#arch .l3{left:720px;width:340px}
+#arch .box{display:block!important;border-radius:14px;background:#e3ecde;padding:11px 14px;margin-bottom:10px;color:#123e34}
+#arch .box b{display:block;font-size:17px}#arch .box small{display:block;font-size:13.5px;color:#4d6158;line-height:1.3;margin-top:2px}
+#arch .box.dark{background:#123e34;color:#f3ead0}#arch .box.dark small{color:#b5cfc3}
+#arch .box.gold{background:#f3e7c6}
+#arch .flow{position:absolute;left:0;top:0;width:1060px;height:720px;pointer-events:none;overflow:visible}
+#arch .flow path{fill:none;stroke:#0d6556;stroke-width:3;stroke-dasharray:8 9;animation:archFlow 1.1s linear infinite}
+#arch .flow path.g{stroke:#cba85f}
+@keyframes archFlow{to{stroke-dashoffset:-34}}
+#arch .keys{position:absolute;right:0;top:120px;width:300px;bottom:70px;border-radius:24px;padding:18px;background:#123e34;color:#f3ead0}
+#arch .keys h3{font-size:13px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#e8cf8e;margin-bottom:8px}
+#arch .keys p{font-size:14.5px;line-height:1.35;color:#d7e4dd;margin-bottom:10px}
+#arch .keys code{display:inline-block;font:600 12px Consolas,monospace;background:rgba(255,255,255,.1);border:1px solid rgba(232,207,142,.35);border-radius:8px;padding:3px 7px;margin:0 4px 6px 0;color:#f3ead0}
+#arch .keys .ok{margin-top:6px;font-size:13.5px;color:#e8cf8e}
+@media (prefers-reduced-motion: reduce){#arch .flow path{animation:none}}

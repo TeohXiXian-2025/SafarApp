@@ -13,9 +13,10 @@
     s4: ['.gp-row', '.gp-gap', '.gp-safar'],
     s5: ['each:.m5-row'],
     s6: ['.up-card:first-child', '.up-card:last-child', '.up-bar'],
-    s8: ['each:.en-list>div'],
     s9: ['each:.t9-row'],
-    s10: ['.b10-left', '.b10-right']
+    s10: ['.b10-left', '.b10-right'],
+    mkt: ['.mx', '.errc-t,.errc', '.now'],
+    arch: ['.l1', '.l2', '.l3', '.keys']
   };
 
   const sweep = document.createElement('div'); sweep.id = 'dm-sweep'; sweep.setAttribute('aria-hidden', 'true');
