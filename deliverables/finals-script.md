@@ -66,9 +66,9 @@ The quoted passages below are spoken. Cues and source notes are for rehearsal. T
 
 ### Story (new slide) · Four friends, one trip to Japan
 
-**About 1:00, added between slides 04 and 05.** The story adds roughly a minute, so the talk now runs about 11:00 unless other sections are shortened. The times on later slides have not been changed.
+**About 1:00, now the opening of the pitch (before slide 01).** The story adds roughly a minute, so the talk now runs about 11:00 unless other sections are shortened. The times on later slides have not been changed.
 
-Press Enter (or →) on the title card to start. Each →, Space or clicker press moves one scene. The last press opens slide 05. Speak one line per scene:
+Press Enter (or →) on the title card to start. Each →, Space or clicker press moves one scene. The last press opens slide 01. Speak one line per scene:
 
 1. **The dream trip (Tokyo):** “Imagine finally going on your dream holiday with your closest friends.”
 2. **The food dilemma (ramen shop):** “Everyone wants to explore local cuisine. But finding a suitable dining option isn’t always straightforward.”

@@ -11,17 +11,17 @@
 #mkt .mx-head>span:last-child{background:#cba85f;color:#0b2a24}
 #mkt .mx .no{color:#b9b3a3}#mkt .mx .part{color:#a9812f}
 #mkt .mx-key{position:absolute;left:0;top:540px;font-size:14px;color:#61736b}
-#mkt .errc{position:absolute;right:0;top:118px;width:560px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
-#mkt .errc>div{background:#fffdf8;border-radius:20px;padding:16px 18px;box-shadow:0 10px 30px rgba(18,62,52,.08);border-top:5px solid #0d6556}
+#mkt .errc{position:absolute;left:0;top:150px;width:860px;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+#mkt .errc>div{background:#fffdf8;border-radius:24px;padding:30px 30px;min-height:200px;box-shadow:0 10px 30px rgba(18,62,52,.08);border-top:5px solid #0d6556}
 #mkt .errc>div:nth-child(3),#mkt .errc>div:nth-child(4){border-top-color:#cba85f}
-#mkt .errc small{display:block;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#0d6556;margin-bottom:6px}
-#mkt .errc p{font-size:17px;line-height:1.3;color:#123e34}
-#mkt .errc-t{position:absolute;right:0;top:84px;width:560px;font-size:14px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#a9812f}
-#mkt .now{position:absolute;right:0;top:430px;width:560px}
-#mkt .now h3{font-size:14px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#a9812f;margin-bottom:10px}
-#mkt .now>div{display:flex;gap:16px;align-items:center;background:#123e34;color:#f3ead0;border-radius:18px;padding:12px 18px;margin-bottom:10px}
-#mkt .now strong{font-family:Georgia,serif;font-size:30px;font-weight:400;color:#e8cf8e;min-width:120px}
-#mkt .now span{font-size:16px;line-height:1.3}
+#mkt .errc small{display:block;font-size:15px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#0d6556;margin-bottom:6px}
+#mkt .errc p{font-family:Georgia,serif;font-size:30px;line-height:1.2;color:#123e34;margin-top:8px}
+#mkt .errc-t{position:absolute;left:0;top:112px;width:860px;font-size:14px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#a9812f}
+#mkt .now{position:absolute;right:0;top:112px;width:540px}
+#mkt .now h3{margin-top:0;font-size:14px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:#a9812f;margin-bottom:10px}
+#mkt .now>div{display:flex;gap:20px;align-items:center;background:#123e34;color:#f3ead0;border-radius:24px;padding:26px 26px;margin-bottom:20px;min-height:128px}
+#mkt .now strong{font-family:Georgia,serif;font-size:46px;font-weight:400;color:#e8cf8e;min-width:120px}
+#mkt .now span{font-size:20px;line-height:1.3}
 #mkt .src{position:absolute;left:0;bottom:-6px;font-size:13px;color:#61736b}
 
 #arch .lane{position:absolute;top:120px;bottom:70px;border-radius:24px;padding:16px;background:#fffdf8;box-shadow:0 10px 30px rgba(18,62,52,.08)}

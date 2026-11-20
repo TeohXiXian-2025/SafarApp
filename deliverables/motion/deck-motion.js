@@ -15,7 +15,7 @@
     s6: ['.up-card:first-child', '.up-card:last-child', '.up-bar'],
     s9: ['each:.t9-row'],
     s10: ['.b10-left', '.b10-right'],
-    mkt: ['.mx', '.errc-t,.errc', '.now'],
+    mkt: ['each:.errc>div', '.now'],
     arch: ['.l1', '.l2', '.l3', '.keys']
   };
 
