@@ -4,6 +4,8 @@
 **Structure:** The prototype’s 12 sections, preserved in the original order. Expanded explanation runs to 7:35, followed by a two-minute demo and a 25-second close.  
 **Deck:** [Open the HTML deck](finals-pitch.html). Keep it beside the assets folder for offline use.
 
+**Reveals (new):** On sections 02, 03, 04, 05, 06, 08, 09 and 10, each → reveals the next key point instead of changing slide. The gold dots at the bottom-right show how many reveals are left. ← takes back the last reveal, and a slide you return to shows fully built. Slides now change with a cinematic blur-and-light transition: a zoom in and out of the story, and an iris opening on the closing slide.
+
 The quoted passages below are spoken. Cues and source notes are for rehearsal. Timings are delivery targets, including pauses and handoffs, and need one full rehearsal at your natural pace.
 
 ## Timing and speaker handoffs
@@ -14,6 +16,7 @@ The quoted passages below are spoken. Cues and source notes are for rehearsal. T
 | 2 | 0:25–1:10 | A large market with specific travel needs | Chong Pohyi |
 | 3 | 1:10–2:00 | Muslim travel planning is fragmented | Chong Pohyi |
 | 4 | 2:00–2:45 | How travellers plan today | Chong Pohyi |
+| Story (new) | +1:00 | Four friends, one trip to Japan (6-scene story) | Chong Pohyi |
 | 5 | 2:45–3:25 | Every pain has a product response | Teoh Xi Xian |
 | 6 | 3:25–4:15 | One app. Two paths. A shared regroup. | Teoh Xi Xian |
 | 7 | 4:15–4:50 | The Safar travel workspace | Teoh Xi Xian |
@@ -60,6 +63,21 @@ The quoted passages below are spoken. Cues and source notes are for rehearsal. T
 **Cue:** Retain the original competitor context without repeating unverified “zero alternatives” claims. Explain Safar’s focus through a concrete change to the group’s itinerary.
 
 **Source:** [Official source](https://wanderlog.com/plan-a-trip), [Official source](https://www.halaltrip.com/islamic-travel-app)
+
+### Story (new slide) · Four friends, one trip to Japan
+
+**About 1:00, added between slides 04 and 05.** The story adds roughly a minute, so the talk now runs about 11:00 unless other sections are shortened. The times on later slides have not been changed.
+
+Press Enter (or →) on the title card to start. Each →, Space or clicker press moves one scene. The last press opens slide 05. Speak one line per scene:
+
+1. **The dream trip (Tokyo):** “Imagine finally going on your dream holiday with your closest friends.”
+2. **The food dilemma (ramen shop):** “Everyone wants to explore local cuisine. But finding a suitable dining option isn’t always straightforward.”
+3. **The prayer-time dilemma (Kyoto):** “And for Muslim travellers, prayer is an essential part of the journey. But how do we fit it naturally into an already packed itinerary?”
+4. **Too many apps:** “Different apps, fragmented information and endless group coordination. Planning one trip has become a challenge of its own.”
+5. **The real problem:** “A shared journey should never mean that someone has to leave their needs behind.”
+6. **Safar:** “What if we could bring everyone’s needs together in one seamless travel experience?”
+
+**Cue:** Let each scene's animation finish (the gold progress bar fills) before pressing →. A plays the story hands-free in about 60 seconds, R replays it, M mutes sound effects, U toggles soft background music and C hides the on-screen captions. Clicking the stage also advances. Photo credits are in `story/CREDITS.md`.
 
 ### 05 · Every pain has a product response
 

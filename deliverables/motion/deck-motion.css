@@ -1,0 +1,46 @@
+/* Deck motion layer: cinematic slide transitions and step-by-step reveals.
+   Add-on only: it overrides the deck's slide-in/out animations and hides build steps
+   until the presenter reveals them. The deck's reduced-motion rule still switches it off. */
+
+/* ---------- Cinematic transitions ---------- */
+/* Default "push": the old slide drifts away and blurs, the new one slides in out of focus. */
+#stage .slide.active{animation:dmIn .9s cubic-bezier(.16,.8,.24,1) both}
+#stage .slide.leaving{animation:dmOut .75s cubic-bezier(.5,0,.75,0) both}
+@keyframes dmIn{from{opacity:0;transform:translateX(calc(var(--dir,1)*7%)) scale(1.05);filter:blur(14px)}60%{filter:blur(0)}to{opacity:1;transform:none;filter:none}}
+@keyframes dmOut{to{opacity:0;transform:translateX(calc(var(--dir,1)*-6%)) scale(.95);filter:blur(10px)}}
+
+/* "zoom": in and out of the story, the camera flies through the slide. */
+#stage[data-dm="zoom"] .slide.active{animation:dmZoomIn 1s cubic-bezier(.16,.8,.24,1) both}
+#stage[data-dm="zoom"] .slide.leaving{animation:dmZoomOut .8s cubic-bezier(.6,0,.8,.3) both}
+@keyframes dmZoomIn{from{opacity:0;transform:scale(.86);filter:blur(16px)}to{opacity:1;transform:none;filter:none}}
+@keyframes dmZoomOut{to{opacity:0;transform:scale(1.35);filter:blur(18px)}}
+
+/* "iris": the closing slide opens from the centre. */
+#stage[data-dm="iris"] .slide.active{animation:dmIris 1.1s cubic-bezier(.6,0,.2,1) both}
+#stage[data-dm="iris"] .slide.leaving{animation:dmHold 1.1s linear both}
+@keyframes dmIris{from{clip-path:circle(0% at 50% 50%)}to{clip-path:circle(75% at 50% 50%)}}
+@keyframes dmHold{to{opacity:.55;transform:scale(.97)}}
+
+/* A soft band of light sweeps across on every slide change. */
+#dm-sweep{position:absolute;inset:0;z-index:4;pointer-events:none;opacity:0;mix-blend-mode:screen;background:linear-gradient(105deg,transparent 38%,rgba(255,236,190,.32) 50%,transparent 62%) no-repeat;background-size:260% 100%}
+#stage.dm-go #dm-sweep{animation:dmSweep .95s cubic-bezier(.3,.6,.3,1)}
+#stage.dm-back.dm-go #dm-sweep{animation-name:dmSweepBack}
+@keyframes dmSweep{0%{opacity:0;background-position:110% 0}20%{opacity:1}100%{opacity:0;background-position:-10% 0}}
+@keyframes dmSweepBack{0%{opacity:0;background-position:-10% 0}20%{opacity:1}100%{opacity:0;background-position:110% 0}}
+
+/* ---------- Step-by-step reveals ---------- */
+#stage .slide .dm-hide{opacity:0!important;visibility:hidden!important}
+#stage .slide.active .dm-in{animation:dmBuild .75s cubic-bezier(.16,.8,.24,1) both,dmGlow 1.5s ease .25s!important}
+@keyframes dmBuild{from{opacity:0;transform:translateY(28px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes dmGlow{0%{filter:drop-shadow(0 0 0 rgba(203,168,95,0))}30%{filter:drop-shadow(0 0 16px rgba(203,168,95,.7))}100%{filter:drop-shadow(0 0 0 rgba(203,168,95,0))}}
+
+/* Build dots: how many reveals are left on this slide (bottom-right, small). */
+#dm-builds{position:absolute;right:30px;bottom:14px;z-index:6;display:flex;gap:7px;pointer-events:none;opacity:0;transition:opacity .3s}
+#dm-builds.on{opacity:1}
+#dm-builds i{width:9px;height:9px;border-radius:50%;border:1.5px solid #cba85f;background:transparent;transition:background .3s,transform .3s}
+#dm-builds i.done{background:#cba85f}
+#dm-builds i.next{animation:dmNext 1.2s ease-in-out infinite}
+@keyframes dmNext{0%,100%{transform:scale(1)}50%{transform:scale(1.35)}}
+
+@media (prefers-reduced-motion: reduce){#dm-sweep{display:none}#dm-builds i.next{animation:none}#stage .slide.active .dm-in{animation:none!important}}
+@media print{#dm-sweep,#dm-builds{display:none!important}#stage .slide .dm-hide{opacity:1!important;visibility:visible!important}}
