@@ -1,0 +1,9 @@
+/* Deck theme: shared Japan-spring details on every slide (see deck-theme.js). */
+#stage .th-bloom{position:absolute;left:-60px;top:-148px;width:360px;height:246px;z-index:3;pointer-events:none;transform-origin:0 0;animation:c1Sway 6s ease-in-out infinite alternate}
+#stage .th-petals{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
+#stage .th-petals i{position:absolute;top:-30px;width:var(--s);height:calc(var(--s)*.72);background:radial-gradient(ellipse at 30% 30%,#fff3f6,#f6b8c8 60%,#e98fa8);border-radius:80% 0 80% 0;opacity:.75;animation:c1Fall var(--d) linear var(--l) infinite}
+
+/* The closing slide echoes the title slide: the same Fuji view, at dusk. */
+#s12{background:linear-gradient(90deg,#082f29 0%,#082f29 40%,rgba(8,47,41,.84) 62%,rgba(8,47,41,.74) 100%),url(../assets/title/fuji-chureito.jpg) 72% 40%/cover no-repeat}
+
+@media print{#stage .th-petals{display:none}}

@@ -15,8 +15,8 @@
     s6: ['.up-card:first-child', '.up-card:last-child', '.up-bar'],
     s9: ['each:.t9-row'],
     s10: ['.b10-left', '.b10-right'],
-    mkt: ['each:.errc>div', '.now'],
-    arch: ['.l1', '.l2', '.l3', '.keys']
+    mkt: ['.bo-venn', 'each:.bo-col', '.bo-quote,.bo-now'],
+    arch: ['.ar-col.k1', '.ar-arrow.a1,.ar-col.k2', '.ar-arrow.a2,.ar-col.k3', '.ar-loop,.ar-pill', '.ar-sec']
   };
 
   const sweep = document.createElement('div'); sweep.id = 'dm-sweep'; sweep.setAttribute('aria-hidden', 'true');

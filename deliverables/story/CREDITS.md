@@ -12,6 +12,7 @@ Photos used by the story slide (`finals-pitch.html`, slide 5 "Story: four friend
 | `face-daniel.jpg`, `card-daniel.jpg` | Mike Jones | https://www.pexels.com/photo/9461241/ |
 | `ramen-street.jpg` | Paolo Sanchez | https://www.pexels.com/photo/36834631/ |
 | `ramen-counter.jpg` | Saúl Sigüenza | https://www.pexels.com/photo/37868030/ |
+| `../title/fuji-chureito.jpg` (title slide backdrop) | Regev Ace Subay | https://www.pexels.com/photo/4336279/ |
 
 The names Aminah, Jun, Mei and Daniel are story characters. They are not the names of the people photographed. The Pexels License does not allow showing identifiable people in a bad light, and the story keeps them as friendly travellers throughout.
 
