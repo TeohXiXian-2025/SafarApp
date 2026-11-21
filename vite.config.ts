@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import fs from 'fs';
 import path from 'path';
 import {defineConfig, type Plugin} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
@@ -111,6 +112,35 @@ function buildStamp(): Plugin {
   };
 }
 
+// ---------------------------------------------------------------------------
+// The finals deck loads three classic (non-module) scripts and builds the story
+// face-photo paths at runtime. Vite neither bundles nor copies those, so on
+// Vercel they fell through to the SPA rewrite and the story slide stayed black.
+// Copy them into the build at their original relative paths, next to both URLs
+// the deck is served from (/final-pitch and /deliverables/finals-pitch.html).
+// ---------------------------------------------------------------------------
+const DECK_STATICS = ['story/story.js', 'motion/deck-motion.js', 'extra/deck-theme.js', 'assets/story'];
+
+function copyDeckStatics(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'safar-copy-deck-statics',
+    apply: 'build',
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir);
+    },
+    closeBundle() {
+      for (const rel of DECK_STATICS) {
+        const from = path.resolve(__dirname, 'deliverables', rel);
+        if (!fs.existsSync(from)) throw new Error(`Deck file missing: deliverables/${rel}`);
+        for (const base of [outDir, path.join(outDir, 'deliverables')]) {
+          fs.cpSync(from, path.join(base, rel), {recursive: true});
+        }
+      }
+    },
+  };
+}
+
 export default defineConfig(() => {
   return {
     // Absolute base: the app is served from the domain root on Vercel.
@@ -121,7 +151,7 @@ export default defineConfig(() => {
     define: {
       __COMMIT_SHA__: JSON.stringify(commitSha),
     },
-    plugins: [react(), tailwindcss(), buildStamp(), vercelApiDev(), pwa, manifestOnMobileOnly()],
+    plugins: [react(), tailwindcss(), buildStamp(), vercelApiDev(), pwa, manifestOnMobileOnly(), copyDeckStatics()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
