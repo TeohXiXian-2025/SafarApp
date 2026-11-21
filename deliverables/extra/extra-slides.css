@@ -150,3 +150,65 @@
 #arch .ar-sec li{display:flex;align-items:center;gap:8px;font-size:13px;line-height:1.25}
 #arch .ar-sec li i{flex:none;width:20px;height:20px;border-radius:50%;background:#2e8b57;color:#fff;font-style:normal;font-size:12px;display:grid;place-items:center}
 @media (prefers-reduced-motion: reduce){#arch .ar-fan path,#arch .ar-loop path,#arch .ar-crew figure{animation:none}}
+
+/* ---------- User feedback (#fb): survey results, Japan-spring layout ---------- */
+#fb{background:#f7f3e8}
+#fb .fb-bg{position:absolute;inset:0;z-index:0;overflow:hidden}
+#fb .fb-bg::before{content:"";position:absolute;right:-180px;top:-220px;width:760px;height:760px;border-radius:50%;background:radial-gradient(circle,rgba(246,184,200,.28),rgba(246,184,200,0) 68%)}
+#fb .fb-bg::after{content:"";position:absolute;left:-160px;bottom:-200px;width:700px;height:420px;border-radius:50%;background:#e3eadb;opacity:.7}
+#fb .slide-top{position:relative;z-index:3;justify-content:flex-start;gap:20px;color:#123e34}
+#fb .fb-rule{width:150px;height:1.5px;background:#9db0a2}
+#fb .fb-head{position:absolute;left:76px;top:88px;z-index:3}
+#fb .fb-head h2{font-size:62px;line-height:1.05;color:#123e34}
+#fb .fb-head h2 em{font-style:italic;color:#1f5a47}
+#fb .fb-sub{margin-top:10px;font-size:22px;font-style:italic;color:#24413a}
+#fb .fb-swash{display:block;width:330px;height:16px;border-bottom:4px solid #cba85f;border-radius:0 0 55% 45%/0 0 100% 100%;margin:-2px 0 0 230px;transform:rotate(-1.5deg)}
+#fb .fb-src-badge{position:absolute;right:76px;top:78px;z-index:3;display:flex;align-items:center;gap:16px;padding:14px 24px;border-radius:20px;background:#123e34;color:#f3ead0;box-shadow:0 12px 28px rgba(18,62,52,.22)}
+#fb .fb-src-badge b{font:400 56px/1 Georgia,serif;color:#e8cf8e;font-variant-numeric:tabular-nums}
+#fb .fb-src-badge span{font-size:17px;line-height:1.3;color:#d9e6de}
+#fb .fb-stats{position:absolute;left:76px;right:76px;top:262px;z-index:3;display:grid;grid-template-columns:repeat(2,1fr);gap:26px}
+#fb .fb-stat{display:flex;align-items:center;gap:22px;padding:20px 26px;border-radius:24px;background:rgba(255,253,248,.95);box-shadow:0 12px 30px rgba(18,62,52,.12);border-top:4px solid #cba85f}
+#fb .fb-stat b{flex:none;font:400 64px/1 Georgia,serif;color:#123e34;letter-spacing:-2px;font-variant-numeric:tabular-nums}
+#fb .fb-stat b small{font-size:30px;color:#a9812f;letter-spacing:0;margin-left:2px}
+#fb .fb-stat span{font-size:20px;line-height:1.3;color:#123e34;font-weight:600}
+#fb .fb-stat span em{font-style:normal;font-weight:400;font-size:17px;color:#4a6158}
+#fb .fb-label{font-size:15px;letter-spacing:2px;text-transform:uppercase;font-weight:700;color:#1f5a47;margin:0 0 12px}
+#fb .fb-label small{text-transform:none;letter-spacing:0;font-weight:400;font-size:15px;color:#6a7c74;margin-left:8px}
+#fb .fb-ratings{position:absolute;left:76px;top:440px;width:780px;z-index:3;padding:20px 26px 16px;border-radius:24px;background:rgba(255,253,248,.95);box-shadow:0 12px 30px rgba(18,62,52,.12)}
+#fb .fb-bar{display:grid;grid-template-columns:330px 1fr 62px;align-items:center;gap:16px;height:39px}
+#fb .fb-bar span{font-size:18px;color:#123e34}
+#fb .fb-bar i{position:relative;height:14px;border-radius:8px;background:#e3eadb;overflow:hidden}
+#fb .fb-bar i b{position:absolute;left:0;top:0;bottom:0;width:var(--v);border-radius:8px;background:linear-gradient(90deg,#1f5a47,#3d7a62)}
+#fb .fb-bar:nth-child(-n+5) i b{background:linear-gradient(90deg,#1f5a47,#cba85f)}
+#fb .fb-bar em{font:700 20px 'Segoe UI',Arial,sans-serif;font-style:normal;color:#123e34;text-align:right;font-variant-numeric:tabular-nums}
+#fb .fb-ratings.dm-in .fb-bar i b{animation:fbGrow 1.1s cubic-bezier(.2,.7,.2,1) both}
+#fb .fb-bar:nth-child(3) i b{animation-delay:.06s}#fb .fb-bar:nth-child(4) i b{animation-delay:.12s}#fb .fb-bar:nth-child(5) i b{animation-delay:.18s}#fb .fb-bar:nth-child(6) i b{animation-delay:.24s}#fb .fb-bar:nth-child(7) i b{animation-delay:.3s}#fb .fb-bar:nth-child(8) i b{animation-delay:.36s}#fb .fb-bar:nth-child(9) i b{animation-delay:.42s}
+@keyframes fbGrow{from{width:0}}
+#fb .fb-voices{position:absolute;left:890px;right:76px;top:440px;z-index:3}
+#fb .fb-q{margin:0 0 10px;padding:10px 20px 9px 24px;border-radius:20px;background:#123e34;color:#f3ead0;box-shadow:0 10px 24px rgba(18,62,52,.2);border-left:5px solid #cba85f}
+#fb .fb-q blockquote{margin:0;font:italic 19px/1.3 Georgia,serif}
+#fb .fb-q figcaption{margin-top:3px;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:#e8cf8e}
+#fb .fb-next{position:absolute;left:890px;right:76px;top:752px;z-index:3}
+#fb .fb-next .fb-label{margin-bottom:8px}
+#fb .fb-next div{display:flex;flex-wrap:wrap;gap:8px}
+#fb .fb-next span{padding:6px 14px;border-radius:20px;background:#f1e3bd;color:#123e34;font-size:16px;font-weight:600}
+#fb .fb-source{position:absolute;left:76px;top:830px;z-index:3;font-size:14px;color:#5d6f67;max-width:800px}
+
+#fb .fb-charts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+#fb .fb-chart{margin:0;padding:8px 8px 6px;border-radius:14px;background:#fff;box-shadow:0 8px 20px rgba(18,62,52,.14);border:1px solid #e6e1d2;cursor:zoom-in;transition:translate .25s ease,box-shadow .25s ease}
+#fb .fb-chart:hover{translate:0 -4px;box-shadow:0 14px 28px rgba(18,62,52,.2)}
+#fb .fb-chart img{display:block;width:100%;aspect-ratio:723/485;object-fit:cover;border-radius:8px}
+#fb .fb-chart figcaption{margin-top:6px;text-align:center;font:700 15px 'Segoe UI',Arial,sans-serif;color:#1f5a47}
+#fb .fb-more{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
+#fb .fb-more em{font-style:normal;font-size:15px;color:#4a6158;margin-right:2px}
+#fb .fb-more span{padding:5px 12px;border-radius:16px;background:#e3eadb;color:#123e34;font-size:15px}
+#fb .fb-more b{color:#1f5a47}
+
+/* ---------- Demo video (#demo) ---------- */
+#demo{background:#082f29}
+#demo .slide-top{position:relative;z-index:3;gap:20px;color:#e8cf8e}
+#demo .slide-top time{color:#e8cf8e}
+#demo .dv-rule{flex:1;height:1.5px;background:rgba(232,207,142,.35)}
+#demo .dv-frame{position:absolute;left:50%;top:100px;width:1312px;height:738px;translate:-50% 0;z-index:2;border-radius:18px;overflow:hidden;background:#000;box-shadow:0 30px 80px rgba(0,0,0,.55),0 0 0 2px rgba(203,168,95,.55)}
+#demo .dv-frame video{display:block;width:100%;height:100%;object-fit:contain;background:#000}
+#demo .slide-bottom{z-index:3;color:#b5cfc3}

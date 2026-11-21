@@ -16,6 +16,7 @@
     s9: ['each:.t9-row'],
     s10: ['.b10-left', '.b10-right'],
     mkt: ['.bo-venn', 'each:.bo-col', '.bo-quote,.bo-now'],
+    fb: ['.fb-stats', '.fb-ratings', '.fb-voices,.fb-next'],
     arch: ['.ar-col.k1', '.ar-arrow.a1,.ar-col.k2', '.ar-arrow.a2,.ar-col.k3', '.ar-loop,.ar-pill', '.ar-sec']
   };
 
