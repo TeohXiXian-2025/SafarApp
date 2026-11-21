@@ -1,20 +1,16 @@
 # Story slide · photo credits
 
-Photos used by the story slide (`finals-pitch.html`, slide 5 "Story: four friends, one trip to Japan"). Files live in `deliverables/assets/story/`. Each was resized and recompressed for the deck. The people photos are also cropped into round portraits (`face-*.jpg`) and 3:4 cards (`card-*.jpg`).
+Photos used by the story slide (`finals-pitch.html`, slide 1 "Story: four travellers, one trip to Japan"). Files live in `deliverables/assets/story/`. Each was resized and recompressed for the deck. The people photos are also cropped into round portraits (`face-*.jpg`) and 3:4 cards (`card-*.jpg`).
 
 ## Pexels (Pexels License: free to use, attribution appreciated but not required)
 
 | File | Photographer | Source |
 | --- | --- | --- |
-| `face-aminah.jpg`, `card-aminah.jpg` | Edmond Dantès | https://www.pexels.com/photo/8556397/ |
-| `face-jun.jpg`, `card-jun.jpg` | Mikhail Nilov | https://www.pexels.com/photo/9795587/ |
-| `face-mei.jpg`, `card-mei.jpg` | Huu Huynh | https://www.pexels.com/photo/20383878/ |
-| `face-daniel.jpg`, `card-daniel.jpg` | Mike Jones | https://www.pexels.com/photo/9461241/ |
 | `ramen-street.jpg` | Paolo Sanchez | https://www.pexels.com/photo/36834631/ |
 | `ramen-counter.jpg` | Saúl Sigüenza | https://www.pexels.com/photo/37868030/ |
 | `../title/fuji-chureito.jpg` (title slide backdrop) | Regev Ace Subay | https://www.pexels.com/photo/4336279/ |
 
-The names Aminah, Jun, Mei and Daniel are story characters. They are not the names of the people photographed. The Pexels License does not allow showing identifiable people in a bad light, and the story keeps them as friendly travellers throughout.
+The four people (`face-*.jpg`, `card-*.jpg`: Aisyah, Mei Ling, Mum, Farid) are stills taken from the team's own AI-generated demo video (`video/safar-demo-2m30.mp4`), so the story and the demo show the same characters.
 
 ## Supplied by the team (licence not verified)
 

@@ -14,7 +14,7 @@
   const DUR = [0, 9000, 11000, 10500, 10500, 9500, 9000];
   const LABEL = ['', 'Dream trip', 'Food', 'Prayer', 'Too many apps', 'The problem', 'Safar'];
   const CAP = ['',
-    'Imagine finally going on your dream holiday with your closest friends.',
+    'Imagine finally going on your dream holiday with your family and your best friend.',
     'Everyone wants to explore local cuisine. But finding a suitable dining option isn’t always straightforward.',
     'And for Muslim travellers, prayer is an essential part of the journey. But how do we fit it naturally into an already packed itinerary?',
     'Different apps, fragmented information and endless group coordination. Planning one trip has become a challenge of its own.',
@@ -186,7 +186,7 @@
       badges.forEach((b, i) => b.textContent = counts[i]);
       const bump = i => { counts[i]++; badges[i].textContent = counts[i] > 99 ? '99+' : counts[i]; badges[i].classList.remove('bump'); void badges[i].offsetWidth; badges[i].classList.add('bump'); };
       const face = n => 'assets/story/face-' + n + '.jpg';
-      const MSGS = [['daniel', 'Daniel', 'Updated the itinerary link 🙏'], ['jun', 'Jun', 'Where are we eating tonight??'], ['aminah', 'Aminah', 'Is that place halal?'], ['mei', 'Mei', 'Sunset at Kiyomizu! 📸'], ['daniel', 'Daniel', 'Prayer first or temple first?'], ['aminah', 'Aminah', 'Asr starts in 10 min'], ['jun', 'Jun', 'Ramen place closes at 9'], ['daniel', 'Daniel', 'Which app has the plan? 😵'], ['mei', 'Mei', 'My battery is at 4% 😭'], ['aminah', 'Aminah', 'Nearest prayer room?'], ['jun', 'Jun', 'guys??'], ['daniel', 'Daniel', 'Re-booking dinner…']];
+      const MSGS = [['farid', 'Farid', 'Updated the itinerary link 🙏'], ['meiling', 'Mei Ling', 'Where are we eating tonight??'], ['aisyah', 'Aisyah', 'Is that place halal?'], ['mum', 'Mum', 'Sunset at Kiyomizu! 📸'], ['farid', 'Farid', 'Prayer first or temple first?'], ['aisyah', 'Aisyah', 'Asr starts in 10 min'], ['meiling', 'Mei Ling', 'Ramen place closes at 9'], ['farid', 'Farid', 'Which app has the plan? 😵'], ['mum', 'Mum', 'My battery is at 4% 😭'], ['aisyah', 'Aisyah', 'Nearest prayer room?'], ['meiling', 'Mei Ling', 'guys??'], ['farid', 'Farid', 'Re-booking dinner…']];
       let mi = 0, gap = 720;
       const add = () => {
         if (!active || idx !== 4) return;
@@ -204,7 +204,7 @@
       every(950, () => { const a = Math.floor(Math.random() * rows.length), b = (a + 1 + Math.floor(Math.random() * (rows.length - 1))) % rows.length; const t = rows[a].style.top; rows[a].style.top = rows[b].style.top; rows[b].style.top = t; });
       sc._reset = () => rows.forEach((r, i) => r.style.top = tops[i]);
       every(1300, () => bump(Math.floor(Math.random() * 3)));
-      const TOASTS = ['📍 Location shared', '🔔 12 new messages', '⏰ Asr in 10 min', '⚠ Booking changed', '🍜 Is it halal?', '📅 Itinerary updated', '🗺 Route recalculating…', '💬 Daniel: where are you?', '🚆 Train delayed 8 min', '📸 Mei shared 24 photos'];
+      const TOASTS = ['📍 Location shared', '🔔 12 new messages', '⏰ Asr in 10 min', '⚠ Booking changed', '🍜 Is it halal?', '📅 Itinerary updated', '🗺 Route recalculating…', '💬 Farid: where are you?', '🚆 Train delayed 8 min', '📸 Mum shared 24 photos'];
       let ti = 0;
       const toast = () => {
         if (!active || idx !== 4) return;
